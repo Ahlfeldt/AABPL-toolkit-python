@@ -16,15 +16,15 @@ from numpy import (
 )
 from pandas import (DataFrame as _pd_DataFrame, cut as _pd_cut, concat as _pd_concat) 
 from math import log10 as _math_log10#,asin,acos
-from ..utils.general import (flatten_list,DataFrameRelation,arr_to_tpls, make_bins_from_vals, get_vals_from_bins)
-from ..illustrations.illustrate_point_to_cell_region_assignment import (illustrate_point_to_cell_region_assignment)
-# from ..illustrations.illustrate_point_to_disk import (illustrate_point_disk)
-# from ..illustrations.plot_pt_vars import create_plots_for_vars
-# from ..utils.distances_to_cell import (get_cells_relevant_for_disk_by_type,)
-from .radius_search.two_dimensional_weak_ordering_class import (gen_weak_order_rel_to_convex_set,recursive_cell_region_inference)
-from .testing_mod.test_performance import time_func_perf, func_timer_dict
-from .radius_search.offset_regions import prepare_offset_regions
-# from ..doc.docstrings import fixdocstring
+from primelocations.utils.general import (flatten_list,DataFrameRelation,arr_to_tpls, make_bins_from_vals, get_vals_from_bins)
+from primelocations.illustrations.illustrate_point_to_cell_region_assignment import (illustrate_point_to_cell_region_assignment)
+# from primelocations.illustrations.illustrate_point_to_disk import (illustrate_point_disk)
+# from primelocations.illustrations.plot_pt_vars import create_plots_for_vars
+# from primelocations.utils.distances_to_cell import (get_cells_relevant_for_disk_by_type,)
+from .two_dimensional_weak_ordering_class import (gen_weak_order_rel_to_convex_set,recursive_cell_region_inference)
+from primelocations.testing_mod.test_performance import time_func_perf, func_timer_dict
+from .offset_regions import prepare_offset_regions
+# from primelocations.doc.docstrings import fixdocstring
 
 ################ classify_point_triangle ######################################################################################
 @time_func_perf

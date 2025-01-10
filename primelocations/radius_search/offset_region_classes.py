@@ -3,11 +3,11 @@ from numpy import (linspace as _np_linspace, array as _np_array, sign as _np_sig
 from math import sin as _math_sin, cos as _math_cos, atan2 as _math_atan2, pi as _math_pi, acos as _math_acos , sin as _math_asin, log10 as _math_log10
 from matplotlib import pyplot as plt
 from matplotlib.patches import (Rectangle as _plt_Rectangle, Polygon as _plt_Polygon, Circle as _plt_Circle)
-from ..utils.general import angle, angles_to_origin, angle_to, pt_is_left_of_vector
-from ..utils.distances_to_cell import (get_cell_closest_point_to_point, get_cell_farthest_vertex_to_point,
+from primelocations.utils.general import angle, angles_to_origin, angle_to, pt_is_left_of_vector
+from primelocations.utils.distances_to_cell import (get_cell_closest_point_to_point, get_cell_farthest_vertex_to_point,
  check_if_never_contains_convex_set, check_if_always_overlaps_full_convex_set,check_if_always_overlaps_convex_set, get_cells_relevant_for_disk_by_type)
-from ..utils.rotations import transform_cell_pattern, transform_coord, transform_cell
-from ..utils.intersections import circle_line_segment_intersection, line_intersection, intersections_pts_arc_to_circle
+from primelocations.utils.rotations import transform_cell_pattern, transform_coord, transform_cell
+from primelocations.utils.intersections import circle_line_segment_intersection, line_intersection, intersections_pts_arc_to_circle
 from shapely.geometry import Polygon, LineString, Point
 from geopandas import GeoSeries, GeoDataFrame
 # from .radius_search.pts_to_offset_regions import (transform_cell_pattern)

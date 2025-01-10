@@ -19,8 +19,8 @@ from math import (
     acos as _math_acos,
     atan2 as _math_atan2,
     pi as _math_pi)
-from ..utils.general import flatten_list, angle
-from ..utils.distances_to_cell import ( get_cells_relevant_for_disk_by_type, get_cell_farthest_vertex_to_point, get_cell_closest_point_to_points, )
+from primelocations.utils.general import flatten_list, angle
+from primelocations.utils.distances_to_cell import ( get_cells_relevant_for_disk_by_type, get_cell_farthest_vertex_to_point, get_cell_closest_point_to_points, )
 
 def map_2D_to_rgb (
     x=None,

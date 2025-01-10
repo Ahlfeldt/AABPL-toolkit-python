@@ -9,10 +9,10 @@ from numpy import (
 # from numpy.random import randint, random
 from pandas import DataFrame as _pd_DataFrame
 from math import pi#,ceil,asin,acos
-# from ..utils.general import ( flatten_list, time_function, visualize, depth)
-from ..illustrations.illustrate_optimal_grid_spacing import ( create_optimal_grid_spacing_gif, )
-from ..utils.distances_to_cell import ( get_always_contained_potentially_overlapped_cells,)
-# from .valid_area import disk_cell_intersection_area
+# from primelocations.utils.general import ( flatten_list, time_function, visualize, depth)
+from primelocations.illustrations.illustrate_optimal_grid_spacing import ( create_optimal_grid_spacing_gif, )
+from primelocations.utils.distances_to_cell import ( get_always_contained_potentially_overlapped_cells,)
+# from primelocations.valid_area import disk_cell_intersection_area
 
 
 def get_next_relevant_grid_spacing(

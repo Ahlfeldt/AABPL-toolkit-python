@@ -29,7 +29,7 @@ from .plot_utils import (
     create_debuffered_trgl1_patch,
     map_2D_to_rgb
 )
-from ..utils.distances_to_cell import ( get_cells_relevant_for_disk_by_type, get_cell_farthest_vertex_to_point,  )
+from primelocations.utils.distances_to_cell import ( get_cells_relevant_for_disk_by_type, get_cell_farthest_vertex_to_point,  )
 
 
 # Plot

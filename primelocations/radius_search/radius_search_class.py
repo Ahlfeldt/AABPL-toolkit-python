@@ -11,15 +11,15 @@ from numpy import (
     all as _np_all, 
 )
 from pandas import (DataFrame as _pd_DataFrame, cut as _pd_cut, concat as _pd_concat) 
-from ..utils.general import ( DataFrameRelation, arr_to_tpls)
-# from ..illustrations.illustrate_point_to_disk import (illustrate_point_disk)
-# from ..illustrations.plot_pt_vars import create_plots_for_vars
-from ..utils.distances_to_cell import (get_cells_relevant_for_disk_by_type,)
-from .radius_search.two_dimensional_weak_ordering_class import (gen_weak_order_rel_to_convex_set,)
-from .radius_search.pts_to_cells import (assign_points_to_cells, aggregate_point_data_to_cells,)
-from .radius_search.pts_to_offset_regions import (assign_points_to_cell_regions,assign_points_to_mirco_regions)
-from .radius_search.pts_radius_search import (aggreagate_point_data_to_disks_vectorized)
-from .testing_mod.test_performance import time_func_perf, func_timer_dict
+from primelocations.utils.general import ( DataFrameRelation, arr_to_tpls)
+# from primelocations.illustrations.illustrate_point_to_disk import (illustrate_point_disk)
+# from primelocations.illustrations.plot_pt_vars import create_plots_for_vars
+from primelocations.utils.distances_to_cell import (get_cells_relevant_for_disk_by_type,)
+from .two_dimensional_weak_ordering_class import (gen_weak_order_rel_to_convex_set,)
+from .pts_to_cells import (assign_points_to_cells, aggregate_point_data_to_cells,)
+from .pts_to_offset_regions import (assign_points_to_cell_regions,assign_points_to_mirco_regions)
+from .pts_radius_search import (aggreagate_point_data_to_disks_vectorized)
+from primelocations.testing_mod.test_performance import time_func_perf, func_timer_dict
 
 
 ################ DiskSearchSource ######################################################################################

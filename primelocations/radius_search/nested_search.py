@@ -24,9 +24,9 @@ from pandas import (
     cut as _pd_cut,
 ) 
 from math import ceil#,asin,acos
-from ..utils.general import ( flatten_list, time_function, visualize, depth, list_dict_keys )
-from ..illustrations.illustrate_point_to_cell_region_assignment import (illustrate_point_to_cell_region_assignment)
-from ..utils.distances_to_cell import (  get_cells_relevant_for_disk_by_type )
+from primelocations.utils.general import ( flatten_list, time_function, visualize, depth, list_dict_keys )
+from primelocations.illustrations.illustrate_point_to_cell_region_assignment import (illustrate_point_to_cell_region_assignment)
+from primelocations.utils.distances_to_cell import (  get_cells_relevant_for_disk_by_type )
 
 def create_nested_cell_structure(
     cell_dict:dict,

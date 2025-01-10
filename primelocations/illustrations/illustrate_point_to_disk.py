@@ -17,8 +17,8 @@ from .plot_utils import (
     create_trgl1_patch,  create_buffered_trgl1_patch,  create_buffered_square_patch, create_debuffered_square_patch, create_debuffered_trgl1_patch, dual_circle_union_patch,
 )
 from .illustrate_point_to_cell_region_assignment import (add_grid_cell_rectangles_by_color,add_circle_patches,)
-from ..utils.distances_to_cell import ( get_cells_relevant_for_disk_by_type, get_cell_farthest_vertex_to_point,  )
-from ..utils.general import ( flatten_list, )
+from primelocations.utils.distances_to_cell import ( get_cells_relevant_for_disk_by_type, get_cell_farthest_vertex_to_point,  )
+from primelocations.utils.general import ( flatten_list, )
 
 
 def illustrate_point_disk(
