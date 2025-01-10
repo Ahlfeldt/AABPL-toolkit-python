@@ -5,7 +5,7 @@
 # import testing
 # import illustrations
 # import radius_search
-import main
+from . import main
 # from .main import *
 # from .radius_search.optimal_grid_spacing import *
 # from .radius_search.offset_regions import *
