@@ -19,7 +19,7 @@ from numpy import (
 )
 from numpy.linalg import norm as _np_linalg_norm
 from math import ceil as _math_ceil
-from .general import ( flatten_list, time_function, visualize, depth, list_dict_keys, )
+from primelocations.utils.general import ( flatten_list, time_function, visualize, depth, list_dict_keys, )
 
 
 # TODO vectorize them such that they can take any input from shape(1,2) to shape(n,2)

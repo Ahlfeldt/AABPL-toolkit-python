@@ -9,8 +9,10 @@ Python version of the prime locations delineation algorithm
 To install the Python package of the ABRSQOL-toolkit, run the following command in your python environment in your terminal. 
 
 ```console
-pip install primelocations
+pip install git+https://github.com/ahlfeldt/AABPL-toolkit-python.git#egg=primelocations
 ```
+pip install primelocations
+
 Alternatively you can also install it from within your python script:
 ```python
 import subprocess, sys

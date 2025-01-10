@@ -12,10 +12,10 @@ from numpy import (
 )
 from numpy.linalg import norm as _np_linalg_norm
 from pandas import (DataFrame as _pd_DataFrame, cut as _pd_cut, concat as _pd_concat) 
-from ..utils.general import (   flatten_list, DataFrameRelation,arr_to_tpls )
-from ..illustrations.illustrate_point_to_disk import (illustrate_point_disk)
-from ..illustrations.plot_pt_vars import create_plots_for_vars
-from ..testing.test_performance import time_func_perf, func_timer_dict
+from primelocations.utils.general import (   flatten_list, DataFrameRelation,arr_to_tpls )
+from primelocations.illustrations.illustrate_point_to_disk import (illustrate_point_disk)
+from primelocations.illustrations.plot_pt_vars import create_plots_for_vars
+from primelocations.testing.test_performance import time_func_perf, func_timer_dict
 
 ################ aggreagate_point_data_to_disks_vectorized ######################################################################################
 @time_func_perf

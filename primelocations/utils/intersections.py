@@ -1,7 +1,7 @@
 # intersection of two circles with same radius
 from numpy import (linspace as _np_linspace, array as _np_array, sign as _np_sign)
 from math import sin as _math_sin, cos as _math_cos, atan2 as _math_atan2, pi as _math_pi, acos as _math_acos , sin as _math_asin, log10 as _math_log10
-from ..utils.general import angle, angles_to_origin, angle_to
+from primelocations.utils.general import angle, angles_to_origin, angle_to
 
 
 
