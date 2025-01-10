@@ -26,7 +26,7 @@ my_dataframe = read_csv("https://raw.githubusercontent.com/Ahlfeldt/ABRSQOL-tool
 # my_dataframe = ABRSQOL.testdata
 
 # Use ABRSQOL to solve for quality of life 
-my_dataframe['QoL1'] = primelocations.invert_quality_of_life(
+my_dataframe['QoL1'] = .invert_quality_of_life(
   # supply your dataset as a dataframe
   df=my_dataframe,
   # specify the corresponding variable name for your data set. 

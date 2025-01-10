@@ -4,14 +4,14 @@ from numpy.linalg import norm as _np_linalg_norm
 from math import sin as _math_sin, cos as _math_cos, atan2 as _math_atan2, pi as _math_pi, acos as _math_acos , sin as _math_asin, log10 as _math_log10
 from matplotlib import pyplot as plt
 from matplotlib.patches import (Rectangle as _plt_Rectangle, Polygon as _plt_Polygon, Circle as _plt_Circle)
-from primelocations.utils.general import angle, angles_to_origin, angle_to, make_bins_from_vals, get_vals_from_bins
-from primelocations.utils.distances_to_cell import (get_cell_closest_point_to_point, get_cell_farthest_vertex_to_point,
+from ..utils.general import angle, angles_to_origin, angle_to, make_bins_from_vals, get_vals_from_bins
+from ..utils.distances_to_cell import (get_cell_closest_point_to_point, get_cell_farthest_vertex_to_point,
  check_if_never_contains_convex_set, check_if_always_overlaps_full_convex_set,check_if_always_overlaps_convex_set, get_cells_relevant_for_disk_by_type)
-# from primelocations.utils.rotations import transform_cell_pattern, transform_coord, transform_cell
-# from primelocations.utils.intersections import circle_line_segment_intersection, line_intersection, intersections_pts_arc_to_circle
-from primelocations.radius_search.offset_region_classes import OffsetRegion, Edge, Vertex, LineSegment, Circle
-from primelocations.illustrations.illustrate_cell_pattern import plot_cell_pattern
-from primelocations.testing_mod.test_performance import time_func_perf, func_timer_dict
+# from ..utils.rotations import transform_cell_pattern, transform_coord, transform_cell
+# from ..utils.intersections import circle_line_segment_intersection, line_intersection, intersections_pts_arc_to_circle
+from .radius_search.offset_region_classes import OffsetRegion, Edge, Vertex, LineSegment, Circle
+from ..illustrations.illustrate_cell_pattern import plot_cell_pattern
+from .testing_mod.test_performance import time_func_perf, func_timer_dict
 
 from shapely.geometry import Polygon, LineString, Point
 from geopandas import GeoSeries, GeoDataFrame

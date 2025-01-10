@@ -4,7 +4,7 @@ from numpy import (
 )
 from numpy.random import ( random as _np_random,  randint as _np_randint, seed as _np_seed, )
 from .radius_search.radius_search_class import aggreagate_point_data_to_disks_vectorized
-from .illustrations.distribution_plot import create_distribution_plot
+from ..illustrations.distribution_plot import create_distribution_plot
 
 def draw_random_points_within_valid_area(
   cell_centroid_xy_coords:_np_array,

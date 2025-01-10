@@ -5,20 +5,20 @@
 # import testing
 # import illustrations
 # import radius_search
-# import main
-# from primelocations.main import *
-# from primelocations.radius_search.optimal_grid_spacing import *
-# from primelocations.radius_search.offset_regions import *
-# from primelocations.utils.general import *
-# from primelocations.illustrations.illustrate_nested_grid import *
-# from primelocations.illustrations.illustrate_optimal_grid_spacing import *
-# from primelocations.illustrations.illustrate_point_to_cell_region_assignment import *
-# # from primelocations.nested_search import *
-# from primelocations.radius_search.radius_search_class import *
-# from primelocations.illustrations.plot_utils import *
-# from primelocations.radius_search.two_dimensional_weak_ordering_class import *
-# from primelocations.main import *
-# from primelocations.illustrations.plot_utils import *
+import main
+# from .main import *
+# from .radius_search.optimal_grid_spacing import *
+# from .radius_search.offset_regions import *
+# from ..utils.general import *
+# from ..illustrations.illustrate_nested_grid import *
+# from ..illustrations.illustrate_optimal_grid_spacing import *
+# from ..illustrations.illustrate_point_to_cell_region_assignment import *
+# # from .nested_search import *
+# from .radius_search.radius_search_class import *
+# from ..illustrations.plot_utils import *
+# from .radius_search.two_dimensional_weak_ordering_class import *
+# from .main import *
+# from ..illustrations.plot_utils import *
 # TODO ensure to no exports imports (like np.array)?
 
 # __version__ = version('primelocations')
