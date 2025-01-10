@@ -11,7 +11,7 @@ from primelocations.utils.distances_to_cell import (get_cell_closest_point_to_po
 # from primelocations.utils.intersections import circle_line_segment_intersection, line_intersection, intersections_pts_arc_to_circle
 from primelocations.radius_search.offset_region_classes import OffsetRegion, Edge, Vertex, LineSegment, Circle
 from primelocations.illustrations.illustrate_cell_pattern import plot_cell_pattern
-from primelocations.testing.test_performance import time_func_perf, func_timer_dict
+from primelocations.testing_mod.test_performance import time_func_perf, func_timer_dict
 
 from shapely.geometry import Polygon, LineString, Point
 from geopandas import GeoSeries, GeoDataFrame
