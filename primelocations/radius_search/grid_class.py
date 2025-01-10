@@ -22,7 +22,7 @@ from .radius_search_class import (
 )
 from primelocations.valid_area import disk_cell_intersection_area
 # from .radius_search.optimal_grid_spacing import (select_optimal_grid_spacing,)
-from primelocations.testing_mod.test_performance import time_func_perf, func_timer_dict
+from primelocations.testing.test_performance import time_func_perf, func_timer_dict
 import matplotlib.pyplot as plt
 
 

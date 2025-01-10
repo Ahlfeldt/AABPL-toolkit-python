@@ -1,6 +1,6 @@
 from pandas import DataFrame as _pd_DataFrame
 from .random_distribution import (get_distribution_for_random_points)
-from primelocations.testing_mod.test_performance import time_func_perf, func_timer_dict
+from primelocations.testing.test_performance import time_func_perf, func_timer_dict
 from primelocations.radius_search.radius_search_class import (aggreagate_point_data_to_disks_vectorized, DiskSearch)
 from primelocations.radius_search.grid_class import Grid
 

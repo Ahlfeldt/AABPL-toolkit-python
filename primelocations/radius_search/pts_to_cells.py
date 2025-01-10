@@ -23,7 +23,7 @@ from primelocations.illustrations.illustrate_point_to_disk import (illustrate_po
 from primelocations.illustrations.plot_pt_vars import create_plots_for_vars
 from primelocations.utils.distances_to_cell import ( get_cells_relevant_for_disk_by_type, )
 from primelocations.radius_search.two_dimensional_weak_ordering_class import ( gen_weak_order_rel_to_convex_set, recursive_cell_region_inference )
-from primelocations.testing_mod.test_performance import time_func_perf, func_timer_dict
+from primelocations.testing.test_performance import time_func_perf, func_timer_dict
 # from primelocations.doc.docstrings import fixdocstring
 
 
