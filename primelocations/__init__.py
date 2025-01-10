@@ -1,7 +1,7 @@
 from importlib.metadata import version
 # TODO replace * with more expliced exports for the final version of the package 
 # # from .radius_search import *
-import utils
+from .primeloactions import utils
 import testing
 import illustrations
 import radius_search
