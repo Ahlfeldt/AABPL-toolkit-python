@@ -3,7 +3,7 @@ from numpy import (
     array as _np_array, arange as _np_arange, ndarray as _np_ndarray, vstack as _np_vstack, ones as _np_ones, percentile as _np_percentile, bool_ as _np_bool
 )
 from numpy.random import ( random as _np_random,  randint as _np_randint, seed as _np_seed, )
-# from .illustrations.distribution_plot import create_distribution_plot
+from primelocations.illustrations.distribution_plot import create_distribution_plot
 
 def draw_random_points_within_valid_area(
   cell_centroid_xy_coords:_np_array,
