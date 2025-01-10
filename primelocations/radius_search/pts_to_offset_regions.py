@@ -516,11 +516,12 @@ def assign_points_to_mirco_regions(
     # scale offset to cell side length of 1
     
     # print("Type offset_xy_unscaled", offset_xy_unscaled)
-    raster_cell_to_region_comb_nr, offset_region_comb_nr_to_check, offset_all_x_vals, offset_all_y_vals, id_to_offset_regions = prepare_offset_regions(
+    raster_cell_to_region_comb_nr, offset_region_comb_nr_to_check, offset_all_x_vals, offset_all_y_vals, id_to_offset_regions, contain_region_mult = prepare_offset_regions(
         grid_spacing=1, radius=radius/grid.spacing, include_boundary=include_boundary, 
         plot_offset_checks=plot_offset_checks, plot_offset_regions=plot_offset_regions, plot_offset_raster=plot_offset_raster,
         silent=silent,
     )
+    grid.search.contain_region_mult = contain_region_mult
     grid.id_to_offset_regions = id_to_offset_regions
     
 
@@ -578,7 +579,6 @@ def assign_points_to_mirco_regions(
     grid.search.id_to_offset_regions = id_to_offset_regions
     grid.search.region_id_to_contained_cells = {id: reg.contained_cells for id,reg in id_to_offset_regions.items()}
     grid.search.region_id_to_overlapped_cells = {id: reg.overlapped_cells for id,reg in id_to_offset_regions.items()}
-    grid.search.contain_region_mult =  list(id_to_offset_regions.values())[0].overlapped_cells_mult
 
     if 'testing' != 'testing':
         pts_df.drop('initial_sort', axis=1, inplace=True)

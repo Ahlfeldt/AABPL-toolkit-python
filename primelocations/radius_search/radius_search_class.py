@@ -392,6 +392,8 @@ class DiskSearch(object):
             sum_names=self.target.sum_names,
             y_coord_name=self.source.y_coord_name,
             x_coord_name=self.source.x_coord_name,
+            row_name=self.source.row_name,
+            col_name=self.source.col_name,
             cell_region_name=self.source.cell_region_name,
             sum_suffix=self.source.sum_suffix,
             exclude_pt_itself=self.exclude_pt_itself,

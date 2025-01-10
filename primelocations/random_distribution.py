@@ -1,6 +1,6 @@
 from pandas import DataFrame as _pd_DataFrame
 from numpy import (
-    array as _np_array, arange as _np_arange, ndarray as _np_ndarray, vstack as _np_vstack, ones as _np_ones, percentile as _np_percentile
+    array as _np_array, arange as _np_arange, ndarray as _np_ndarray, vstack as _np_vstack, ones as _np_ones, percentile as _np_percentile, bool_ as _np_bool
 )
 from numpy.random import ( random as _np_random,  randint as _np_randint, seed as _np_seed, )
 from .radius_search.radius_search_class import aggreagate_point_data_to_disks_vectorized
@@ -114,8 +114,8 @@ def draw_random_points_within_valid_area(
                 cell_inclusion_indicator[cell_nrs],
                 new_random_point_coordinates
             ) if (
-                (type(inclusion) is bool and inclusion == True) or 
-                (type(inclusion) is not bool and not inclusion.contains(coords) )
+                (type(inclusion) in [bool, _np_bool] and inclusion == True) or 
+                (not type(inclusion) in [bool, _np_bool] and not inclusion.contains(coords) )
             )
         ])
 
@@ -172,7 +172,7 @@ def get_distribution_for_random_points(
         random_seed=random_seed,
         cell_height=grid.spacing,
     )
-    # TODO CHECK LAT LON ORDER
+
     rndm_pts_df = _pd_DataFrame(
         data = random_point_coords,
         columns=[x_coord_name,y_coord_name]

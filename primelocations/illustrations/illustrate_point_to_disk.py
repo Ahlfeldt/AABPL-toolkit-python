@@ -117,7 +117,7 @@ def illustrate_point_disk(
     ax.scatter(
         x=[cntrd[0] for cntrd,color in cntrd_color],
         y =[cntrd[1] for cntrd,color in cntrd_color],
-        s=fig.get_figheight()/1, c=[color for cntrd,color in cntrd_color], marker='x')
+        s=fig.get_figheight()*500, c=[color for cntrd,color in cntrd_color], marker='+', alpha=0.1)
     
     # all pts
     ax.scatter(

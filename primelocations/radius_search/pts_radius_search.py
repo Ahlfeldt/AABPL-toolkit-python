@@ -27,6 +27,8 @@ def aggreagate_point_data_to_disks_vectorized(
     sum_names:list=['employment'],
     y_coord_name:str='lat',
     x_coord_name:str='lon',
+    row_name:str='id_y',
+    col_name:str='id_x',
     cell_region_name:str='cell_region',
     sum_suffix:str='_750m',
     exclude_pt_itself:bool=True,
@@ -65,25 +67,35 @@ def aggreagate_point_data_to_disks_vectorized(
     
     if plot_pt_disk is not None:
         if not 'pt_id' in plot_pt_disk:
-            plot_pt_disk['pt_id']=pts_df_search_source.index[int(n_pts//2)]
+            plot_pt_disk['pt_id'] = pts_df_search_source.index[int(n_pts//2)]
         
     zero_sums = _np_zeros(len(sum_names),dtype=int)
     # time_function(time_dict)#1
-    (last_pt_row, last_pt_col) = (-1, -1)
+    pts_df_search_source['initial_sort'] = range(len(pts_df_search_source))
+    pts_df_search_source.sort_values([row_name, col_name, cell_region_name], inplace=True)
+    last_pt_row_col = (-1, -1)
     last_cell_region_id = -1
-    for (i, pt_id, a_pt_ycoord, a_pt_xcoord, cell_region_id) in zip(
+    counter_new_cell = 0
+    counter_new_contain_region = 0
+    counter_new_overlap_region = 0
+
+    for (i, pt_id, a_pt_ycoord, a_pt_xcoord, (pt_row,pt_col), contain_region_id, overlap_region_id, cell_region_id) in zip(
         range(n_pts),
         pts_df_search_source.index,
-        pts_df_search_source[y_coord_name], 
-        pts_df_search_source[x_coord_name],
-        pts_df_search_source[cell_region_name],
+        pts_df_search_source[y_coord_name].values, 
+        pts_df_search_source[x_coord_name].values,
+        pts_df_search_source[[row_name, col_name]].values,
+        pts_df_search_source[cell_region_name].values // grid.search.contain_region_mult,
+        pts_df_search_source[cell_region_name].values % grid.search.contain_region_mult,
+        pts_df_search_source[cell_region_name].values,
+        
+        
         ):
-        (pt_row, pt_col) = pt_id_to_row_col[pt_id]
+        # (pt_row, pt_col) = pt_id_to_row_col[pt_id]
         
         # as pts are sorted by grid cell update only if grid cell changed
-        # TODO IMPLEMENT CONTAIN CELL REGION ID
-        if not (pt_row, pt_col) == (last_pt_row, last_pt_col):
-             
+        if not (pt_row, pt_col) == last_pt_row_col:
+            counter_new_cell += 1
             cells_cntd_by_pt_cell = sparse_grid_ids.intersection([(row+pt_row,col+pt_col) for row,col in cells_contained_in_all_disks])
             # cells_cntd_by_pt_cell = [cell_id for cell_id in (id_y_mult*(cells_contained_in_all_disks[:,0]+(pt_row))+(
             #     cells_contained_in_all_disks[:,1]+pt_col)) if cell_id in sparse_grid_ids] 
@@ -91,7 +103,8 @@ def aggreagate_point_data_to_disks_vectorized(
                                       if len(cells_cntd_by_pt_cell)>0 else zero_sums)
         #
             
-        if not (pt_row, pt_col) == (last_pt_row, last_pt_col) or last_cell_region_id != cell_region_id:
+        if not (pt_row, pt_col) == last_pt_row_col or last_contain_region_id != contain_region_id:
+            counter_new_contain_region += 1
             # if cell changed or cell region changed
             # this can be improve to capture only changes of cell region conatain ids 
             cells_contained_by_pt_region = sparse_grid_ids.intersection([(row+pt_row,col+pt_col) for row,col in region_id_to_contained_cells[cell_region_id]])
@@ -101,6 +114,8 @@ def aggreagate_point_data_to_disks_vectorized(
             sums_contained_by_pt_region = (_np_array([grid_id_to_sums[g_id] for g_id in cells_contained_by_pt_region]).sum(axis=0) 
                                              if len(cells_contained_by_pt_region)>0 else zero_sums)
 
+        if not (pt_row, pt_col) == last_pt_row_col or last_overlap_region_id != overlap_region_id:
+            counter_new_overlap_region += 1
             cells_overlapped_by_pt_region = sparse_grid_ids.intersection([(row+pt_row,col+pt_col) for row,col in region_id_to_overlapped_cells[cell_region_id]])
             # cells_overlapped_by_pt_region = [cell_id for cell_id in (id_y_mult*(region_id_to_overlapped_cells[cell_region_id][:,0]+(pt_row))+(
             #     region_id_to_overlapped_cells[cell_region_id][:,1]+pt_col)) if cell_id in sparse_grid_ids]
@@ -151,16 +166,16 @@ def aggreagate_point_data_to_disks_vectorized(
         #
 
         # set id as last id for next iteration
-        (last_pt_row, last_pt_col)=(pt_row, pt_col)
-        last_cell_region_id = cell_region_id
-        
+        last_pt_row_col = (pt_row, pt_col)
+        last_contain_region_id = contain_region_id
+        last_overlap_region_id = overlap_region_id
     #
     pts_df_search_source[sum_radius_names] = pts_df_search_source[sum_radius_names].values + sums_within_disks
             
     if exclude_pt_itself and grid.search.tgt_df_contains_src_df:
         # substract data from point itself unless specified otherwise
         pts_df_search_source[sum_radius_names] = pts_df_search_source[sum_radius_names].values - pts_df_search_source[sum_names]
-
+    print("counter_new_cell", round(counter_new_cell/len(pts_df_search_source),3), "cn",round(counter_new_contain_region/len(pts_df_search_source),3) , "ov",round(counter_new_overlap_region/len(pts_df_search_source),3) )
     
     if plot_radius_sums is not None:
         print('create plot for radius sums')
@@ -170,6 +185,9 @@ def aggreagate_point_data_to_disks_vectorized(
             plot_kwargs=plot_radius_sums,
         )
     #
+    pts_df_search_source.sort_values(['initial_sort'], inplace=True)
+    pts_df_search_source.drop('initial_sort', axis=1, inplace=True)
+
     return pts_df_search_source[sum_radius_names]
 #
 

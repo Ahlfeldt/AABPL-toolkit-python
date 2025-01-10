@@ -331,12 +331,11 @@ def transform_region_to_remaining_triangles(trgl_regions):
         if not region.overlapped_cells in unique_overlapped_cells:
             unique_overlapped_cells[region.overlapped_cells] = len(unique_overlapped_cells)
     
-    overlapped_cells_mult = 10**(int(_math_log10(len(unique_overlapped_cells)))+1)
+    contain_region_mult = 10**(int(_math_log10(len(unique_overlapped_cells)))+1)
     id_to_offset_regions = dict()
     
     for region in all_regions:
-        region.overlapped_cells_mult = 10**(int(_math_log10(len(unique_overlapped_cells)))+1)
-        region.id = unique_contained_cells[region.contained_cells] * overlapped_cells_mult + unique_overlapped_cells[region.overlapped_cells]
+        region.id = unique_contained_cells[region.contained_cells] * contain_region_mult + unique_overlapped_cells[region.overlapped_cells]
         
         if not region.id in id_to_offset_regions:
             id_to_offset_regions[region.id] = region
@@ -346,7 +345,7 @@ def transform_region_to_remaining_triangles(trgl_regions):
     
     translate_reg_nr_to_reg_id = {k: trgl_reg_nr_to_id[v] for k,v in translate_trgl_reg_nr_to_reg_nr.items()}
 
-    return id_to_offset_regions, translate_reg_nr_to_reg_id
+    return id_to_offset_regions, translate_reg_nr_to_reg_id, contain_region_mult
     
 #
 
@@ -855,7 +854,7 @@ def prepare_offset_regions(
     )
     
     # OffsetRegion.plot_many(regions=list(trgl_regions.values()))
-    id_to_offset_regions, translate_reg_nr_to_reg_id = transform_region_to_remaining_triangles(trgl_regions=trgl_regions)
+    id_to_offset_regions, translate_reg_nr_to_reg_id, contain_region_mult = transform_region_to_remaining_triangles(trgl_regions=trgl_regions)
     
     (trgl_raster_cell_to_region,
      offset_x_bins,
@@ -904,5 +903,5 @@ def prepare_offset_regions(
         offset_reg_id_comb_to_check=offset_reg_id_comb_to_check
     )
     
-    return raster_cell_to_region_comb_nr, offset_region_comb_nr_to_check, offset_all_x_vals, offset_all_y_vals, id_to_offset_regions
+    return raster_cell_to_region_comb_nr, offset_region_comb_nr_to_check, offset_all_x_vals, offset_all_y_vals, id_to_offset_regions, contain_region_mult
 
