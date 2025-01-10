@@ -8,7 +8,7 @@ extra_ci = [*extra_test,'python-coveralls',]
 
 with open('./README.md', 'r') as f:
     long_description = f.read()
-
+# packages=[name],
 setup(
     name=name,
     version="0.1.0",
@@ -20,7 +20,7 @@ setup(
     author_email='g.ahlfeldt@hu-berlin.de',
     license='MIT',
     install_requires=['numpy','pandas','geopandas','shapely','matplotlib','pyproj'],
-    packages=[name],
+    packages=find_packages(exclude=["tests*",]),
     extras_require={
         'test': extra_test,
         'dev': extra_dev,
