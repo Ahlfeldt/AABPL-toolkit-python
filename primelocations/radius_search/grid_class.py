@@ -14,19 +14,14 @@ from primelocations.utils.general import ( flatten_list, time_function, visualiz
 from primelocations.illustrations.illustrate_optimal_grid_spacing import ( create_optimal_grid_spacing_gif, )
 from primelocations.illustrations.plot_utils import map_2D_to_rgb, get_2D_rgb_colobar_kwargs
 from primelocations.utils.distances_to_cell import ( get_always_contained_potentially_overlapped_cells, )
-# from .nested_search import (
-#     aggregate_point_data_to_nested_cells,
-#     aggreagate_point_data_to_disks_vectorized_nested
-#     )
+# from .nested_search import (aggregate_point_data_to_nested_cells, aggreagate_point_data_to_disks_vectorized_nested)
 from primelocations.radius_search.radius_search_class import (
     aggregate_point_data_to_cells,
     assign_points_to_cell_regions,
     aggreagate_point_data_to_disks_vectorized
 )
 from primelocations.valid_area import disk_cell_intersection_area
-from primelocations.radius_search.optimal_grid_spacing import (
-    select_optimal_grid_spacing,
-)
+# from primelocations.radius_search.optimal_grid_spacing import (select_optimal_grid_spacing,)
 from primelocations.testing.test_performance import time_func_perf, func_timer_dict
 import matplotlib.pyplot as plt
 
