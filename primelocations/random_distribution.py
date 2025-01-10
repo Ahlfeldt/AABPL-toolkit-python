@@ -3,7 +3,7 @@ from numpy import (
     array as _np_array, arange as _np_arange, ndarray as _np_ndarray, vstack as _np_vstack, ones as _np_ones, percentile as _np_percentile, bool_ as _np_bool
 )
 from numpy.random import ( random as _np_random,  randint as _np_randint, seed as _np_seed, )
-from .illustrations.distribution_plot import create_distribution_plot
+# from .illustrations.distribution_plot import create_distribution_plot
 
 def draw_random_points_within_valid_area(
   cell_centroid_xy_coords:_np_array,
@@ -206,13 +206,14 @@ def get_distribution_for_random_points(
     cluster_threshold_values  = [_np_percentile(disk_sums_for_random_points[:,i], k_th_percentile,axis=0) for i, k_th_percentile in enumerate(k_th_percentiles)]
     
     if plot_distribution is not None:
-        create_distribution_plot(
-            sums_df=rndm_pts_df[sum_radius_names],
-            cluster_threshold_values=cluster_threshold_values,
-            k_th_percentiles=k_th_percentiles,
-            radius=radius,
-            plot_kwargs=plot_distribution
-            )
+        pass
+        # create_distribution_plot(
+        #     sums_df=rndm_pts_df[sum_radius_names],
+        #     cluster_threshold_values=cluster_threshold_values,
+        #     k_th_percentiles=k_th_percentiles,
+        #     radius=radius,
+        #     plot_kwargs=plot_distribution
+        #     )
 
 
     return (cluster_threshold_values, disk_sums_for_random_points)
