@@ -1,11 +1,11 @@
 from importlib.metadata import version
 # TODO replace * with more expliced exports for the final version of the package 
 # from .radius_search import *
-from . import illustrations
-from . import testing
 from . import utils
-from . import main
+from . import testing
+from . import illustrations
 from . import radius_search
+from . import main
 # from primelocations.main import *
 # from primelocations.radius_search.optimal_grid_spacing import *
 # from primelocations.radius_search.offset_regions import *
