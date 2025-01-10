@@ -1,0 +1,194 @@
+from numpy import (
+    array as _np_array,
+    ndarray as _np_ndarray,
+    arange as _np_arange,
+    hstack as _np_hstack,
+    zeros as _np_zeros,
+    unique as _np_unique, 
+    concatenate as _np_concatenate,
+    equal as _np_equal, 
+    logical_or as _np_logical_or, 
+    all as _np_all, 
+)
+from numpy.linalg import norm as _np_linalg_norm
+from pandas import (DataFrame as _pd_DataFrame, cut as _pd_cut, concat as _pd_concat) 
+from aabpl.utils.general import (   flatten_list, DataFrameRelation,arr_to_tpls )
+from aabpl.illustrations.illustrate_point_to_disk import (illustrate_point_disk)
+from aabpl.illustrations.plot_pt_vars import create_plots_for_vars
+from aabpl.testing.test_performance import time_func_perf, func_timer_dict
+
+################ aggreagate_point_data_to_disks_vectorized ######################################################################################
+@time_func_perf
+def aggreagate_point_data_to_disks_vectorized(
+    grid:dict,
+    pts_df_search_source:_pd_DataFrame,
+    pts_df_search_target:_pd_DataFrame=None,
+    radius:float=0.0075,
+    sum_names:list=['employment'],
+    y_coord_name:str='lat',
+    x_coord_name:str='lon',
+    row_name:str='id_y',
+    col_name:str='id_x',
+    cell_region_name:str='cell_region',
+    sum_suffix:str='_750m',
+    exclude_pt_itself:bool=True,
+    plot_radius_sums:dict=None,
+    plot_pt_disk:dict=None,
+    silent = False,
+):
+    """
+    
+    """
+    
+    if pts_df_search_target is None:
+        pts_df_search_target = pts_df_search_source 
+    
+    # unpack grid_data 
+    grid_id_to_pt_ids = grid.id_to_pt_ids
+    grid_id_to_sums = grid.id_to_sums
+    pt_id_to_row_col = grid.pt_id_to_row_col
+    sparse_grid_ids = set(grid_id_to_pt_ids)
+    
+    region_id_to_contained_cells = grid.search.region_id_to_contained_cells
+    region_id_to_overlapped_cells = grid.search.region_id_to_overlapped_cells
+    cells_contained_in_all_disks = grid.search.cells_contained_in_all_disks
+
+    id_y_mult=grid.id_y_mult
+    pt_id_to_xy_coords = grid.search.target.pt_id_to_xy_coords
+    pt_id_to_vals = grid.search.target.pt_id_to_vals
+    n_pts = len(pts_df_search_source)
+
+    # initialize columns and/or reset to zero 
+    sum_radius_names = [(cname+sum_suffix) for cname in sum_names]
+    pts_df_search_source[sum_radius_names] = 0
+    
+  
+    sums_within_disks = _np_zeros((n_pts, len(sum_names)))
+    
+    if plot_pt_disk is not None:
+        if not 'pt_id' in plot_pt_disk:
+            plot_pt_disk['pt_id'] = pts_df_search_source.index[int(n_pts//2)]
+        
+    zero_sums = _np_zeros(len(sum_names),dtype=int)
+    # time_function(time_dict)#1
+    pts_df_search_source['initial_sort'] = range(len(pts_df_search_source))
+    pts_df_search_source.sort_values([row_name, col_name, cell_region_name], inplace=True)
+    last_pt_row_col = (-1, -1)
+    last_cell_region_id = -1
+    counter_new_cell = 0
+    counter_new_contain_region = 0
+    counter_new_overlap_region = 0
+
+    for (i, pt_id, a_pt_ycoord, a_pt_xcoord, (pt_row,pt_col), contain_region_id, overlap_region_id, cell_region_id) in zip(
+        range(n_pts),
+        pts_df_search_source.index,
+        pts_df_search_source[y_coord_name].values, 
+        pts_df_search_source[x_coord_name].values,
+        pts_df_search_source[[row_name, col_name]].values,
+        pts_df_search_source[cell_region_name].values // grid.search.contain_region_mult,
+        pts_df_search_source[cell_region_name].values % grid.search.contain_region_mult,
+        pts_df_search_source[cell_region_name].values,
+        
+        
+        ):
+        # (pt_row, pt_col) = pt_id_to_row_col[pt_id]
+        
+        # as pts are sorted by grid cell update only if grid cell changed
+        if not (pt_row, pt_col) == last_pt_row_col:
+            counter_new_cell += 1
+            cells_cntd_by_pt_cell = sparse_grid_ids.intersection([(row+pt_row,col+pt_col) for row,col in cells_contained_in_all_disks])
+            # cells_cntd_by_pt_cell = [cell_id for cell_id in (id_y_mult*(cells_contained_in_all_disks[:,0]+(pt_row))+(
+            #     cells_contained_in_all_disks[:,1]+pt_col)) if cell_id in sparse_grid_ids] 
+            sums_cells_cntd_by_pt_cell = (_np_array([grid_id_to_sums[g_id] for g_id in cells_cntd_by_pt_cell]).sum(axis=0) 
+                                      if len(cells_cntd_by_pt_cell)>0 else zero_sums)
+        #
+            
+        if not (pt_row, pt_col) == last_pt_row_col or last_contain_region_id != contain_region_id:
+            counter_new_contain_region += 1
+            # if cell changed or cell region changed
+            # this can be improve to capture only changes of cell region conatain ids 
+            cells_contained_by_pt_region = sparse_grid_ids.intersection([(row+pt_row,col+pt_col) for row,col in region_id_to_contained_cells[cell_region_id]])
+            # cells_contained_by_pt_region = [cell_id for cell_id in (id_y_mult*(region_id_to_contained_cells[cell_region_id][:,0]+(pt_row))+(
+            #     region_id_to_contained_cells[cell_region_id][:,1]+pt_col)) if cell_id in sparse_grid_ids]
+                           
+            sums_contained_by_pt_region = (_np_array([grid_id_to_sums[g_id] for g_id in cells_contained_by_pt_region]).sum(axis=0) 
+                                             if len(cells_contained_by_pt_region)>0 else zero_sums)
+
+        if not (pt_row, pt_col) == last_pt_row_col or last_overlap_region_id != overlap_region_id:
+            counter_new_overlap_region += 1
+            cells_overlapped_by_pt_region = sparse_grid_ids.intersection([(row+pt_row,col+pt_col) for row,col in region_id_to_overlapped_cells[cell_region_id]])
+            # cells_overlapped_by_pt_region = [cell_id for cell_id in (id_y_mult*(region_id_to_overlapped_cells[cell_region_id][:,0]+(pt_row))+(
+            #     region_id_to_overlapped_cells[cell_region_id][:,1]+pt_col)) if cell_id in sparse_grid_ids]
+            
+            pts_in_cells_overlapped_by_pt_region = _np_array(flatten_list([
+                grid_id_to_pt_ids[cell_id] for cell_id in cells_overlapped_by_pt_region
+            ]))
+        #
+
+        if len(pts_in_cells_overlapped_by_pt_region) > 0:
+            pts_in_radius = pts_in_cells_overlapped_by_pt_region[(_np_linalg_norm( # create a mask of boolean values indicating if point are within radius 
+                _np_array([pt_id_to_xy_coords[pt_id] for pt_id in pts_in_cells_overlapped_by_pt_region]) -
+                _np_array([a_pt_xcoord, a_pt_ycoord]), 
+            axis=1) <= radius)]
+            
+            overlapping_cells_sums = _np_array([pt_id_to_vals[pt_id] for pt_id in pts_in_radius]).sum(axis=0) if len(pts_in_radius) > 0 else zero_sums
+        else:
+            # else no points in radius thus return vector of _np_zeros
+            overlapping_cells_sums = zero_sums
+
+        # combine sums from three steps.
+        sums_full_disk = sums_cells_cntd_by_pt_cell + sums_contained_by_pt_region + overlapping_cells_sums
+        
+        # append result 
+        sums_within_disks[i,:] = sums_full_disk
+        
+        if plot_pt_disk is not None and pt_id == plot_pt_disk['pt_id']:
+            illustrate_point_disk(
+                grid=grid,
+                pts_df_search_source=pts_df_search_source,
+                pts_df_search_target=pts_df_search_target,
+                radius=radius,
+                sum_names=sum_names,
+                x_coord_name=x_coord_name,
+                y_coord_name=y_coord_name,
+                cells_cntd_by_pt_cell=[(row+pt_row,col+pt_col) for row,col in cells_contained_in_all_disks],
+                cells_contained_by_pt_region=[(row+pt_row,col+pt_col) for row,col in region_id_to_contained_cells[cell_region_id]],
+                cells_overlapped_by_pt_region=[(row+pt_row,col+pt_col) for row,col in region_id_to_overlapped_cells[cell_region_id]],
+                pts_in_cell_contained_by_pt_region=_np_array(flatten_list([
+                        grid_id_to_pt_ids[cell_id] for cell_id in cells_cntd_by_pt_cell
+                    ]+[
+                        grid_id_to_pt_ids[cell_id] for cell_id in cells_contained_by_pt_region
+                    ])),
+                pts_in_cells_overlapped_by_pt_region=pts_in_cells_overlapped_by_pt_region,
+                pts_in_radius=pts_in_radius,
+                **plot_pt_disk,
+            )
+        #
+
+        # set id as last id for next iteration
+        last_pt_row_col = (pt_row, pt_col)
+        last_contain_region_id = contain_region_id
+        last_overlap_region_id = overlap_region_id
+    #
+    pts_df_search_source[sum_radius_names] = pts_df_search_source[sum_radius_names].values + sums_within_disks
+            
+    if exclude_pt_itself and grid.search.tgt_df_contains_src_df:
+        # substract data from point itself unless specified otherwise
+        pts_df_search_source[sum_radius_names] = pts_df_search_source[sum_radius_names].values - pts_df_search_source[sum_names]
+    print("counter_new_cell", round(counter_new_cell/len(pts_df_search_source),3), "cn",round(counter_new_contain_region/len(pts_df_search_source),3) , "ov",round(counter_new_overlap_region/len(pts_df_search_source),3) )
+    
+    if plot_radius_sums is not None:
+        print('create plot for radius sums')
+        create_plots_for_vars(
+            grid=grid,
+            colnames=_np_array([sum_names, sum_radius_names]),
+            plot_kwargs=plot_radius_sums,
+        )
+    #
+    pts_df_search_source.sort_values(['initial_sort'], inplace=True)
+    pts_df_search_source.drop('initial_sort', axis=1, inplace=True)
+
+    return pts_df_search_source[sum_radius_names]
+#
+
+
