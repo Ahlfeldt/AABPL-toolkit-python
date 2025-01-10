@@ -107,4 +107,4 @@ Folder | Name  | Description |
 
 
 ## Acknowledgements
-The Python version of the toolkit was developed by [Max von Mylius](https://github.com/maximylius) based on the Stata and MATLAB functions.
+The Python version of the toolkit was developed by [Max von Mylius](https://github.com/maximylius)
