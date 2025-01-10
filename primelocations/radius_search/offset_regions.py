@@ -7,8 +7,8 @@ from matplotlib.patches import (Rectangle as _plt_Rectangle, Polygon as _plt_Pol
 from primelocations.utils.general import angle, angles_to_origin, angle_to, make_bins_from_vals, get_vals_from_bins
 from primelocations.utils.distances_to_cell import (get_cell_closest_point_to_point, get_cell_farthest_vertex_to_point,
  check_if_never_contains_convex_set, check_if_always_overlaps_full_convex_set,check_if_always_overlaps_convex_set, get_cells_relevant_for_disk_by_type)
-from primelocations.utils.rotations import transform_cell_pattern, transform_coord, transform_cell
-from primelocations.utils.intersections import circle_line_segment_intersection, line_intersection, intersections_pts_arc_to_circle
+# from primelocations.utils.rotations import transform_cell_pattern, transform_coord, transform_cell
+# from primelocations.utils.intersections import circle_line_segment_intersection, line_intersection, intersections_pts_arc_to_circle
 from primelocations.radius_search.offset_region_classes import OffsetRegion, Edge, Vertex, LineSegment, Circle
 from primelocations.illustrations.illustrate_cell_pattern import plot_cell_pattern
 from primelocations.testing.test_performance import time_func_perf, func_timer_dict
