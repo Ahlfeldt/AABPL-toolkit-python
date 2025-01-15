@@ -95,9 +95,17 @@ If you are new to Python, you may find it useful to execute the [`Example.py`](h
 
 ### Inputs
 
-The compulsory input into the algorithm is a file containing spatial point pattern data. In the application by Ahlfeldt, Albers, and Behrens (2024), spatial points are establishments. However, these could also be individuals, buildings, or any other subjects or objects whose location can by references by geographic coordinates. The data file should contain geographic coordinates in standard decimal degrees and a variable that defines the importance of a subject or object. In the application by Ahlfeldt, Albers, and Behrens (2024) the importance is represented by the employment of an establishment. However, it could also be the productivity of a worker, the height of a building, or any weight that summarizes the importance of a data point. 
+The compulsory input into the algorithm is a file containing spatial point pattern data. In the application by Ahlfeldt, Albers, and Behrens (2024), spatial points are establishments. However, these could also be individuals, buildings, or any other subjects or objects whose location can by references by geographic coordinates. The data file should contain geographic coordinates in standard decimal degrees and a variable that defines the importance of a subject or object. In the application by Ahlfeldt, Albers, and Behrens (2024) the importance is represented by the employment of an establishment. However, it could also be the productivity of a worker, the height of a building, or any weight that summarizes the importance of a data point. Of course, equal importance will be reflected by a uniform value.
 
-In case you wish to use the above `Example.py` script without having to make any adjustments (except for setting your root directory) you should create a comma-separated file with exactly the same name and structure as `plants.txt` file provided in this repository. 
+In case you wish to use the above `Example.py` script without having to make any adjustments (except for setting your root directory) you should create a comma-separated file with exactly the same name and structure as `plants.txt` file provided in this repository. Notice that this exemplary input file **does not** include variable names. It includes variables in the following order (separated by commas):
+
+- **identifier variable**: In our case, this is an establishment identifier. If you do not need this, you can set all values to 1.
+- **importance weight**: In our case, this is predicted employment. If you want to use equal weights, you can set all values to 1.
+- **category identifier**: In our case, this is the type of establishment (e.g. accounting, consulting, etc.). If you do not care, you can set all values to 1.
+- **latitude**: Given in decimal degrees in the standard WGS1984 geographic coordinate system.
+- **longitude**: Given in decimal degrees in the standard WGS1984 geographic coordinate system.
+
+Variable names will then be assigned by the script. Of course, you can also import data sets that already contain variable names. Just and sure that latitudes and longitudes are defined by varariables named lat and lon. You can define the name of the variable representing your importance weights in the program syntax.
 
 ## Folder Structure and Files (OUTDATED)
 
