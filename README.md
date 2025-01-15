@@ -5,7 +5,9 @@
 
 
 ## About
-This repository is part of the [Toolkit of Prime Locations (AABPL)](https://github.com/Ahlfeldt/AABPL-toolkit/blob/main/README.md). It contains a Python version of the prime locations delineation algorithm developed by Ahlfeldt, Albers, Behrens (2024). **Please cite** when using the algorithm in your work. 
+This repository is part of the [Toolkit of Prime Locations (AABPL)](https://github.com/Ahlfeldt/AABPL-toolkit/blob/main/README.md). It contains a Python version of the prime locations delineation algorithm developed by Ahlfeldt, Albers, Behrens (2024). 
+
+When using the algorithm in your work, **please cite**: 
 
 Ahlfeldt, Albers, Behrens (2024): Prime locations. American Economic Review: Insights, forthcoming.
 
