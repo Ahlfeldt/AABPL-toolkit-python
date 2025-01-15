@@ -91,7 +91,7 @@ If you are new to Python, you may find it useful to execute the [`Example.py`](h
 
 ### Inputs
 
-The compulsory 
+The compulsory input into the algorithm is a file containing spatial point pattern data. In the application by Ahlfeldt, Albers, and Behrens (2024), spatial points are establishments. However, these could also be individuals, buildings, or any other subjects or objects whose location can by references by geographic coordinates. The data file should contain geographic coordinates in standard decimal degrees and a variable that defines the importance of a subject or object. In the application by Ahlfeldt, Albers, and Behrens (2024) the importance is represented by the employment of an establishment. However, it could also be the productivity of a worker, the height of a building, or any weight that summarizes the importance of a data point. 
 
 ## Folder Structure and Files (OUTDATED)
 
@@ -125,3 +125,6 @@ Folder | Name  | Description |
 |:-------------------|:-------------------------------------|:-------------------------------------------------------------------------|
 | [-](https://github.com/Ahlfeldt/ABRSQOL-toolkit) | `AABPL-Codebook.pdf` | **Codebook** laying out the **structure of the deliniation algorithm in pseduo code** |
 
+# References 
+
+Ahlfeldt, Albers, Behrens (2024): Prime locations. American Economic Review: Insights, forthcoming.
