@@ -104,6 +104,8 @@ In case you wish to use the above `Example.py` script without having to make any
 - **category identifier**: In our case, this is the type of establishment (e.g., accounting, consulting, etc.). If you do not care, you can set all values to 1.
 - **latitude**: Given in decimal degrees in the standard WGS1984 geographic coordinate system.
 - **longitude**: Given in decimal degrees in the standard WGS1984 geographic coordinate system.
+- **placebolder for another variable**: You can ignore it.
+
 
 Variable names will then be assigned by the script. Of course, you can also import data sets that already contain variable names. Just make sure that latitudes and longitudes are defined by variables named `lat` and `lon`. You can define the name of the variable representing your importance weights in the program syntax.
 
