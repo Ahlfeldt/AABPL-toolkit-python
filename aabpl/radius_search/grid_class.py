@@ -10,7 +10,7 @@ from numpy import (
 # from numpy.random import randint, random
 from pandas import DataFrame as _pd_DataFrame
 from math import log10 as _math_log10#,ceil,asin,acos
-from aabpl.utils.general import ( flatten_list, time_function, visualize, depth )
+from aabpl.utils.general import ( flatten_list, visualize, depth )
 from aabpl.illustrations.illustrate_optimal_grid_spacing import ( create_optimal_grid_spacing_gif, )
 from aabpl.illustrations.plot_utils import map_2D_to_rgb, get_2D_rgb_colobar_kwargs
 from aabpl.utils.distances_to_cell import ( get_always_contained_potentially_overlapped_cells, )

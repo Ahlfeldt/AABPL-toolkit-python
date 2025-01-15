@@ -75,8 +75,6 @@ def radius_search(
     tgt_row_name:str=None,
     tgt_col_name:str=None,
 
-    time_dict:dict={'i':0,'clean':-1},
-
     plot_radius_sums:dict=None,
     plot_pt_disk:dict=None,
     plot_cell_reg_assign:dict=None,
@@ -178,8 +176,6 @@ def detect_clusters(
     sum_suffix:str='_750m',
     cluster_suffix:str='_cluster',
     
-    time_dict:dict={'i':0,'clean':-1},
-
     plot_distribution:dict=None,
     plot_radius_sums:dict=None,
     plot_cluster_points:dict=None,

@@ -75,24 +75,6 @@ def sort_2D_array_by_rows(
     return arr
 #
 
-def time_function(time_dict:dict,i_force:int=None):
-    if type(i_force)==int:
-        time_dict['i']=i_force
-    i = time_dict['i']
-    t = datetime.now()
-    time_dict[i] = t     
-    if i > 0:
-        print(
-            'Time step '+str(i)+
-            ': '+str(time_dict[i]-time_dict[i-1])[2:-7]+
-            '. Total: '+str(time_dict[i]-time_dict[0])[2:-7]
-            )
-    else:
-        print("Start timer.")
-
-    time_dict['i'] += 1
-#
-
 # copied helpefer funs 
 def depth(d):
     if isinstance(d, dict):

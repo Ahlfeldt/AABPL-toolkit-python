@@ -109,7 +109,7 @@ def analyze_func_perf(
         if not any([func['func_name'] == func_name for func in open_funcs]):
             # nest function call
             if len(open_funcs) > 0:
-                open_funcs[-1]['process_time'] =max([0., open_funcs[-1]['process_time'] - time_elapsed])  
+                open_funcs[-1]['process_time'] = max([0., open_funcs[-1]['process_time'] - time_elapsed])  
             #
             
             open_funcs.append(t_dict)
@@ -193,6 +193,7 @@ def analyze_func_perf(
         used_cmap = plt.get_cmap('jet')
         other_name, other_color = 'other', '#ccc'
         used_names = []
+        used_colors = []
         for i, r in zip(range(nest_level_max)[::-1], _np_linspace(0.0, 1, nest_level_max+1)[1:][::-1]):
             group_col = ['path_cat_'+str(i)]
             xs = grp_df.groupby(group_col)['process_time'].sum()
@@ -201,28 +202,32 @@ def analyze_func_perf(
 
             labels = [label if (x/total_process_time)>threshold else other_name for x, label in zip(xs, grp_df.groupby(group_col).groups.keys())]
             names = [name if (x/total_process_time)>threshold else other_name for x, name in zip(xs, grp_df.groupby(['path_name_'+str(i)]).groups.keys())]
-            for name, xs0 in zip(names, xs):
-                if name not in used_names:
-                    print("name",name, xs0, xs0/total_process_time, "i", i, "grps", len(xs))
-                    used_names.append(name)
-
             colors = [used_cmap(space_dict[key]) if (x/total_process_time)>threshold else other_color for x, key in zip(xs, labels)]
+            for name, color, xs0 in zip(names, colors, xs):
+                if name not in used_names:
+                    used_names.append(name)
+                    used_colors.append(color)
+                else:
+                    used_colors[used_names.index(name)] = color
+
             # colors = [used_cmap(cmap_dict[key]) for key in labels]
             patches, text = ax.pie(
                 x=xs,
                 radius=r,
                 colors=colors,
-                # labels=names,
+                labels=['' if name == other_name else (n.split('-')[-1] if n.split('-')[-1] != '__init__' else n.split('-')[-2]) if xs/total_process_time>0.000 else '' for n,xs in zip(names,xs)],
+                labeldistance=.999,
+                textprops={'fontsize': 7},
                 wedgeprops={'edgecolor':'black'}, # TODO maybe its possible to pass a vector of bordercolors in here(remove if same slice)
                 )
             func_timer_dict['cmap_dict']=space_dict
         # title_str = "Effective time: "+ str(grp_df['total_no_sub'].sum()) + ". Total time:"+str(max(grp_df['end_time'])-min(grp_df['start_time']))
         # print("title_str",title_str)
-        title = 'Total process time:'+str(round(total_process_time,0))+'s.'
+        title = 'Total process time:'+str(round(total_process_time,1))+'s.'
         ax.set(aspect="equal", title=title)
         handles = [
-            plt.Rectangle((0, 0), 0, 0, color=used_cmap(space_dict[concat_name_to_cat[name]]) if name != other_name else other_color, label=name.split('-')[-1])
-            for name in used_names]
+            plt.Rectangle((0, 0), 0, 0, color=color if name != other_name else other_color, label=name.split('-')[-1]) # used_cmap(space_dict[concat_name_to_cat[name]])
+            for name, color in zip(used_names, used_colors)]
         ax.legend(handles=handles, framealpha=0., bbox_to_anchor=(0.85,1.025), loc="upper left")# bbox_to_anchor=(0.2, 1.1),
         plt.show()
     func_timer_dict['grp_df'] = grp_df

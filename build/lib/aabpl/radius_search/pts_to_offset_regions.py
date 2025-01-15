@@ -585,7 +585,7 @@ def assign_points_to_mirco_regions(
         print('Mean contained:', sum([len(v) for v in grid.search.region_id_to_contained_cells.values()])/len(grid.search.region_id_to_contained_cells))
         print('Mean overlapped:', sum([len(v) for v in grid.search.region_id_to_overlapped_cells.values()])/len(grid.search.region_id_to_overlapped_cells))
     else:
-        pts_df['triangle_id'] = classify_point_triangle(x=pts_df['offset_x'], y=pts_df['offset_y']) # TODO remove this
+        # pts_df['triangle_id'] = classify_point_triangle(x=pts_df['offset_x'], y=pts_df['offset_y']) # TODO remove this
         pts_df.drop(['initial_sort', 'micro_raster_x', 'micro_raster_y','offset_x', 'offset_y'], axis=1, inplace=True)
    
 #

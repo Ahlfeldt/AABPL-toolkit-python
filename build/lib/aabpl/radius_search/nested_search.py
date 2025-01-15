@@ -24,7 +24,7 @@ from pandas import (
     cut as _pd_cut,
 ) 
 from math import ceil#,asin,acos
-from aabpl.utils.general import ( flatten_list, time_function, visualize, depth, list_dict_keys )
+from aabpl.utils.general import ( flatten_list, visualize, depth, list_dict_keys )
 from aabpl.illustrations.illustrate_point_to_cell_region_assignment import (illustrate_point_to_cell_region_assignment)
 from aabpl.utils.distances_to_cell import (  get_cells_relevant_for_disk_by_type )
 
@@ -487,7 +487,6 @@ def aggreagate_point_data_to_disks_vectorized_nested(
     
   
     sums_within_disks = []
-    # time_function(time_dict)#1
     last_grid_id = -1
     last_cell_region_id = -1
     zero_sums = _np_zeros(len(sum_names),dtype=int)
@@ -548,8 +547,7 @@ def aggreagate_point_data_to_disks_vectorized_nested(
     if exclude_pt_itself:
         # substract data from point itself unless specified otherwise
         pts_df[sum_radius_names] = pts_df[sum_radius_names].values-pts_df[sum_names]
-    # time_function(time_dict)#10
-    
+
     # restore index 
     pts_df.index = store_index
 
