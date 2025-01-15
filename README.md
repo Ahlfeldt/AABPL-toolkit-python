@@ -1,7 +1,7 @@
 # !!! This site is under construction !!!
 
 # AABPL-toolkit-python
-(c) Gabriel M. Ahlfeldt, Thilo N. H. Albers, Kristian Behrens, Max von Mylius, Version 0.1.0, 2024-10
+(c) Gabriel M. Ahlfeldt, Thilo N. H. Albers, Kristian Behrens, [Max von Mylius](https://github.com/maximylius), Version 0.1.0, 2024-10
 
 
 ## About
@@ -119,6 +119,3 @@ Folder | Name  | Description |
 |:-------------------|:-------------------------------------|:-------------------------------------------------------------------------|
 | [-](https://github.com/Ahlfeldt/ABRSQOL-toolkit) | `AABPL-Codebook.pdf` | **Codebook** laying out the **structure of the deliniation algorithm in pseduo code** |
 
-
-## Acknowledgements
-The Python version of the toolkit was developed by [Max von Mylius](https://github.com/maximylius)
