@@ -5,8 +5,12 @@
 
 
 ## About
-This repository is part of the [Toolkit of Prime Locations (AABPL)](https://github.com/Ahlfeldt/AABPL-toolkit/blob/main/README.md). It contains a Python version of the prime locations delineation algorithm developed by Ahlfeldt, Albers, Behrens (2024). 
+This repository is part of the [Toolkit of Prime Locations (AABPL)](https://github.com/Ahlfeldt/AABPL-toolkit/blob/main/README.md). It contains a Python version of the prime locations delineation algorithm developed by Ahlfeldt, Albers, Behrens (2024). It is designed to be more readily accessible that the C++/Stata hybrid version used by Ahlfeldt, Albers, Behrens (2024).
 
+basic inputs and outputs. 
+
+Notice that while this implementation of the algorithm follows the same basic steps as the one used by Ahlfeldt, Albers, Behrens (2024) it will not necessarily generate exactly the same results. The Python package is designed to enhance usability. There are subtle differences in the way counterfactual distributions are generated, establishments are assigned to grid cells, clusters are aggregated and convex hulls are generated. Importantly, the current version of the algorithm samples from a bounding box built around the establishments that are input into the algorithm whereas Ahlfeldt, Albers, Behrens (2024) condition on the presence of employment. Therefore, the parameter values that to be defined in the program syntax cannot be directly transferred from Ahlfeldt, Albers, Behrens (2024). We recommend that users find their own preferred values depending on the context and purpose of the clustering. For replication of the results reported in Ahlfeldt, Albers, Behrens (2024), we refer to the official replication directory.
+ 
 When using the algorithm in your work, **please cite**: 
 
 Ahlfeldt, Albers, Behrens (2024): Prime locations. American Economic Review: Insights, forthcoming.
