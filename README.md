@@ -109,6 +109,12 @@ Variable names will then be assigned by the script. Of course, you can also impo
 
 For future versions of the package, we aim to allow for a shapefile that defines the sampling area of the counterfactual distribution as an **optional input**. This shapefile must be projected within the WGS1984 geographic coordinate system. Ahlfeldt, Albers, and Behrens (2024) exclude residential and undevelopable areas. Such a shapefile could also restrict the sampling area for counterfactual spatial distributions to inhabitable areas or to areas zoned for the development of tall buildings.
 
+### Outputs
+
+The package will create the a number of folders in your working directory into which the outputs will be saved.
+
+**Add a discussion**
+
 ## Folder Structure and Files (OUTDATED)
 
 Folder | Name  | Description |
