@@ -57,6 +57,10 @@ import matplotlib.pyplot as plt
 from aabpl.main import detect_clusters, radius_search, convert_coords_to_local_crs
 ```
 
+### Program syntax
+
+Explain the syntax with its arguments here
+
 ### Examples
 #### Example 1:
 ```python
@@ -92,6 +96,8 @@ If you are new to Python, you may find it useful to execute the [`Example.py`](h
 ### Inputs
 
 The compulsory input into the algorithm is a file containing spatial point pattern data. In the application by Ahlfeldt, Albers, and Behrens (2024), spatial points are establishments. However, these could also be individuals, buildings, or any other subjects or objects whose location can by references by geographic coordinates. The data file should contain geographic coordinates in standard decimal degrees and a variable that defines the importance of a subject or object. In the application by Ahlfeldt, Albers, and Behrens (2024) the importance is represented by the employment of an establishment. However, it could also be the productivity of a worker, the height of a building, or any weight that summarizes the importance of a data point. 
+
+In case you wish to use the above 'Example.py' script without having to make any adjustment (except for setting your root directory) you should create a comma-separated file with exactly the same name and structure as 'plants.txt' file provided in this repository. 
 
 ## Folder Structure and Files (OUTDATED)
 
