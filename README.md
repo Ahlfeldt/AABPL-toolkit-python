@@ -107,6 +107,12 @@ Folder | Name  | Description |
 | aabpl | `nested_search` | Not fully implemented. Nesting grid cell improves scaling for vary dense (relative to search radius) point data sets. |
 | aabpl/documentation | `docstring.py` | Not implemented yet. Will include repetitive help text for functions |
 
+### Selected Files
+
+Folder | Name  | Description |
+|:-------------------|:-------------------------------------|:-------------------------------------------------------------------------|
+| [-](https://github.com/Ahlfeldt/ABRSQOL-toolkit) | `AABPL-Codebook.pdf` | **Codebook** laying out the **structure of the deliniation algorithm in pseduo code** |
+
 
 ## Acknowledgements
 The Python version of the toolkit was developed by [Max von Mylius](https://github.com/maximylius)
