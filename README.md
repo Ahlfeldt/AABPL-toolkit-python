@@ -5,9 +5,11 @@
 
 
 ## About
-This repository is part of the **[Toolkit of Prime Locations (AABPL)](https://github.com/Ahlfeldt/AABPL-toolkit/blob/main/README.md)**. It contains a Python version of the prime locations delineation algorithm developed by Ahlfeldt, Albers, Behrens (2024). It is designed to be more readily accessible that the C++/Stata hybrid version used by Ahlfeldt, Albers, Behrens (2024). It uses arbitrary spatial point patterns as input and returns a gridded version of the data along with polygons of the delineated spatial clusters as outputs.
+This repository is part of the **[Toolkit of Prime Locations (AABPL)](https://github.com/Ahlfeldt/AABPL-toolkit/blob/main/README.md)**. It contains a Python version of the prime locations delineation algorithm developed by Ahlfeldt, Albers, and Behrens (2024). It is designed to be more readily accessible than the C++/Stata hybrid version used by Ahlfeldt, Albers, and Behrens (2024). The algorithm uses arbitrary spatial point patterns as input and returns a gridded version of the data along with polygons of the delineated spatial clusters as outputs.
 
-Notice that while this implementation of the algorithm follows the same basic steps as the one used by Ahlfeldt, Albers, Behrens (2024) it will not necessarily generate exactly the same results. The Python package is designed to enhance usability. There are subtle differences in the way counterfactual distributions are generated, establishments are assigned to grid cells, clusters are aggregated and convex hulls are generated. Importantly, the current version of the algorithm samples from a bounding box built around the establishments that are input into the algorithm whereas Ahlfeldt, Albers, Behrens (2024) condition on the presence of employment. Therefore, the parameter values that to be defined in the program syntax cannot be directly transferred from Ahlfeldt, Albers, Behrens (2024). We recommend that users find their own preferred values depending on the context and purpose of the clustering. For replication of the results reported in Ahlfeldt, Albers, Behrens (2024), we refer to the official replication directory.
+Note that while this implementation of the algorithm follows the same basic steps as the one used by Ahlfeldt, Albers, and Behrens (2024), it will not necessarily generate exactly the same results. The Python package is designed to enhance usability. There are subtle differences in the way counterfactual distributions are generated, establishments are assigned to grid cells, clusters are aggregated, and convex hulls are generated. Importantly, the current version of the algorithm samples from a bounding box built around the establishments input into the algorithm, whereas Ahlfeldt, Albers, and Behrens (2024) condition on the presence of employment. Therefore, the parameter values that need to be defined in the program syntax cannot be directly transferred from Ahlfeldt, Albers, and Behrens (2024). 
+
+We recommend that users find their own preferred values depending on the context and purpose of the clustering. We aim to allow for a user-specified sampling area so that users can, akin to Ahlfeldt, Albers, and Behrens (2024), exclude arbitrary areas when generating counterfactual establishment distributions. For replication of the results reported in Ahlfeldt, Albers, and Behrens (2024), we refer to the official replication directory.
  
 When using the algorithm in your work, **please cite**: 
 
@@ -86,6 +88,10 @@ detect_clusters(
 ### Ready-to-use script
 
 If you are new to Python, you may find it useful to execute the [`Example.py`](https://github.com/Ahlfeldt/ABRSQOL-toolkit-python/blob/main/Example.py) (or [`Example.ipynb`](https://github.com/Ahlfeldt/ABRSQOL-toolkit-python/blob/main/Example.ipynb)) script saved in this folder. It will install the package, load the testing data set, generate a quality-of-life index, and save it to your working directory.  It should be straightforward to adapt the script to your data and preferred parameter values.
+
+### Inputs
+
+The compulsory 
 
 ## Folder Structure and Files (OUTDATED)
 
