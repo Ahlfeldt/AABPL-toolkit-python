@@ -111,9 +111,20 @@ For future versions of the package, we aim to allow for a shapefile that defines
 
 ### Outputs
 
-The package will create the a number of folders in your working directory into which the outputs will be saved.
+The package will create the a number of folders in your working directory into which the outputs will be saved. File names are those specified in the `Example.py` file (you may choose different names). 
 
-**Add a discussion**
+Folder | File  | Description |
+|:------------------------|:-----------------------|:----------------------------------------------------------------------------------|
+| output_data | `pts_df_with_radius_sums.csv` | CSV files containing information on how clustered each establishment in the data set is   |
+| output_data | `grid_with_cluster_ids.csv` | CSV files containing a gridded version of the data set, including groups of clustered grid cells   |
+| output_data | `pl_data.csv` | CSV files attributes of the final outputs, i.e. aggregated clusters (in our case prime locations)   |
+| output_gis | `grid_with_cluster_ids.*` | Shapefile of the grid clusters (and ids) before aggregation (to prime locations)  |
+| output_gis | `grid_with_final_pl_ids.*` | Shapefile of the grid clusters (and ids) after aggregation (to prime locations)  |
+| output_gis | `pl_shape.*` | Shapefile of final output, i.e. aggregated clusters (prime locations)  |
+| output_maps | `grid_with_cluster_ids.png` | Map showing the boundaries of clusters (before aggregation), with the density of the selected importance weight (in our case employment) in the background  |
+| output_maps | `prime_location_map.png` | Map showing the boundaries of the final output, i.e. clusters after aggregation (prime locations), with the density of the selected importance weight (in our case employment) in the background  |
+
+
 
 ## Folder Structure and Files (OUTDATED)
 
