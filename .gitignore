@@ -18,3 +18,10 @@ dist/
 # Testing
 .pytest_cache/
 .coverage
+
+# outputs
+outputs/*
+output_data/*
+output_gis/*
+output_maps/*
+temp/*

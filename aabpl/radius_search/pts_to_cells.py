@@ -104,7 +104,7 @@ def aggregate_point_data_to_cells(
     cells_containing_pts = arr_to_tpls(_np_unique(pts_df[[row_name, col_name]],axis=0),int)
     grid.id_to_pt_ids = {pt_row_col:_np_array([],dtype=int) for pt_row_col in cells_containing_pts}
     grid.id_to_sums = {pt_row_col:sums_zero for pt_row_col in cells_containing_pts}
-    grid.id_to_sums = {g_id:sums_zero for g_id in grid.ids} 
+    # grid.id_to_sums = {g_id:sums_zero for g_id in grid.ids} 
     grid.pt_id_to_row_col = {}
     
     # TODO this could be also done in batches of points belonging to a single cell

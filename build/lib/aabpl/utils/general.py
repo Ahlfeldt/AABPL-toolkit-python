@@ -163,7 +163,7 @@ class DataFrameRelation(object):
         a_columns = set(a.columns)
         b_columns = set(b.columns)
         if (force_same_columns or not silent) and len(a_columns.difference(b_columns)) > 0:
-            msg = ("Checking relation of two DataFrame with columns that are not shared: " + 
+            msg = ("Checking relation of two DataFrames with columns that are not shared: " + 
                 str(a_columns.difference(b_columns))+". Shared columns:"+str(a_columns.intersection(b_columns))
                 )
             if force_same_columns:

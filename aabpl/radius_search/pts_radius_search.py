@@ -284,7 +284,26 @@ def aggreagate_point_data_to_disks_vectorized(
     if exclude_pt_itself and grid.search.tgt_df_contains_src_df:
         # substract data from point itself unless specified otherwise
         pts_df_search_source[sum_radius_names] = pts_df_search_source[sum_radius_names].values - pts_df_search_source[sum_names]
-    print("counter_new_cell", round(counter_new_cell/len(pts_df_search_source),3), "cn",round(counter_new_contain_region/len(pts_df_search_source),3) , "ov",round(counter_new_overlap_region/len(pts_df_search_source),3) )
+    
+    # print(
+    #     "Share of pts in",
+    #     "\n- same cell as previous:", 100-int(counter_new_cell/len(pts_df_search_source)*100),"%",
+    #     "\n- same cell and containing same surrounding cells:",100 - int(counter_new_contain_region/len(pts_df_search_source)*100),"%",
+    #     "\n- same cell and overlapping same surrounding cells",100 - int(counter_new_overlap_region/len(pts_df_search_source)*100),"%")
+    def plot_vars(
+        self = grid,
+        colnames = _np_array([sum_names, sum_radius_names]), 
+        filename:str='',
+        **plot_kwargs:dict,
+    ):
+        return create_plots_for_vars(
+            grid=self,
+            colnames=colnames,
+            filename=filename,
+            plot_kwargs=plot_kwargs,
+        )
+
+    grid.plot_vars = plot_vars
     
     if plot_radius_sums is not None:
         print('create plot for radius sums')

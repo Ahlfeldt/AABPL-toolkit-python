@@ -217,7 +217,7 @@ def detect_clusters(
         silent=silent,
     )
 
-    (cluster_threshold_value, disk_sums_for_random_points) = get_distribution_for_random_points(
+    (cluster_threshold_value, disk_sums_for_random_points, random_point_coords) = get_distribution_for_random_points(
         grid=grid,
         pts_df=pts_df,
         radius=radius,

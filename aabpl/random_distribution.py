@@ -9,7 +9,7 @@ def draw_random_points_within_valid_area(
   cell_centroid_xy_coords:_np_array,
   cell_inclusion_indicator:_np_array,
   cell_width:float,
-  n_random_points:int=int(1e6),
+  n_random_points:int=int(1e5),
   random_seed:float=None,
   cell_height:float=None,
   extra_share_of_pts_to_create:float = 0.02,
@@ -28,7 +28,7 @@ def draw_random_points_within_valid_area(
     cell_width (float):
         width of cells
     n_random_points (int):
-        number of random points to be drawn (default=1e6)
+        number of random points to be drawn (default=1e5)
     random_seed (int):
         seed to make random draws replicable. TODO not yet implemented.
     cell_height (float):
@@ -132,7 +132,7 @@ def get_distribution_for_random_points(
     grid:dict,
     pts_df:_pd_DataFrame,
     radius:float=0.0075,
-    n_random_points:int=int(1e6),
+    n_random_points:int=int(1e5),
     k_th_percentiles:float=[99.5],
     sum_names:list=['employment'],
     x_coord_name:str='lon',
@@ -198,6 +198,8 @@ def get_distribution_for_random_points(
         silent=silent,
     )
     
+    grid.rndm_pts_df = rndm_pts_df
+    
     grid.search.perform_search(silent=silent,)
 
     sum_radius_names = [(cname+sum_suffix) for cname in sum_names]
@@ -205,14 +207,5 @@ def get_distribution_for_random_points(
 
     cluster_threshold_values  = [_np_percentile(disk_sums_for_random_points[:,i], k_th_percentile,axis=0) for i, k_th_percentile in enumerate(k_th_percentiles)]
     
-    if plot_distribution is not None:
-        create_distribution_plot(
-            sums_df=rndm_pts_df[sum_radius_names],
-            cluster_threshold_values=cluster_threshold_values,
-            k_th_percentiles=k_th_percentiles,
-            radius=radius,
-            plot_kwargs=plot_distribution
-            )
-
-
-    return (cluster_threshold_values, disk_sums_for_random_points)
+  
+    return (cluster_threshold_values, rndm_pts_df)

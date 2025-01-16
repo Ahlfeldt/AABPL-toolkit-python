@@ -830,7 +830,7 @@ def prepare_offset_regions(
         plot_offset_checks:dict=None,
         plot_offset_regions:dict=None,
         plot_offset_raster:dict=None,
-        silent:bool=False,
+        silent:bool=True,
 ):
     cells_contained_in_all_disks, cells_contained_in_all_trgl_disks, cells_maybe_overlapping_a_disk, cells_maybe_overlapping_a_trgl_disk = get_cells_relevant_for_disk_by_type(
         grid_spacing=grid_spacing, radius=radius, include_boundary=False

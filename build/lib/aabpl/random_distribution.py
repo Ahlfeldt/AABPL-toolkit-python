@@ -204,15 +204,6 @@ def get_distribution_for_random_points(
     disk_sums_for_random_points = rndm_pts_df[sum_radius_names].values
 
     cluster_threshold_values  = [_np_percentile(disk_sums_for_random_points[:,i], k_th_percentile,axis=0) for i, k_th_percentile in enumerate(k_th_percentiles)]
-    
-    if plot_distribution is not None:
-        create_distribution_plot(
-            sums_df=rndm_pts_df[sum_radius_names],
-            cluster_threshold_values=cluster_threshold_values,
-            k_th_percentiles=k_th_percentiles,
-            radius=radius,
-            plot_kwargs=plot_distribution
-            )
 
 
-    return (cluster_threshold_values, disk_sums_for_random_points)
+    return (cluster_threshold_values, disk_sums_for_random_points, random_point_coords)

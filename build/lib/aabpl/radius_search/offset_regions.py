@@ -367,7 +367,7 @@ def create_raster_plot(
         add_raster_labels:bool=True
         
         ):
-        fig, axs = plt.subplots(1,3,figsize=(50,30))
+        fig, axs = plt.subplots(1,3,figsize=(30,20))
 
         gdf = GeoDataFrame(geometry=[Polygon([(_np_sign(ix)*x, _np_sign(iy)*y) for x,y in [
             (offset_x_bins[abs(ix)-1][0], offset_y_bins[abs(iy)-1][0]), (offset_x_bins[abs(ix)-1][1], offset_y_bins[abs(iy)-1][0]),
