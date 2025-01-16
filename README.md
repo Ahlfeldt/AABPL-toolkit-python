@@ -1,9 +1,19 @@
+# !!! This site is under construction !!!
+
 # AABPL-toolkit-python
-(c) Gabriel M. Ahlfeldt, Thilo N. H. Albers, Kristian Behrens Version 0.1.0, 2024-10
+(c) Gabriel M. Ahlfeldt, Thilo N. H. Albers, Kristian Behrens, [Max von Mylius](https://github.com/maximylius), Version 0.1.0, 2024-10
 
 
 ## About
-Python version of the prime locations delineation algorithm
+This repository is part of the **[Toolkit of Prime Locations (AABPL)](https://github.com/Ahlfeldt/AABPL-toolkit/blob/main/README.md)**. It contains a Python version of the prime locations delineation algorithm developed by Ahlfeldt, Albers, and Behrens (2024). It is designed to be more readily accessible than the C++/Stata hybrid version used by Ahlfeldt, Albers, and Behrens (2024). The algorithm uses arbitrary spatial point patterns as input and returns a gridded version of the data along with polygons of the delineated spatial clusters as outputs.
+
+Note that while this implementation of the algorithm follows the same basic steps as the one used by Ahlfeldt, Albers, and Behrens (2024), it will not necessarily generate exactly the same results. The Python package is designed to enhance usability. There are subtle differences in the way counterfactual distributions are generated, establishments are assigned to grid cells, clusters are aggregated, and convex hulls are generated. Importantly, the current version of the algorithm samples from a bounding box built around the establishments input into the algorithm, whereas Ahlfeldt, Albers, and Behrens (2024) condition on the presence of employment. Therefore, the parameter values that need to be defined in the program syntax cannot be directly transferred from Ahlfeldt, Albers, and Behrens (2024). 
+
+We recommend that users find their own preferred values depending on the context and purpose of the clustering. We aim to allow for a user-specified sampling area so that users can, akin to Ahlfeldt, Albers, and Behrens (2024), exclude arbitrary areas when generating counterfactual establishment distributions. For replication of the results reported in Ahlfeldt, Albers, and Behrens (2024), we refer to the official replication directory.
+ 
+When using the algorithm in your work, **please cite**: 
+
+Ahlfeldt, Albers, Behrens (2024): Prime locations. American Economic Review: Insights, forthcoming.
 
 ## Installation
 To install the Python package of the ABRSQOL-toolkit, run the following command in your python environment in your terminal. 
@@ -47,6 +57,10 @@ import matplotlib.pyplot as plt
 from aabpl.main import detect_clusters, radius_search, convert_coords_to_local_crs
 ```
 
+### Program syntax
+
+Explain the syntax with its arguments here
+
 ### Examples
 #### Example 1:
 ```python
@@ -79,6 +93,41 @@ detect_clusters(
 
 If you are new to Python, you may find it useful to execute the [`Example.py`](https://github.com/Ahlfeldt/ABRSQOL-toolkit-python/blob/main/Example.py) (or [`Example.ipynb`](https://github.com/Ahlfeldt/ABRSQOL-toolkit-python/blob/main/Example.ipynb)) script saved in this folder. It will install the package, load the testing data set, generate a quality-of-life index, and save it to your working directory.  It should be straightforward to adapt the script to your data and preferred parameter values.
 
+### Inputs
+
+The **compulsory input** into the algorithm is a file containing spatial point pattern data. In the application by Ahlfeldt, Albers, and Behrens (2024), spatial points are establishments. However, these could also be individuals, buildings, or any other subjects or objects whose location can be referenced by geographic coordinates. The data file should contain geographic coordinates in standard decimal degrees and a variable that defines the importance of a subject or object. In the application by Ahlfeldt, Albers, and Behrens (2024), the importance is represented by the employment of an establishment. However, it could also be the productivity of a worker, the height of a building, or any weight that summarizes the importance of a data point. Of course, equal importance will be reflected by a uniform value.
+
+In case you wish to use the above `Example.py` script without having to make any adjustments (except for setting your root directory), you should create a comma-separated file with exactly the same name and structure as the `plants.txt` file provided in this repository. Note that this exemplary input file **does not** include variable names. It includes variables in the following order (separated by commas):
+
+- **identifier variable**: In our case, this is an establishment identifier. If you do not need this, you can set all values to 1.
+- **importance weight**: In our case, this is predicted employment. If you want to use equal weights, you can set all values to 1.
+- **category identifier**: In our case, this is the type of establishment (e.g., accounting, consulting, etc.). If you do not care, you can set all values to 1.
+- **latitude**: Given in decimal degrees in the standard WGS1984 geographic coordinate system.
+- **longitude**: Given in decimal degrees in the standard WGS1984 geographic coordinate system.
+- **placebolder for another variable**: You can ignore it.
+
+
+Variable names will then be assigned by the script. Of course, you can also import data sets that already contain variable names. Just make sure that latitudes and longitudes are defined by variables named `lat` and `lon`. You can define the name of the variable representing your importance weights in the program syntax.
+
+For future versions of the package, we aim to allow for a shapefile that defines the sampling area of the counterfactual distribution as an **optional input**. This shapefile must be projected within the WGS1984 geographic coordinate system. Ahlfeldt, Albers, and Behrens (2024) exclude residential and undevelopable areas. Such a shapefile could also restrict the sampling area for counterfactual spatial distributions to inhabitable areas or to areas zoned for the development of tall buildings.
+
+### Outputs
+
+The package will create the a number of folders in your working directory into which the outputs will be saved. File names are those specified in the `Example.py` file (you may choose different names). 
+
+Folder | File  | Description |
+|:------------------------|:-----------------------|:----------------------------------------------------------------------------------|
+| output_data | `pts_df_with_radius_sums.csv` | CSV files containing information on how clustered each establishment in the data set is   |
+| output_data | `grid_with_cluster_ids.csv` | CSV files containing a gridded version of the data set, including groups of clustered grid cells   |
+| output_data | `pl_data.csv` | CSV files attributes of the final outputs, i.e. aggregated clusters (in our case prime locations)   |
+| output_gis | `grid_with_cluster_ids.*` | Shapefile of the grid clusters (and ids) before aggregation (to prime locations)  |
+| output_gis | `grid_with_final_pl_ids.*` | Shapefile of the grid clusters (and ids) after aggregation (to prime locations)  |
+| output_gis | `pl_shape.*` | Shapefile of final output, i.e. aggregated clusters (prime locations)  |
+| output_maps | `grid_with_cluster_ids.png` | Map showing the boundaries of clusters (before aggregation), with the density of the selected importance weight (in our case employment) in the background  |
+| output_maps | `prime_location_map.png` | Map showing the boundaries of the final output, i.e. clusters after aggregation (prime locations), with the density of the selected importance weight (in our case employment) in the background  |
+
+
+
 ## Folder Structure and Files (OUTDATED)
 
 Folder | Name  | Description |
@@ -105,6 +154,12 @@ Folder | Name  | Description |
 | aabpl | `nested_search` | Not fully implemented. Nesting grid cell improves scaling for vary dense (relative to search radius) point data sets. |
 | aabpl/documentation | `docstring.py` | Not implemented yet. Will include repetitive help text for functions |
 
+### Selected Files
 
-## Acknowledgements
-The Python version of the toolkit was developed by [Max von Mylius](https://github.com/maximylius)
+Folder | Name  | Description |
+|:-------------------|:-------------------------------------|:-------------------------------------------------------------------------|
+| [-](https://github.com/Ahlfeldt/ABRSQOL-toolkit) | `AABPL-Codebook.pdf` | **Codebook** laying out the **structure of the deliniation algorithm in pseduo code** |
+
+# References 
+
+Ahlfeldt, Albers, Behrens (2024): Prime locations. American Economic Review: Insights, forthcoming.
