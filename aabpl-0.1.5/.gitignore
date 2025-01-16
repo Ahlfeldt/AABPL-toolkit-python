@@ -1,0 +1,27 @@
+# IDE
+.idea/
+
+# Python
+*.py[cod]
+__pycache__/
+
+# Venv
+.venv/
+
+# System
+.DS_Store
+
+# Pip
+*.egg-info
+dist/
+
+# Testing
+.pytest_cache/
+.coverage
+
+# outputs
+outputs/*
+output_data/*
+output_gis/*
+output_maps/*
+temp/*
