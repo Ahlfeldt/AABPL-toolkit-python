@@ -4,9 +4,13 @@
 import subprocess, sys
 try:
     __import__('aabpl')
+    from aabpl import __version__
+    if __version__ in ['0.1.'+str(i) for i in range(6)]:
+        subprocess.check_call([sys.executable, "-m", "pip", "uninstall", 'aabpl'])
+        raise ImportError("Old version, updated needed")
 except ImportError:
-    print(f"Package '{'aabpl'}' not found. Installing...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", 'aabpl'])
+    print("Installing / updating package aabpl...")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", 'aabpl', "--upgrade"])
 
 ### set up working directory and folders
 import os
