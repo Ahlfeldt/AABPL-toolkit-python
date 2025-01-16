@@ -21,4 +21,4 @@ from . import main
 # from ..illustrations.plot_utils import *
 # TODO ensure to no exports imports (like np.array)?
 
-__version__ = version('primelocations')
+__version__ = version('aabpl')
