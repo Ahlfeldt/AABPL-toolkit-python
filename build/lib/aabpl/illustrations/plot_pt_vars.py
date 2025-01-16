@@ -4,6 +4,7 @@ from numpy import array as _np_array
 def create_plots_for_vars(
         grid,
         colnames:_np_array,
+        filename:str="",
         plot_kwargs:dict={},
 ):
     """
@@ -18,7 +19,7 @@ def create_plots_for_vars(
         'axs': None,
         's': s,
         'cmap': 'Reds',
-        'figsize': (20*ncols,20*nrows),
+        'figsize': (12*ncols,12*nrows),
         'additional_varnames':[],
         **plot_kwargs
     }
@@ -55,5 +56,8 @@ def create_plots_for_vars(
         pad_x, pad_y = (xmax-xmin)/50, (ymax-ymin)/50
         ax.set_xlim([xmin-pad_x,xmax+pad_x])
         ax.set_ylim([ymin-pad_y,ymax+pad_y])
+    
+    if filename:
+        fig.savefig(filename, dpi=300, bbox_inches="tight")
     #
 #

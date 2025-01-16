@@ -219,18 +219,20 @@ class DiskSearch(object):
     # @time_func_perf
     def check_if_tgt_df_contains_src_df(
         self,
+        silent:bool=False,
     )->bool:
         if not hasattr(self, 'target'): return False
         if not hasattr(self, 'source'): return False
         if not hasattr(self.target, 'pts_df'): return False
         if not hasattr(self.source, 'pts_df'): return False
-        return DataFrameRelation.check_if_df_is_contained(self.source.pts_df, self.target.pts_df,)
+        return DataFrameRelation.check_if_df_is_contained(self.source.pts_df, self.target.pts_df,silent=silent)
     
     # @time_func_perf
     def check_if_search_obj_already_exist(
         self,
         pts_df:_pd_DataFrame,
         obj:str=['source','target'],
+        silent:bool=False,
         **kwargs
     ):
         """
@@ -251,7 +253,7 @@ class DiskSearch(object):
                 v == getattr(self.target, k)
                 for k,v in kwargs.items()]) and
                 hasattr(self.target, 'pts_df') and 
-                DataFrameRelation.check_if_df_is_contained(pts_df, self.target.pts_df)
+                DataFrameRelation.check_if_df_is_contained(pts_df, self.target.pts_df,silent=silent)
         )
         alr_assg_to_cell_regions = obj=='source' and (
             hasattr(self, 'source') and all([
@@ -259,7 +261,7 @@ class DiskSearch(object):
                 v == getattr(self.source, k)
                 for k,v in kwargs.items()]) and
                 hasattr(self.source, 'pts_df') and 
-                DataFrameRelation.check_if_df_is_contained(pts_df, self.source.pts_df)
+                DataFrameRelation.check_if_df_is_contained(pts_df, self.source.pts_df,silent=silent)
         )
         alr_assg_to_cells = (alr_added_pts_to_grid or alr_assg_to_cell_regions)
         
@@ -305,14 +307,14 @@ class DiskSearch(object):
             sum_suffix=sum_suffix,
         )
         
-        self.tgt_df_contains_src_df = self.check_if_tgt_df_contains_src_df()
+        self.tgt_df_contains_src_df = self.check_if_tgt_df_contains_src_df(silent=silent)
 
         if not alr_assg_to_cells:
             self.source.assign_pts_to_cells(silent=silent,)
-            self.source.pts_df.sort_values(
-                [self.source.row_name, self.source.col_name],
-                inplace=True
-            )
+            # self.source.pts_df.sort_values(
+            #     [self.source.row_name, self.source.col_name],
+            #     inplace=True
+            # )
         #
         if not alr_assg_to_cell_regions:
             self.source.assign_pts_to_cell_regions(
@@ -322,10 +324,10 @@ class DiskSearch(object):
                 plot_offset_raster=plot_offset_raster,
                 silent=silent,
             )
-            self.source.pts_df.sort_values(
-                [self.source.row_name, self.source.col_name, self.source.cell_region_name],
-                inplace=True
-            )
+            # self.source.pts_df.sort_values(
+            #     [self.source.row_name, self.source.col_name, self.source.cell_region_name],
+            #     inplace=True
+            # )
         #
     #
 
@@ -359,16 +361,16 @@ class DiskSearch(object):
             col_name=col_name,
         )
 
-        self.tgt_df_contains_src_df = self.check_if_tgt_df_contains_src_df()
+        self.tgt_df_contains_src_df = self.check_if_tgt_df_contains_src_df(silent=silent)
 
         if not alr_assg_to_cells:
             self.target.assign_pts_to_cells(silent=silent,)
 
             # also sort according to grid cell region!
-            self.target.pts_df.sort_values(
-                [self.target.row_name, self.target.col_name],
-                inplace=True
-            )
+            # self.target.pts_df.sort_values(
+            #     [self.target.row_name, self.target.col_name],
+            #     inplace=True
+            # )
         #
         if not alr_added_pts_to_grid:
             self.target.aggregate_pt_data_to_cells(silent=silent,)
