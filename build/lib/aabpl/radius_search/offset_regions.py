@@ -7,8 +7,8 @@ from matplotlib.patches import (Rectangle as _plt_Rectangle, Polygon as _plt_Pol
 from aabpl.utils.general import angle, angles_to_origin, angle_to, make_bins_from_vals, get_vals_from_bins
 from aabpl.utils.distances_to_cell import (get_cell_closest_point_to_point, get_cell_farthest_vertex_to_point,
  check_if_never_contains_convex_set, check_if_always_overlaps_full_convex_set,check_if_always_overlaps_convex_set, get_cells_relevant_for_disk_by_type)
-# from primelocations.utils.rotations import transform_cell_pattern, transform_coord, transform_cell
-# from primelocations.utils.intersections import circle_line_segment_intersection, line_intersection, intersections_pts_arc_to_circle
+# from aabpl.utils.rotations import transform_cell_pattern, transform_coord, transform_cell
+# from aabpl.utils.intersections import circle_line_segment_intersection, line_intersection, intersections_pts_arc_to_circle
 from .offset_region_classes import OffsetRegion, Edge, Vertex, LineSegment, Circle
 from aabpl.illustrations.illustrate_cell_pattern import plot_cell_pattern
 from aabpl.testing.test_performance import time_func_perf, func_timer_dict
@@ -367,7 +367,7 @@ def create_raster_plot(
         add_raster_labels:bool=True
         
         ):
-        fig, axs = plt.subplots(1,3,figsize=(30,20))
+        fig, axs = plt.subplots(1,3,figsize=(50,30))
 
         gdf = GeoDataFrame(geometry=[Polygon([(_np_sign(ix)*x, _np_sign(iy)*y) for x,y in [
             (offset_x_bins[abs(ix)-1][0], offset_y_bins[abs(iy)-1][0]), (offset_x_bins[abs(ix)-1][1], offset_y_bins[abs(iy)-1][0]),
@@ -830,7 +830,7 @@ def prepare_offset_regions(
         plot_offset_checks:dict=None,
         plot_offset_regions:dict=None,
         plot_offset_raster:dict=None,
-        silent:bool=False,
+        silent:bool=True,
 ):
     cells_contained_in_all_disks, cells_contained_in_all_trgl_disks, cells_maybe_overlapping_a_disk, cells_maybe_overlapping_a_trgl_disk = get_cells_relevant_for_disk_by_type(
         grid_spacing=grid_spacing, radius=radius, include_boundary=False

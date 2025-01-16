@@ -21,7 +21,7 @@ from aabpl.illustrations.illustrate_point_to_cell_region_assignment import (illu
 from .two_dimensional_weak_ordering_class import (gen_weak_order_rel_to_convex_set,recursive_cell_region_inference)
 from aabpl.testing.test_performance import time_func_perf, func_timer_dict
 from .offset_regions import prepare_offset_regions
-# from primelocations.doc.docstrings import fixdocstring
+# from aabpl.doc.docstrings import fixdocstring
 
 ################ classify_point_triangle ######################################################################################
 @time_func_perf

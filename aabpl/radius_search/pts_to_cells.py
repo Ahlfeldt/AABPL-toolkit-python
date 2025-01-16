@@ -19,7 +19,7 @@ from pandas import (DataFrame as _pd_DataFrame, cut as _pd_cut, concat as _pd_co
 from math import ceil#,asin,acos
 from aabpl.utils.general import ( flatten_list, DataFrameRelation, arr_to_tpls )
 from aabpl.testing.test_performance import time_func_perf, func_timer_dict
-# from primelocations.doc.docstrings import fixdocstring
+# from aabpl.doc.docstrings import fixdocstring
 
 
 ################ assign_points_to_cells ######################################################################################
