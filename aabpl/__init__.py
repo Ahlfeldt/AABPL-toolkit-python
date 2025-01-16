@@ -1,4 +1,4 @@
-# from importlib.metadata import version
+from importlib.metadata import version
 # TODO replace * with more expliced exports for the final version of the package 
 # # from .radius_search import *
 # import utils
@@ -21,4 +21,4 @@ from . import main
 # from ..illustrations.plot_utils import *
 # TODO ensure to no exports imports (like np.array)?
 
-# __version__ = version('primelocations')
+__version__ = version('primelocations')
