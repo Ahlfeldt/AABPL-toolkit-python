@@ -138,7 +138,6 @@ def get_distribution_for_random_points(
     y_coord_name:str='lat',
     row_name:str='id_y',
     col_name:str='id_x',
-    cell_region_name:str='cell_region',
     sum_suffix:str='_750m',
     plot_distribution:dict={},
     random_seed:int=None,
@@ -182,7 +181,6 @@ def get_distribution_for_random_points(
         y_coord_name=y_coord_name,
         row_name=row_name,
         col_name=col_name,
-        cell_region_name=cell_region_name,
         sum_suffix=sum_suffix,
         silent=silent,
     )

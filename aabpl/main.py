@@ -8,37 +8,62 @@ from aabpl.radius_search.radius_search_class import DiskSearch
 from aabpl.radius_search.grid_class import Grid
 from aabpl.illustrations.plot_pt_vars import create_plots_for_vars
 from aabpl.illustrations.distribution_plot import create_distribution_plot
-
+# TODO remove cell_region from kwargs
 @time_func_perf
 def create_auto_grid_for_radius_search(
-    pts_df_source:_pd_DataFrame,
+    pts_source:_pd_DataFrame,
     crs:str,
-    radius:float,
-    pts_df_target:_pd_DataFrame=None,
-    x_coord_name:str='lon',
-    y_coord_name:str='lat',
-    tgt_x_coord_name:str=None,
-    tgt_y_coord_name:str=None,
+    r:float,
+    x:str='lon',
+    y:str='lat',
+    pts_target:_pd_DataFrame=None,
+    x_tgt:str=None,
+    y_tgt:str=None,
     silent:bool=True,
 ):
     """
-    automatially choose 
+    Returns a Grid that covers all points and will 
+    - can be used to represent clusters
+    - and is leverage for performance gains of radius search 
+
+    Args:
+    pts_source (pandas.DataFrame):
+        DataFrame of points for which a search for other points within the specified radius shall be performed
+    crs (str):
+        crs of coordinates, e.g. 'EPSG:4326'
+    r (float):
+        radius within which other points shall be found in meters 
+    x (str):
+        column name of x-coordinate (=longtitude) in pts_source (default='lon')
+    y (str):
+        column name of y-coordinate (=lattitude) in pts_source (default='lat')
+    pts_target (pandas.DataFrame):
+        DataFrame of points that shall be found/aggregated when searching within radius of points from pts_source. If None specified its assumed to be the same as pts_source. (default=None)
+    x_tgt (str):
+        column name of x-coordinate (=longtitude) in pts_target. If None its assumed to be same as x (default=None)
+    y_tgt (str):
+        column name of y-coordinate (=lattitude) in pts_target. If None its assumed to be same as y (default=None)
+    silent (bool):
+        Whether information on progress shall be printed to console (default=False)
+    Returns:
+    grid (aabl.Grid):
+        a grid covering all points (custom class containing  
     """
 
-    if pts_df_target is None:
-        xmin = pts_df_source[x_coord_name].min()
-        xmax = pts_df_source[x_coord_name].max()
-        ymin = pts_df_source[y_coord_name].min()
-        ymax = pts_df_source[y_coord_name].max()
+    if pts_target is None:
+        xmin = pts_source[x].min()
+        xmax = pts_source[x].max()
+        ymin = pts_source[y].min()
+        ymax = pts_source[y].max()
     else:
-        if tgt_y_coord_name is None:
-            tgt_y_coord_name = y_coord_name
-        if tgt_x_coord_name is None:
-            tgt_x_coord_name = x_coord_name
-        xmin = min([pts_df_source[x_coord_name].min(), pts_df_target[tgt_x_coord_name].min()])
-        xmax = max([pts_df_source[x_coord_name].max(), pts_df_target[tgt_x_coord_name].max()])
-        ymin = min([pts_df_source[y_coord_name].min(), pts_df_target[tgt_y_coord_name].min()])
-        ymax = max([pts_df_source[y_coord_name].max(), pts_df_target[tgt_y_coord_name].max()])
+        if y_tgt is None:
+            y_tgt = y
+        if x_tgt is None:
+            x_tgt = x
+        xmin = min([pts_source[x].min(), pts_target[x_tgt].min()])
+        xmax = max([pts_source[x].max(), pts_target[x_tgt].max()])
+        ymin = min([pts_source[y].min(), pts_target[y_tgt].min()])
+        ymax = max([pts_source[y].max(), pts_target[y_tgt].max()])
 
     return Grid(
             xmin=xmin,
@@ -46,39 +71,30 @@ def create_auto_grid_for_radius_search(
             ymin=ymin,
             ymax=ymax,
             crs=crs,
-            set_fixed_spacing=radius/3, # TODO don t set fixed spacing but
+            set_fixed_spacing=r/3, # TODO don t set fixed spacing but
             silent=silent,
         )
 #
 
 @time_func_perf
 def radius_search(
-    pts_df:_pd_DataFrame,
+    pts:_pd_DataFrame,
     crs:str,
-    radius:float,
-
-    include_boundary:bool=False,
+    r:float,
+    columns:list=[],
     exclude_pt_itself:bool=True,
-
-    pts_df_target:_pd_DataFrame=None,
-    relation_src_tgt:str=['equal','subset','superset','none'][0],
-
-    grid=None,
-    
-    x_coord_name:str='lon',
-    y_coord_name:str='lat',
+    x:str='lon',
+    y:str='lat',
     row_name:str='id_y',
     col_name:str='id_x',
-    cell_region_name:str='cell_region',
-    sum_suffix:str='_750m', 
-
-    sum_names:list=['employment'],
-
-    tgt_x_coord_name:str=None,
-    tgt_y_coord_name:str=None,
+    sum_suffix:str='_r_sum', 
+    pts_target:_pd_DataFrame=None,
+    x_tgt:str=None,
+    y_tgt:str=None,
     tgt_row_name:str=None,
     tgt_col_name:str=None,
-
+    grid:Grid=None,
+    include_boundary:bool=False,
     plot_radius_sums:dict=None,
     plot_pt_disk:dict=None,
     plot_cell_reg_assign:dict=None,
@@ -88,39 +104,96 @@ def radius_search(
     silent:bool=True,
 ):
     """
-    execute methods
-    1. pts_df data -> aggreagate_point_data_to_disks_vectorized
-    2. create columns to check whether points are within cluster depending on the various parameters
+    For all points in DataFrame it searches for all other points (potentially of another DataFrame) within the specified radius.
+    The result will be appended to DataFrame.
+
+    Args:
+    pts (pandas.DataFrame):
+        DataFrame of points for which a search for other points within the specified radius shall be performed
+    crs (str):
+        crs of coordinates, e.g. 'EPSG:4326'
+    r (float):
+        radius within which other points shall be found in meters 
+    columns (list or str):
+        column(s) in DataFrame for which data within search radius shall be aggregated. If None provided it will simply count the points within the radius. 
+    exclude_pt_itself (bool):
+        whether the sums within search radius point shall exlclude the point data itself (default=True)
+    x (str):
+        column name of x-coordinate (=longtitude) in pts (default='lon')
+    y (str):
+        column name of y-coordinate (=lattitude) in pts (default='lat')
+    row_name (str):
+        name for column that will be appended to pts indicating grid cell row (default='id_y')
+    col_name (str):
+        name for column that will be appended to pts indicating grid cell column (default='id_y')
+    sum_suffix (str):
+        suffix used for new column(s) creating by aggregating data of columns , 
+    pts_target (pandas.DataFrame):
+        DataFrame of points that shall be found/aggregated when searching within radius of points from pts_source. If None specified its assumed to be the same as pts_source. (default=None)
+    x_tgt (str):
+        column name of x-coordinate (=longtitude) in pts_target. If None its assumed to be same as x (default=None)
+    y_tgt (str):
+        column name of y-coordinate (=lattitude) in pts_target. If None its assumed to be same as y (default=None)
+    tgt_row_name (str):
+        name for column that will be appended to pts indicating grid cell row. If None its assumed to be same as x (default=None)
+    col_name (str):
+        name for column that will be appended to pts indicating grid cell column (default='id_y')
+    grid (aabpl.Grid):
+        grid of custom class containing points. If None it will automatically one (default=None)
+    include_boundary (bool):
+        FEATURE NOT YET IMPLEMENTED. Define whether points that are at the distance of exactly the radius shall be considered within (Default=False)
+    plot_radius_sums (dict):
+        dictionary with kwargs to create plot for radius sums. If None no plot will be created (default=None)
+    plot_pt_disk (dict):
+        Only needed for development. Dictionary with kwargs to create plot for example radius search. If None no plot will be created (default=None)
+    plot_cell_reg_assign (dict):
+        Only needed for development. Dictionary with kwargs to create plot for assginments of points to cell offset regions. If None no plot will be created (default=None)
+    plot_offset_checks (dict):
+        Only needed for development. Dictionary with kwargs to create plot for checks creating offset regions. If None no plot will be created (default=None)
+    plot_offset_regions (dict):
+        Only needed for development. Dictionary with kwargs to create plot for offset regions. If None no plot will be created (default=None)
+    plot_offset_raster (dict):
+        Only needed for development. Dictionary with kwargs to create plot for raster for offset regions. If None no plot will be created (default=None)
+    silent (bool):
+        Whether information on progress shall be printed to console (default=False)
+    
+    Returns:
+    grid (aabl.Grid):
+        a grid covering all points (custom class containing  
     """
     # OVERWRITE DEFAULTS
     if grid is None:
         grid = create_auto_grid_for_radius_search(
-            pts_df_source=pts_df,
+            pts_source=pts,
             crs=crs,
-            radius=radius,
-            pts_df_target=pts_df_target,
-            x_coord_name=x_coord_name,
-            y_coord_name=y_coord_name,
-            tgt_x_coord_name=tgt_x_coord_name,
-            tgt_y_coord_name=tgt_y_coord_name,
+            r=r,
+            x=x,
+            y=y,
+            pts_target=pts_target,
+            x_tgt=x_tgt,
+            y_tgt=y_tgt,
             silent=silent,
         )
-    if pts_df_target is None:
-        pts_df_target = pts_df
-    if tgt_x_coord_name is None:
-        tgt_x_coord_name = x_coord_name
-    if tgt_y_coord_name is None:
-        tgt_y_coord_name = y_coord_name
+    if pts_target is None:
+        pts_target = pts
+    if x_tgt is None:
+        x_tgt = x
+    if y_tgt is None:
+        y_tgt = y
     if tgt_row_name is None:
         tgt_row_name = row_name
     if tgt_col_name is None:
         tgt_col_name = col_name
-
+    help_col = None
+    if columns is None or len(columns)==0:
+        help_col = [next(('helper_col'+str(i) for i in (['']+list(range(len(pts_target.columns)))) if not 'helper_col'+str(i) in pts_target.columns))]
+        pts_target[help_col] = 1
+        columns = [help_col]
 
     # initialize disk_search
     grid.search = DiskSearch(
         grid=grid,
-        radius=radius,
+        r=r,
         exclude_pt_itself=exclude_pt_itself,
         include_boundary=include_boundary
     )
@@ -128,10 +201,10 @@ def radius_search(
 
     # prepare target points data
     grid.search.set_target(
-        pts_df=pts_df_target,
-        sum_names=sum_names,
-        x_coord_name=tgt_x_coord_name,
-        y_coord_name=tgt_y_coord_name,
+        pts=pts_target,
+        columns=columns,
+        x_coord_name=x_tgt,
+        y_coord_name=y_tgt,
         row_name=tgt_row_name,
         col_name=tgt_col_name,
         silent=silent,
@@ -139,12 +212,11 @@ def radius_search(
 
     # prepare source points data
     grid.search.set_source(
-        pts_df=pts_df,
-        x_coord_name=x_coord_name,
-        y_coord_name=y_coord_name,
+        pts=pts,
+        x_coord_name=x,
+        y_coord_name=y,
         row_name=row_name,
         col_name=col_name,
-        cell_region_name=cell_region_name,
         sum_suffix=sum_suffix,
         plot_cell_reg_assign=plot_cell_reg_assign,
         plot_offset_checks=plot_offset_checks,
@@ -153,35 +225,30 @@ def radius_search(
         silent=silent,
     )
     
-    disk_sums_for_pts_df = grid.search.perform_search(silent=silent,plot_radius_sums=plot_radius_sums,plot_pt_disk=plot_pt_disk)
-
+    disk_sums_for_pts = grid.search.perform_search(silent=silent,plot_radius_sums=plot_radius_sums,plot_pt_disk=plot_pt_disk)
+    if help_col is not None:
+        pts_target.drop(columns=[help_col], inplace=True)
     return grid
 #
 
 @time_func_perf
 def detect_cluster_pts(
-    pts_df:_pd_DataFrame,
+    pts:_pd_DataFrame,
     crs:str,
-    
-    radius:float=0.0075,
-    include_boundary:bool=False,
+    r:float=0.0075,
+    columns:list=[],
     exclude_pt_itself:bool=True,
-
     k_th_percentiles:float=[99.5],
     n_random_points:int=int(1e5),
     random_seed:int=None,
-
-    grid=None,
-
-    sum_names:list=['employment'],
-    x_coord_name:str='lon',
-    y_coord_name:str='lat',
+    x:str='lon',
+    y:str='lat',
     row_name:str='id_y',
     col_name:str='id_x',
-    cell_region_name:str='cell_region',
     sum_suffix:str='_750m',
     cluster_suffix:str='_cluster',
-    
+    grid:Grid=None,
+    include_boundary:bool=False,
     plot_distribution:dict=None,
     plot_radius_sums:dict=None,
     plot_cluster_points:dict=None,
@@ -193,47 +260,103 @@ def detect_cluster_pts(
     silent:bool=True,
 ):
     """
-    execute methods
-    1. pts_df data -> aggreagate_point_data_to_disks_vectorized
-    2. create columns to check whether points are within cluster depending on the various parameters
+    For all points in DataFrame it searches for all other points (potentially of another DataFrame) within the specified radius.
+    The result will be appended to DataFrame.
+
+    Args:
+    pts (pandas.DataFrame):
+        DataFrame of points for which a search for other points within the specified radius shall be performed
+    crs (str):
+        crs of coordinates, e.g. 'EPSG:4326'
+    r (float):
+        radius within which other points shall be found in meters 
+    columns (list or str):
+        column(s) in DataFrame for which data within search radius shall be aggregated. If None provided it will simply count the points within the radius. 
+    exclude_pt_itself (bool):
+        whether the sums within search radius point shall exlclude the point data itself (default=True)
+    k_th_percentiles:float=[99.5],
+    n_random_points:int=int(1e5),
+    random_seed:int=None,
+    x (str):
+        column name of x-coordinate (=longtitude) in pts (default='lon')
+    y (str):
+        column name of y-coordinate (=lattitude) in pts (default='lat')
+    row_name (str):
+        name for column that will be appended to pts indicating grid cell row (default='id_y')
+    col_name (str):
+        name for column that will be appended to pts indicating grid cell column (default='id_y')
+    sum_suffix (str):
+        suffix used for new column(s) creating by aggregating data of columns , 
+    pts_target (pandas.DataFrame):
+        DataFrame of points that shall be found/aggregated when searching within radius of points from pts_source. If None specified its assumed to be the same as pts_source. (default=None)
+    x_tgt (str):
+        column name of x-coordinate (=longtitude) in pts_target. If None its assumed to be same as x (default=None)
+    y_tgt (str):
+        column name of y-coordinate (=lattitude) in pts_target. If None its assumed to be same as y (default=None)
+    tgt_row_name (str):
+        name for column that will be appended to pts indicating grid cell row. If None its assumed to be same as x (default=None)
+    col_name (str):
+        name for column that will be appended to pts indicating grid cell column (default='id_y')
+    grid (aabpl.Grid):
+        grid of custom class containing points. If None it will automatically one (default=None)
+    include_boundary (bool):
+        FEATURE NOT YET IMPLEMENTED. Define whether points that are at the distance of exactly the radius shall be considered within (Default=False)
+    plot_distribution 
+    plot_radius_sums (dict):
+        dictionary with kwargs to create plot for radius sums. If None no plot will be created (default=None)
+    plot_pt_disk (dict):
+        Only needed for development. Dictionary with kwargs to create plot for example radius search. If None no plot will be created (default=None)
+    plot_cell_reg_assign (dict):
+        Only needed for development. Dictionary with kwargs to create plot for assginments of points to cell offset regions. If None no plot will be created (default=None)
+    plot_offset_checks (dict):
+        Only needed for development. Dictionary with kwargs to create plot for checks creating offset regions. If None no plot will be created (default=None)
+    plot_offset_regions (dict):
+        Only needed for development. Dictionary with kwargs to create plot for offset regions. If None no plot will be created (default=None)
+    plot_offset_raster (dict):
+        Only needed for development. Dictionary with kwargs to create plot for raster for offset regions. If None no plot will be created (default=None)
+    silent (bool):
+        Whether information on progress shall be printed to console (default=False)
+    
+    Returns:
+    grid (aabl.Grid):
+        a grid covering all points (custom class containing  
     """
     # OVERWRITE DEFAULTS
     if grid is None:
         grid = create_auto_grid_for_radius_search(
-            pts_df_source=pts_df,
+            pts_source=pts,
             crs=crs,
-            radius=radius,
-            y_coord_name=y_coord_name,
-            x_coord_name=x_coord_name,
+            r=r,
+            y=y,
+            x=x,
         )
     # initialize disk_search
     grid.search = DiskSearch(
         grid,
-        radius=radius,
+        r=r,
         exclude_pt_itself=exclude_pt_itself,
         include_boundary=include_boundary
     )
 
     grid.search.set_target(
-        pts_df=pts_df,
-        sum_names=sum_names,
-        x_coord_name=x_coord_name,
-        y_coord_name=y_coord_name,
+        pts=pts,
+        columns=columns,
+        x_coord_name=x,
+        y_coord_name=y,
         row_name=row_name,
         col_name=col_name,
         silent=silent,
     )
 
-    (cluster_threshold_values, rndm_pts_df) = get_distribution_for_random_points(
+    (cluster_threshold_values, rndm_pts) = get_distribution_for_random_points(
         grid=grid,
-        pts_df=pts_df,
-        radius=radius,
-        sum_names=sum_names,
-        x_coord_name=x_coord_name,
-        y_coord_name=y_coord_name,
+        pts=pts,
+        r=r,
+        columns=columns,
+        x_coord_name=x,
+        y_coord_name=y,
         row_name=row_name,
         col_name=col_name,
-        cell_region_name=cell_region_name,
         sum_suffix=sum_suffix,
         n_random_points=n_random_points,
         k_th_percentiles=k_th_percentiles,
@@ -243,16 +366,15 @@ def detect_cluster_pts(
     )
 
     if not silent:
-        for (colname, threshold_value, k_th_percentile) in zip(sum_names, cluster_threshold_values,k_th_percentiles):
+        for (colname, threshold_value, k_th_percentile) in zip(columns, cluster_threshold_values,k_th_percentiles):
             print("Threshold value for "+str(k_th_percentile)+"th-percentile is "+str(threshold_value)+" for "+str(colname)+".")
     
     grid.search.set_source(
-        pts_df=pts_df,
-        x_coord_name=x_coord_name,
-        y_coord_name=y_coord_name,
+        pts=pts,
+        x_coord_name=x,
+        y_coord_name=y,
         row_name=row_name,
         col_name=col_name,
-        cell_region_name=cell_region_name,
         sum_suffix=sum_suffix,
         plot_cell_reg_assign=plot_cell_reg_assign,
         plot_offset_checks=plot_offset_checks,
@@ -262,57 +384,57 @@ def detect_cluster_pts(
     )
 
 
-    disk_sums_for_pts_df = grid.search.perform_search(silent=silent,plot_radius_sums=plot_radius_sums,plot_pt_disk=plot_pt_disk)
+    disk_sums_for_pts = grid.search.perform_search(silent=silent,plot_radius_sums=plot_radius_sums,plot_pt_disk=plot_pt_disk)
     
     # save bool of whether pt is part of a cluster 
-    pts_df[
-        [str(cname)+str(cluster_suffix) for cname in sum_names]
-    ] = disk_sums_for_pts_df>cluster_threshold_values
+    pts[
+        [str(cname)+str(cluster_suffix) for cname in columns]
+    ] = disk_sums_for_pts>cluster_threshold_values
 
 
     if plot_distribution is not None:
         # print("disk_sums_for_random_points", disk_sums_for_random_points)
         create_distribution_plot(
-            pts_df=pts_df,
-            x_coord_name=x_coord_name,
-            y_coord_name=y_coord_name,
-            sum_radius_names=[n+sum_suffix for n in sum_names],
-            rndm_pts_df=rndm_pts_df,
+            pts=pts,
+            x_coord_name=x,
+            y_coord_name=y,
+            radius_sum_columns=[n+sum_suffix for n in columns],
+            rndm_pts=rndm_pts,
             cluster_threshold_values=cluster_threshold_values,
             k_th_percentiles=k_th_percentiles,
-            radius=radius,
+            r=r,
             plot_kwargs=plot_distribution
             )
     #
 
     def plot_rand_dist(
-            pts_df=pts_df,
-            x_coord_name=x_coord_name,
-            y_coord_name=y_coord_name,
-            sum_radius_names=[n+sum_suffix for n in sum_names],
-            rndm_pts_df=rndm_pts_df,
+            pts=pts,
+            x_coord_name=x,
+            y_coord_name=y,
+            radius_sum_columns=[n+sum_suffix for n in columns],
+            rndm_pts=rndm_pts,
             cluster_threshold_values=cluster_threshold_values,
             k_th_percentiles=k_th_percentiles,
-            radius=radius,
+            r=r,
             filename:str="",
             **plot_kwargs
             
     ):
         create_distribution_plot(
-            pts_df=pts_df,
-            x_coord_name=x_coord_name,
-            y_coord_name=y_coord_name,
-            sum_radius_names=sum_radius_names,
-            rndm_pts_df=rndm_pts_df,
+            pts=pts,
+            x_coord_name=x,
+            y_coord_name=y,
+            radius_sum_columns=radius_sum_columns,
+            rndm_pts=rndm_pts,
             cluster_threshold_values=cluster_threshold_values,
             k_th_percentiles=k_th_percentiles,
-            radius=radius,
+            r=r,
             filename=filename,
             plot_kwargs=plot_kwargs
             )
     grid.plot_rand_dist = plot_rand_dist
     
-    plot_colnames = list(sum_names) + [n+sum_suffix for n in sum_names] + [str(cname)+str(cluster_suffix) for cname in sum_names]
+    plot_colnames = list(columns) + [n+sum_suffix for n in columns] + [str(cname)+str(cluster_suffix) for cname in columns]
     def plot_cluster_pts(
             self=grid,
             colnames=_np_array(plot_colnames),
@@ -340,11 +462,87 @@ def detect_cluster_pts(
     return grid
 # done
 
+def detect_cells_with_cluster_pts(
+    pts:_pd_DataFrame,
+    crs:str,
+    
+    r:float=750,
+    distance_thresholds:float=2500,
+    make_convex:bool=True,
+    include_boundary:bool=False,
+    exclude_pt_itself:bool=True,
+
+    k_th_percentiles:float=[99.5],
+    n_random_points:int=int(1e5),
+    random_seed:int=None,
+
+    grid=None,
+
+    columns:list=['employment'],
+    x:str='lon',
+    y:str='lat',
+    row_name:str='id_y',
+    col_name:str='id_x',
+    sum_suffix:str='_750m',
+    cluster_suffix:str='_cluster',
+    
+    plot_distribution:dict=None,
+    plot_radius_sums:dict=None,
+    plot_cluster_points:dict=None,
+    plot_pt_disk:dict=None,
+    plot_cell_reg_assign:dict=None,
+    plot_offset_checks:dict=None,
+    plot_offset_regions:dict=None,
+    plot_offset_raster:dict=None,
+    plot_cluster_cells:dict=None,
+    silent:bool=True,
+):
+    grid = detect_cluster_pts(
+        pts=pts,
+        crs=crs,
+        r=r,
+        columns=columns,
+        exclude_pt_itself=exclude_pt_itself,
+        k_th_percentiles=k_th_percentiles,
+        n_random_points=n_random_points,
+        random_seed=random_seed,
+        grid=grid,
+        x_coord_name=x,
+        y_coord_name=y,
+        row_name=row_name,
+        col_name=col_name,
+        sum_suffix=sum_suffix,
+        cluster_suffix=cluster_suffix,
+        include_boundary=include_boundary,
+        plot_distribution=plot_distribution,
+        plot_radius_sums=plot_radius_sums,
+        plot_cluster_points=plot_cluster_points,
+        plot_pt_disk=plot_pt_disk,
+        plot_cell_reg_assign=plot_cell_reg_assign,
+        plot_offset_checks=plot_offset_checks,
+        plot_offset_regions=plot_offset_regions,
+        plot_offset_raster=plot_offset_raster,
+        silent=silent,
+    )
+
+    grid.create_clusters(
+        pts=pts,
+        columns=columns,
+        distance_thresholds=distance_thresholds,
+        make_convex=make_convex,
+        row_name=row_name,
+        col_name=col_name,
+        cluster_suffix=cluster_suffix,
+        plot_cluster_cells=plot_cluster_cells,
+        )
+    
+    return grid
 def convert_coords_to_local_crs(
-        pts_df,
-        x_coord_name:str='lon',
-        y_coord_name:str='lat',
+        pts,
+        x:str='lon',
+        y:str='lat',
         initial_crs:str="EPSG:4326",
+        silent:bool=False,
 ) -> str:
     
     # https://gis.stackexchange.com/a/269552
@@ -363,92 +561,15 @@ def convert_coords_to_local_crs(
         return epsg_code
         
     # Get best UTM Zone SRID/EPSG Code for center coordinate pair
-    utm_code = convert_wgs_to_utm(*pts_df[[x_coord_name,y_coord_name]].mean(axis=0))
+    utm_code = convert_wgs_to_utm(*pts[[x,y]].mean(axis=0))
     # define project_from_to with iteration
     # see https://gis.stackexchange.com/a/127432/33092
     local_crs = 'EPSG:'+str(utm_code)
     transformer = Transformer.from_crs(crs_from=initial_crs, crs_to=local_crs, always_xy=True)
-    pts_df[x_coord_name],pts_df[y_coord_name] = transformer.transform(pts_df[x_coord_name], pts_df[y_coord_name])
+    pts[x],pts[y] = transformer.transform(pts[x], pts[y])
+    if not silent and initial_crs != local_crs:
+        print("Reproject from " +str(initial_crs)+' to '+local_crs)
     return local_crs
-
-def detect_cells_with_cluster_pts(
-    pts_df:_pd_DataFrame,
-    crs:str,
-    
-    radius:float=750,
-    distance_thresholds:float=2500,
-    make_convex:bool=True,
-    include_boundary:bool=False,
-    exclude_pt_itself:bool=True,
-
-    k_th_percentiles:float=[99.5],
-    n_random_points:int=int(1e5),
-    random_seed:int=None,
-
-    grid=None,
-
-    sum_names:list=['employment'],
-    x_coord_name:str='lon',
-    y_coord_name:str='lat',
-    row_name:str='id_y',
-    col_name:str='id_x',
-    cell_region_name:str='cell_region',
-    sum_suffix:str='_750m',
-    cluster_suffix:str='_cluster',
-    
-    plot_distribution:dict=None,
-    plot_radius_sums:dict=None,
-    plot_cluster_points:dict=None,
-    plot_pt_disk:dict=None,
-    plot_cell_reg_assign:dict=None,
-    plot_offset_checks:dict=None,
-    plot_offset_regions:dict=None,
-    plot_offset_raster:dict=None,
-    plot_cluster_cells:dict=None,
-    silent:bool=True,
-):
-    grid = detect_cluster_pts(
-        pts_df=pts_df,
-        crs=crs,
-        radius=radius,
-        include_boundary=include_boundary,
-        exclude_pt_itself=exclude_pt_itself,
-        k_th_percentiles=k_th_percentiles,
-        n_random_points=n_random_points,
-        random_seed=random_seed,
-        grid=grid,
-        sum_names=sum_names,
-        x_coord_name=x_coord_name,
-        y_coord_name=y_coord_name,
-        row_name=row_name,
-        col_name=col_name,
-        cell_region_name=cell_region_name,
-        sum_suffix=sum_suffix,
-        cluster_suffix=cluster_suffix,
-        plot_distribution=plot_distribution,
-        plot_radius_sums=plot_radius_sums,
-        plot_cluster_points=plot_cluster_points,
-        plot_pt_disk=plot_pt_disk,
-        plot_cell_reg_assign=plot_cell_reg_assign,
-        plot_offset_checks=plot_offset_checks,
-        plot_offset_regions=plot_offset_regions,
-        plot_offset_raster=plot_offset_raster,
-        silent=silent,
-    )
-
-    grid.create_clusters(
-        pts_df=pts_df,
-        sum_names=sum_names,
-        distance_thresholds=distance_thresholds,
-        make_convex=make_convex,
-        row_name=row_name,
-        col_name=col_name,
-        cluster_suffix=cluster_suffix,
-        plot_cluster_cells=plot_cluster_cells,
-        )
-    
-    return grid
-
 # next thing would be to label cells as clustered or not
 # then to create orthogonal convex hull around clusters
 # then to maybe wrap everything in one final function  

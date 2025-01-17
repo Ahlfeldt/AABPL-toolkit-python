@@ -17,7 +17,7 @@ from .two_dimensional_weak_ordering_class import (gen_weak_order_rel_to_convex_s
 from .pts_to_cells import (assign_points_to_cells, aggregate_point_data_to_cells,)
 from .pts_to_offset_regions import (assign_points_to_cell_regions,assign_points_to_mirco_regions)
 from .pts_radius_search import (aggreagate_point_data_to_disks_vectorized)
-from aabpl.testing.test_performance import time_func_perf
+from aabpl.testing.test_performance import time_func_perf, func_timer_dict
 
 
 ################ DiskSearchSource ######################################################################################
@@ -49,7 +49,6 @@ class DiskSearchSource(DiskSearchObject):
         x_coord_name:str='lon',
         row_name:str='id_y',
         col_name:str='id_x',
-        cell_region_name:str='cell_region',
         sum_suffix:str='_750m',
     ):
         self.grid = grid 
@@ -58,9 +57,9 @@ class DiskSearchSource(DiskSearchObject):
         self.x_coord_name = x_coord_name
         self.row_name = row_name
         self.col_name = col_name
-        self.cell_region_name = cell_region_name 
+        self.cell_region_name = next(('cell_reg'+str(i) for i in (['']+list(range(len(pts_df.columns)))) if not 'cell_reg'+str(i) in pts_df.columns)) 
         self.sum_suffix = sum_suffix
-    #
+    #next(('helper_col'+i for i in (['']+list(range(len(pts_target.columns))))))
 
     def assign_pts_to_cell_regions(
             self,
