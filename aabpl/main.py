@@ -104,7 +104,7 @@ def radius_search(
     silent:bool=True,
 ):
     """
-    For all points in DataFrame it searches for all other points (potentially of another DataFrame) within the specified radius.
+    For all points in DataFrame it searches for all other points (potentially of another DataFrame) within the specified radius and aggregate the values for specified column(s)
     The result will be appended to DataFrame.
 
     Args:
@@ -260,8 +260,10 @@ def detect_cluster_pts(
     silent:bool=True,
 ):
     """
-    For all points in DataFrame it searches for all other points (potentially of another DataFrame) within the specified radius.
-    The result will be appended to DataFrame.
+    For all points in a DataFrame it searches for all other points (potentially of another DataFrame) within the specified radius and aggregate the values for specified column(s).
+    It draws random the bounding box containing all points from DataFrame(s) and aggregate the values within the radius to obtain a random distribution.   
+    Then all points from DataFrame which exceed the k_th_percentile of the random distribution are labeld as clustered.
+    The results will be appended to DataFrame.
 
     Args:
     pts (pandas.DataFrame):
@@ -274,9 +276,12 @@ def detect_cluster_pts(
         column(s) in DataFrame for which data within search radius shall be aggregated. If None provided it will simply count the points within the radius. 
     exclude_pt_itself (bool):
         whether the sums within search radius point shall exlclude the point data itself (default=True)
-    k_th_percentiles:float=[99.5],
-    n_random_points:int=int(1e5),
-    random_seed:int=None,
+    k_th_percentiles (float):
+        percentile of random distribution that a point needs to exceed to be classified as clustered.
+    n_random_points (int):
+        number of random points to be drawn to create random distribution (default=100000)
+    random_seed (int):
+        random seed to be applied when drawing random points to create random distribution. If None no seed will be set (default=None)
     x (str):
         column name of x-coordinate (=longtitude) in pts (default='lon')
     y (str):
@@ -301,7 +306,8 @@ def detect_cluster_pts(
         grid of custom class containing points. If None it will automatically one (default=None)
     include_boundary (bool):
         FEATURE NOT YET IMPLEMENTED. Define whether points that are at the distance of exactly the radius shall be considered within (Default=False)
-    plot_distribution 
+    plot_distribution (dict):
+        dictionary with kwargs to create plot for random distribution. If None no plot will be created (default=None)
     plot_radius_sums (dict):
         dictionary with kwargs to create plot for radius sums. If None no plot will be created (default=None)
     plot_pt_disk (dict):
@@ -319,7 +325,7 @@ def detect_cluster_pts(
     
     Returns:
     grid (aabl.Grid):
-        a grid covering all points (custom class containing  
+        a grid covering all points (custom class) with cluster attributes stored to it  
     """
     # OVERWRITE DEFAULTS
     if grid is None:
@@ -465,27 +471,22 @@ def detect_cluster_pts(
 def detect_cells_with_cluster_pts(
     pts:_pd_DataFrame,
     crs:str,
-    
     r:float=750,
-    distance_thresholds:float=2500,
-    make_convex:bool=True,
-    include_boundary:bool=False,
+    columns:list=[],
     exclude_pt_itself:bool=True,
-
     k_th_percentiles:float=[99.5],
     n_random_points:int=int(1e5),
     random_seed:int=None,
-
-    grid=None,
-
-    columns:list=['employment'],
+    distance_thresholds:float=2500,
+    make_convex:bool=True,
     x:str='lon',
     y:str='lat',
     row_name:str='id_y',
     col_name:str='id_x',
     sum_suffix:str='_750m',
     cluster_suffix:str='_cluster',
-    
+    grid:Grid=None,
+    include_boundary:bool=False,
     plot_distribution:dict=None,
     plot_radius_sums:dict=None,
     plot_cluster_points:dict=None,
@@ -497,6 +498,75 @@ def detect_cells_with_cluster_pts(
     plot_cluster_cells:dict=None,
     silent:bool=True,
 ):
+    """
+    For all points in a DataFrame it searches for all other points (potentially of another DataFrame) within the specified radius and aggregate the values for specified column(s).
+    It draws random the bounding box containing all points from DataFrame(s) and aggregate the values within the radius to obtain a random distribution.   
+    Then all points from DataFrame which exceed the k_th_percentile of the random distribution are labeld as clustered.
+    The results will be appended to DataFrame.
+
+    Args:
+    pts (pandas.DataFrame):
+        DataFrame of points for which a search for other points within the specified radius shall be performed
+    crs (str):
+        crs of coordinates, e.g. 'EPSG:4326'
+    r (float):
+        radius within which other points shall be found in meters 
+    columns (list or str):
+        column(s) in DataFrame for which data within search radius shall be aggregated. If None provided it will simply count the points within the radius. 
+    exclude_pt_itself (bool):
+        whether the sums within search radius point shall exlclude the point data itself (default=True)
+    k_th_percentiles (float):
+        percentile of random distribution that a point needs to exceed to be classified as clustered.
+    n_random_points (int):
+        number of random points to be drawn to create random distribution (default=100000)
+    random_seed (int):
+        random seed to be applied when drawing random points to create random distribution. If None no seed will be set (default=None)
+    x (str):
+        column name of x-coordinate (=longtitude) in pts (default='lon')
+    y (str):
+        column name of y-coordinate (=lattitude) in pts (default='lat')
+    row_name (str):
+        name for column that will be appended to pts indicating grid cell row (default='id_y')
+    col_name (str):
+        name for column that will be appended to pts indicating grid cell column (default='id_y')
+    sum_suffix (str):
+        suffix used for new column(s) creating by aggregating data of columns , 
+    pts_target (pandas.DataFrame):
+        DataFrame of points that shall be found/aggregated when searching within radius of points from pts_source. If None specified its assumed to be the same as pts_source. (default=None)
+    x_tgt (str):
+        column name of x-coordinate (=longtitude) in pts_target. If None its assumed to be same as x (default=None)
+    y_tgt (str):
+        column name of y-coordinate (=lattitude) in pts_target. If None its assumed to be same as y (default=None)
+    tgt_row_name (str):
+        name for column that will be appended to pts indicating grid cell row. If None its assumed to be same as x (default=None)
+    col_name (str):
+        name for column that will be appended to pts indicating grid cell column (default='id_y')
+    grid (aabpl.Grid):
+        grid of custom class containing points. If None it will automatically one (default=None)
+    include_boundary (bool):
+        FEATURE NOT YET IMPLEMENTED. Define whether points that are at the distance of exactly the radius shall be considered within (Default=False)
+    plot_distribution (dict):
+        dictionary with kwargs to create plot for random distribution. If None no plot will be created (default=None)
+    plot_radius_sums (dict):
+        dictionary with kwargs to create plot for radius sums. If None no plot will be created (default=None)
+    plot_pt_disk (dict):
+        Only needed for development. Dictionary with kwargs to create plot for example radius search. If None no plot will be created (default=None)
+    plot_cell_reg_assign (dict):
+        Only needed for development. Dictionary with kwargs to create plot for assginments of points to cell offset regions. If None no plot will be created (default=None)
+    plot_offset_checks (dict):
+        Only needed for development. Dictionary with kwargs to create plot for checks creating offset regions. If None no plot will be created (default=None)
+    plot_offset_regions (dict):
+        Only needed for development. Dictionary with kwargs to create plot for offset regions. If None no plot will be created (default=None)
+    plot_offset_raster (dict):
+        Only needed for development. Dictionary with kwargs to create plot for raster for offset regions. If None no plot will be created (default=None)
+    silent (bool):
+        Whether information on progress shall be printed to console (default=False)
+    
+    Returns:
+    grid (aabl.Grid):
+        a grid covering all points (custom class) with cluster attributes stored to it  
+    """
+    
     grid = detect_cluster_pts(
         pts=pts,
         crs=crs,
