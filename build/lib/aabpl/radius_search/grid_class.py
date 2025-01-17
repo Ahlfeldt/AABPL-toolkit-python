@@ -26,7 +26,7 @@ from .radius_search_class import (
 )
 from aabpl.valid_area import disk_cell_intersection_area
 # from .radius_search.optimal_grid_spacing import (select_optimal_grid_spacing,)
-from aabpl.testing.test_performance import time_func_perf, func_timer_dict
+from aabpl.testing.test_performance import time_func_perf
 import matplotlib.pyplot as plt
 from matplotlib.pyplot import get_cmap as _plt_get_cmap, savefig as _plt_savefig
 from shapely.geometry import Polygon, Point
@@ -474,7 +474,7 @@ class Grid(object):
             self,
             filename:str="full_grid",
             file_format:str=['shp','csv'][0],
-            target_crs:str="EPSG:4326"
+            target_crs:str="EPSG:4326",
         ):
         for (cluster_column, clusters) in self.clusters.items():
             
@@ -516,7 +516,8 @@ class Grid(object):
             self,
             filename:str="sparse_grid",
             file_format:str=['shp','csv'][0],
-            target_crs:str="EPSG:4326"
+            target_crs:str="EPSG:4326",
+            discard_empty_cluster_cells:bool=False,
         ):
         """
         saving all grid cell filled with
@@ -526,8 +527,8 @@ class Grid(object):
             cell_to_cluster = self.clusters[cluster_column]['cell_to_cluster']
             id_to_sums = self.id_to_sums
             polys = []
-            c_ids = _np_zeros(len(id_to_sums),int)
-            sums = _np_zeros(len(id_to_sums),float)
+            c_ids = _np_zeros(len(self.ids),int)
+            sums = _np_zeros(len(self.ids),float)
             centroids = _np_array(list(self.row_col_to_centroid.values()))
             transformer = Transformer.from_crs(crs_from=self.crs, crs_to=target_crs, always_xy=True)
             centroids_x_full, centroids_y_full = transformer.transform(centroids[:,0], centroids[:,1])
@@ -535,10 +536,11 @@ class Grid(object):
             centroids_y = _np_zeros(len(id_to_sums),float)
             i = 0
             for row_col, ((xmin,ymin),(xmax,ymax)), c_x, c_y in zip(self.ids, self.id_to_bounds.values(), centroids_x_full, centroids_y_full):
-                if row_col in id_to_sums: 
+                if row_col in cell_to_cluster or not discard_empty_cluster_cells or row_col in id_to_sums: 
                     if row_col in cell_to_cluster: 
                         c_ids[i] = cell_to_cluster[row_col]
-                    sums[i] = id_to_sums[row_col]
+                    if row_col in id_to_sums:
+                        sums[i] = id_to_sums[row_col]
                     centroids_x[i] = c_x 
                     centroids_y[i] = c_y 
                     polys.append(Polygon(((xmin,ymin),(xmax,ymin),(xmax,ymax),(xmin,ymax))))
@@ -546,10 +548,10 @@ class Grid(object):
                 #
             #
             df = _gpd_GeoDataFrame({
-                'centroid_x': centroids_x,
-                'centroid_y': centroids_y,
-                'cluster_id': c_ids,
-                'sum': sums,},
+                'centroid_x': centroids_x[:i+1],
+                'centroid_y': centroids_y[:i+1],
+                'cluster_id': c_ids[:i+1],
+                'sum': sums[:i+1],},
                 geometry=polys,
                 crs=self.crs
                 )
@@ -568,8 +570,12 @@ class Grid(object):
             self,
             filename:str="grid_clusters",
             file_format:str=['shp','csv'][0],
-            target_crs:str="EPSG:4326"
+            target_crs:str="EPSG:4326",
         ):
+        """
+        Save cluster polygons project in target crs with area, number of cells, centroid coords, sums values. 
+        Eglegible file formats: shapefile, csv
+        """
         for (cluster_column, clusters) in self.clusters.items():
             df = _gpd_GeoDataFrame({
                 'centroid_x': [pl['centroid'][0] for pl in clusters['prime_locs']],
@@ -689,7 +695,10 @@ class Grid(object):
         if filename:
             fig.savefig(filename, dpi=300, bbox_inches="tight")
     
-    def plot_clusters(self, cluster_column:str, fig=None, ax=None, filename:str='',):
+    def plot_clusters(self, cluster_column:str, fig=None, ax=None, filename:str='', background_color='#ccc',):
+        """
+        Creates a plot 
+        """
         if ax is None:
             fig, ax = plt.subplots(nrows=len(self.clusters), figsize=(15,25))
         

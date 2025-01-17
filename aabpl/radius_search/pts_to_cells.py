@@ -18,7 +18,7 @@ from numpy.linalg import norm as _np_linalg_norm
 from pandas import (DataFrame as _pd_DataFrame, cut as _pd_cut, concat as _pd_concat) 
 from math import ceil#,asin,acos
 from aabpl.utils.general import ( flatten_list, DataFrameRelation, arr_to_tpls )
-from aabpl.testing.test_performance import time_func_perf, func_timer_dict
+from aabpl.testing.test_performance import time_func_perf
 # from aabpl.doc.docstrings import fixdocstring
 
 

@@ -1,23 +1,12 @@
-from numpy import (
-    array as _np_array,
-    ndarray as _np_ndarray,
-    arange as _np_arange,
-    hstack as _np_hstack,
-    zeros as _np_zeros,
-    unique as _np_unique, 
-    concatenate as _np_concatenate,
-    equal as _np_equal, 
-    logical_or as _np_logical_or, 
-    all as _np_all, 
-)
+from numpy import (array as _np_array)
 from pandas import (DataFrame as _pd_DataFrame, cut as _pd_cut, concat as _pd_concat) 
-from aabpl.utils.general import ( DataFrameRelation, arr_to_tpls)
-from aabpl.utils.distances_to_cell import (get_cells_relevant_for_disk_by_type,)
-from .two_dimensional_weak_ordering_class import (gen_weak_order_rel_to_convex_set,)
-from .pts_to_cells import (assign_points_to_cells, aggregate_point_data_to_cells,)
-from .pts_to_offset_regions import (assign_points_to_cell_regions,assign_points_to_mirco_regions)
-from .pts_radius_search import (aggreagate_point_data_to_disks_vectorized)
-from aabpl.testing.test_performance import time_func_perf, func_timer_dict
+from aabpl.utils.general import DataFrameRelation, arr_to_tpls
+from aabpl.utils.distances_to_cell import get_cells_relevant_for_disk_by_type
+from .two_dimensional_weak_ordering_class import gen_weak_order_rel_to_convex_set
+from .pts_to_cells import assign_points_to_cells, aggregate_point_data_to_cells
+from .pts_to_offset_regions import assign_points_to_mirco_regions
+from .pts_radius_search import aggreagate_point_data_to_disks_vectorized
+from aabpl.testing.test_performance import time_func_perf
 
 
 ################ DiskSearchSource ######################################################################################

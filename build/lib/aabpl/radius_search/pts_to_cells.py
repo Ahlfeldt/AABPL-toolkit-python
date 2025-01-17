@@ -1,11 +1,6 @@
 from numpy import (
     array as _np_array,
     append as _np_append,
-    ndarray as _np_ndarray,
-    arange as _np_arange,
-    column_stack as _np_column_stack,
-    hstack as _np_hstack,
-    ones as _np_ones,
     zeros as _np_zeros,
     unique as _np_unique, 
     concatenate as _np_concatenate,
@@ -14,11 +9,9 @@ from numpy import (
     all as _np_all, 
     sort as _np_sort
 )
-from numpy.linalg import norm as _np_linalg_norm
 from pandas import (DataFrame as _pd_DataFrame, cut as _pd_cut, concat as _pd_concat) 
-from math import ceil#,asin,acos
-from aabpl.utils.general import ( flatten_list, DataFrameRelation, arr_to_tpls )
-from aabpl.testing.test_performance import time_func_perf, func_timer_dict
+from aabpl.utils.general import arr_to_tpls
+from aabpl.testing.test_performance import time_func_perf
 # from aabpl.doc.docstrings import fixdocstring
 
 

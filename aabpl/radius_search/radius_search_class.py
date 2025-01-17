@@ -17,7 +17,7 @@ from .two_dimensional_weak_ordering_class import (gen_weak_order_rel_to_convex_s
 from .pts_to_cells import (assign_points_to_cells, aggregate_point_data_to_cells,)
 from .pts_to_offset_regions import (assign_points_to_cell_regions,assign_points_to_mirco_regions)
 from .pts_radius_search import (aggreagate_point_data_to_disks_vectorized)
-from aabpl.testing.test_performance import time_func_perf, func_timer_dict
+from aabpl.testing.test_performance import time_func_perf
 
 
 ################ DiskSearchSource ######################################################################################

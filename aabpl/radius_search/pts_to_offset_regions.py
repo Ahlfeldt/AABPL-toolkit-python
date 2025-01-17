@@ -19,7 +19,7 @@ from math import log10 as _math_log10#,asin,acos
 from aabpl.utils.general import (flatten_list,DataFrameRelation,arr_to_tpls, make_bins_from_vals, get_vals_from_bins)
 from aabpl.illustrations.illustrate_point_to_cell_region_assignment import (illustrate_point_to_cell_region_assignment)
 from .two_dimensional_weak_ordering_class import (gen_weak_order_rel_to_convex_set,recursive_cell_region_inference)
-from aabpl.testing.test_performance import time_func_perf, func_timer_dict
+from aabpl.testing.test_performance import time_func_perf
 from .offset_regions import prepare_offset_regions
 # from aabpl.doc.docstrings import fixdocstring
 

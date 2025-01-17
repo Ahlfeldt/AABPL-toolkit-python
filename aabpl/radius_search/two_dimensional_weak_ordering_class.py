@@ -2,7 +2,7 @@ from numpy import (
     array as _np_array, invert as _np_invert, hstack as _np_hstack, zeros as _np_zeros, ones as _np_ones, all as _np_all,  any as _np_any,
 )
 from aabpl.utils.distances_to_cell import ( min_dist_points_to_cell, max_dist_points_to_cell,)
-from aabpl.testing.test_performance import time_func_perf, func_timer_dict
+from aabpl.testing.test_performance import time_func_perf
 
 # This script provides methods to sort points according to 
 # their distance to an undefined point within a convex polygon

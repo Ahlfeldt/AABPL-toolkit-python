@@ -1,18 +1,8 @@
-from numpy import (
-    array as _np_array, 
-    linspace as _np_linspace,
-    stack as _np_stack,
-    arange, unique, invert, flip, transpose, concatenate, sign, zeros, 
-    min, max, equal, where, logical_or, logical_and, all, newaxis
-)
-# from numpy.linalg import norm
-# from numpy.random import randint, random
+from numpy import (linspace as _np_linspace,)
 from pandas import DataFrame as _pd_DataFrame
-from math import pi#,ceil,asin,acos
-# from aabpl.utils.general import ( flatten_list, visualize, depth)
+from math import pi
 from aabpl.illustrations.illustrate_optimal_grid_spacing import ( create_optimal_grid_spacing_gif, )
 from aabpl.utils.distances_to_cell import ( get_always_contained_potentially_overlapped_cells,)
-# from aabpl.valid_area import disk_cell_intersection_area
 
 
 def get_next_relevant_grid_spacing(

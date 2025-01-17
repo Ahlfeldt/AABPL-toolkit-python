@@ -3,7 +3,7 @@ from numpy import array as _np_array
 import math
 from pyproj import Transformer
 from .random_distribution import get_distribution_for_random_points
-from aabpl.testing.test_performance import time_func_perf, func_timer_dict
+from aabpl.testing.test_performance import time_func_perf
 from aabpl.radius_search.radius_search_class import DiskSearch
 from aabpl.radius_search.grid_class import Grid
 from aabpl.illustrations.plot_pt_vars import create_plots_for_vars
@@ -340,37 +340,6 @@ def detect_cluster_pts(
     return grid
 # done
 
-def convert_coords_to_local_crs(
-        pts_df,
-        x_coord_name:str='lon',
-        y_coord_name:str='lat',
-        initial_crs:str="EPSG:4326",
-) -> str:
-    
-    # https://gis.stackexchange.com/a/269552
-    
-    
-    # convert_wgs_to_utm function, see https://stackoverflow.com/a/40140326/4556479
-    def convert_wgs_to_utm(lon: float, lat: float):
-        """Based on lat and lng, return best utm epsg-code"""
-        utm_band = str((math.floor((lon + 180) / 6 ) % 60) + 1)
-        if len(utm_band) == 1:
-            utm_band = '0'+utm_band
-        if lat >= 0:
-            epsg_code = '326' + utm_band
-            return epsg_code
-        epsg_code = '327' + utm_band
-        return epsg_code
-        
-    # Get best UTM Zone SRID/EPSG Code for center coordinate pair
-    utm_code = convert_wgs_to_utm(*pts_df[[x_coord_name,y_coord_name]].mean(axis=0))
-    # define project_from_to with iteration
-    # see https://gis.stackexchange.com/a/127432/33092
-    local_crs = 'EPSG:'+str(utm_code)
-    transformer = Transformer.from_crs(crs_from=initial_crs, crs_to=local_crs, always_xy=True)
-    pts_df[x_coord_name],pts_df[y_coord_name] = transformer.transform(pts_df[x_coord_name], pts_df[y_coord_name])
-    return local_crs
-
 def detect_cells_with_cluster_pts(
     pts_df:_pd_DataFrame,
     crs:str,
@@ -448,7 +417,39 @@ def detect_cells_with_cluster_pts(
         )
     
     return grid
-
+def convert_coords_to_local_crs(
+        pts_df,
+        x_coord_name:str='lon',
+        y_coord_name:str='lat',
+        initial_crs:str="EPSG:4326",
+        silent:bool=False,
+) -> str:
+    
+    # https://gis.stackexchange.com/a/269552
+    
+    
+    # convert_wgs_to_utm function, see https://stackoverflow.com/a/40140326/4556479
+    def convert_wgs_to_utm(lon: float, lat: float):
+        """Based on lat and lng, return best utm epsg-code"""
+        utm_band = str((math.floor((lon + 180) / 6 ) % 60) + 1)
+        if len(utm_band) == 1:
+            utm_band = '0'+utm_band
+        if lat >= 0:
+            epsg_code = '326' + utm_band
+            return epsg_code
+        epsg_code = '327' + utm_band
+        return epsg_code
+        
+    # Get best UTM Zone SRID/EPSG Code for center coordinate pair
+    utm_code = convert_wgs_to_utm(*pts_df[[x_coord_name,y_coord_name]].mean(axis=0))
+    # define project_from_to with iteration
+    # see https://gis.stackexchange.com/a/127432/33092
+    local_crs = 'EPSG:'+str(utm_code)
+    transformer = Transformer.from_crs(crs_from=initial_crs, crs_to=local_crs, always_xy=True)
+    pts_df[x_coord_name],pts_df[y_coord_name] = transformer.transform(pts_df[x_coord_name], pts_df[y_coord_name])
+    if not silent and initial_crs != local_crs:
+        print("Reproject from " +str(initial_crs)+' to '+local_crs)
+    return local_crs
 # next thing would be to label cells as clustered or not
 # then to create orthogonal convex hull around clusters
 # then to maybe wrap everything in one final function  

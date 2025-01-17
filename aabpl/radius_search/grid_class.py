@@ -26,7 +26,7 @@ from .radius_search_class import (
 )
 from aabpl.valid_area import disk_cell_intersection_area
 # from .radius_search.optimal_grid_spacing import (select_optimal_grid_spacing,)
-from aabpl.testing.test_performance import time_func_perf, func_timer_dict
+from aabpl.testing.test_performance import time_func_perf
 import matplotlib.pyplot as plt
 from matplotlib.pyplot import get_cmap as _plt_get_cmap, savefig as _plt_savefig
 from shapely.geometry import Polygon, Point

@@ -1,32 +1,18 @@
 
 from numpy import (
     array as _np_array,
-    append as _np_append,
-    arange,
     invert as _np_invert,
-    where,
-    sign,
     zeros as _np_zeros,
-    transpose,
-    unique, linspace, flip,  concatenate,
     min as _np_min, 
     max as _np_max, 
-    equal, 
     logical_or as _np_logical_or, 
-    logical_and, 
     all as _np_all, 
-    newaxis,
-    sort
 )
 from numpy.linalg import norm as _np_linalg_norm
 from pandas import (
     DataFrame as _pd_DataFrame, 
     cut as _pd_cut,
 ) 
-from math import ceil#,asin,acos
-from aabpl.utils.general import ( flatten_list, visualize, depth, list_dict_keys )
-from aabpl.illustrations.illustrate_point_to_cell_region_assignment import (illustrate_point_to_cell_region_assignment)
-from aabpl.utils.distances_to_cell import (  get_cells_relevant_for_disk_by_type )
 
 def create_nested_cell_structure(
     cell_dict:dict,

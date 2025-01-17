@@ -15,7 +15,7 @@ from pandas import (DataFrame as _pd_DataFrame, cut as _pd_cut, concat as _pd_co
 from aabpl.utils.general import (   flatten_list, DataFrameRelation,arr_to_tpls )
 from aabpl.illustrations.illustrate_point_to_disk import (illustrate_point_disk)
 from aabpl.illustrations.plot_pt_vars import create_plots_for_vars
-from aabpl.testing.test_performance import time_func_perf, func_timer_dict
+from aabpl.testing.test_performance import time_func_perf
 
 _np_array = time_func_perf(_np_array)
 

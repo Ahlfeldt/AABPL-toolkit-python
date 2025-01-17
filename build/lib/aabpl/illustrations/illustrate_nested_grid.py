@@ -1,17 +1,10 @@
 from numpy import (
-    array,
     unique as _np_unique,
     ones as _np_ones,
-    linspace, invert, flip, transpose, concatenate, sign, zeros, min, max,
-    equal, where, logical_or, logical_and, all, newaxis
 )
 from matplotlib.pyplot import (get_cmap as _plt_get_cmap, subplots as _plt_subplots)
 from matplotlib.patches import Rectangle as _plt_Rectangle
 
-from .plot_utils import (
-    create_grid_cell_patches, 
-    create_grid_cell_patches_by_type, 
-    )
 
 
 def illustrate_nested_grid(
