@@ -1,9 +1,8 @@
-from numpy import (linspace as _np_linspace,)
+from numpy import linspace as _np_linspace
 from pandas import DataFrame as _pd_DataFrame
 from math import pi
 from aabpl.illustrations.illustrate_optimal_grid_spacing import ( create_optimal_grid_spacing_gif, )
 from aabpl.utils.distances_to_cell import ( get_always_contained_potentially_overlapped_cells,)
-
 
 def get_next_relevant_grid_spacing(
         relevantGridSizes:_pd_DataFrame,

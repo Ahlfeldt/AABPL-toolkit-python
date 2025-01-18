@@ -1,5 +1,5 @@
 # intersection of two circles with same radius
-from numpy import (array as _np_array, sign as _np_sign, arange as _np_arange, invert as _np_invert, zeros as _np_zeros)
+from numpy import array as _np_array, sign as _np_sign, arange as _np_arange, invert as _np_invert, zeros as _np_zeros
 from numpy.linalg import norm as _np_linalg_norm
 from math import log10 as _math_log10
 from matplotlib import pyplot as plt

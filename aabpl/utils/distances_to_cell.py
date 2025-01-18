@@ -218,14 +218,14 @@ def max_dist_points_to_cell(
     )
 #
 
-def is_within_radius(distances,radius:float,include_boundary):
+def is_within_radius(distances,r:float,include_boundary):
     if include_boundary:
-        return distances <= radius
-    return distances < radius
+        return distances <= r
+    return distances < r
 
 def get_cells_relevant_for_disk_by_type(
         grid_spacing:float=250,
-        radius:float=750,
+        r:float=750,
         include_boundary:bool=False,
         return_type:str=[None, 'contained_by_all', 'contained_by_trgl', 'overlapped_by_all', 'overlapped_by_trgl'][0]
     ) -> tuple:
@@ -241,7 +241,7 @@ def get_cells_relevant_for_disk_by_type(
     - cells_maybe_overlapping_a_trgl_disk
     """
 
-    ratio = radius/grid_spacing
+    ratio = r/grid_spacing
     cell_steps_max = _math_ceil(ratio+1)
     
     # create all cells within square
@@ -257,17 +257,17 @@ def get_cells_relevant_for_disk_by_type(
     unassigned_cells_in_max_steps_square = unassigned_cells_in_max_steps_square[_np_invert(cell_is_contained_in_all_disks),:]
     # compare closest vertex of cells: bool if cell is potentially overlaped by a disk of radius around pt within grid cell 
     cell_may_overlap_a_disk = (
-        grid_spacing * min_possible_dist_cells_to_cell(unassigned_cells_in_max_steps_square) <= radius
+        grid_spacing * min_possible_dist_cells_to_cell(unassigned_cells_in_max_steps_square) <= r
         ) if include_boundary else (
-        grid_spacing * min_possible_dist_cells_to_cell(unassigned_cells_in_max_steps_square) < radius
+        grid_spacing * min_possible_dist_cells_to_cell(unassigned_cells_in_max_steps_square) < r
         )
-    # [min_possible_dist_cell_to_cell(cell, grid_spacing) <= radius for cell in unassigned_cells_in_max_steps_square]
+    # [min_possible_dist_cell_to_cell(cell, grid_spacing) <= r for cell in unassigned_cells_in_max_steps_square]
     cells_maybe_overlapping_a_disk = unassigned_cells_in_max_steps_square[cell_may_overlap_a_disk,:]
     if 'overlapped_by_all' == return_type:
         return cells_maybe_overlapping_a_disk
     
     # compare farthest vertex of cells: bool if cell is in contained in disk of radius centered around any pt within triangle 1 
-    cell_is_contained_in_all_trgl_disks = [grid_spacing * max_possible_dist_trgl1_to_cell(cell) <= radius for cell in unassigned_cells_in_max_steps_square]
+    cell_is_contained_in_all_trgl_disks = [grid_spacing * max_possible_dist_trgl1_to_cell(cell) <= r for cell in unassigned_cells_in_max_steps_square]
     cells_contained_in_all_trgl_disks = unassigned_cells_in_max_steps_square[cell_is_contained_in_all_trgl_disks]    
     
     if 'contained_by_trgl' == return_type:
@@ -277,9 +277,9 @@ def get_cells_relevant_for_disk_by_type(
     unassigned_cells_in_max_steps_square = unassigned_cells_in_max_steps_square[_np_invert(cell_is_contained_in_all_trgl_disks),:]
     # compare closest vertex of cells: bool if cell is potentially overlaped by a disk of radius around pt within triangle 1
     cell_may_overlap_trgl_disk = (
-        [grid_spacing * min_possible_dist_trgl1_to_cell(cell) <= radius for cell in unassigned_cells_in_max_steps_square]
+        [grid_spacing * min_possible_dist_trgl1_to_cell(cell) <= r for cell in unassigned_cells_in_max_steps_square]
         ) if include_boundary else (
-        [grid_spacing * min_possible_dist_trgl1_to_cell(cell) < radius for cell in unassigned_cells_in_max_steps_square]
+        [grid_spacing * min_possible_dist_trgl1_to_cell(cell) < r for cell in unassigned_cells_in_max_steps_square]
         )
     cells_maybe_overlapping_a_trgl_disk = unassigned_cells_in_max_steps_square[cell_may_overlap_trgl_disk,:]
 
@@ -299,41 +299,41 @@ def get_cells_relevant_for_disk_by_type(
 
 def filter_cells_alw_contained(
         grid_spacing:float=250,
-        radius:float=750,
+        r:float=750,
         include_boundary:bool=False
     ) -> tuple:
     return get_cells_relevant_for_disk_by_type(
-       grid_spacing=grid_spacing, radius=radius, include_boundary=include_boundary, return_type='contained_by_all'
+       grid_spacing=grid_spacing, r=r, include_boundary=include_boundary, return_type='contained_by_all'
     )
 #
 
 def filter_cells_alw_contained(
         grid_spacing:float=250,
-        radius:float=750,
+        r:float=750,
         include_boundary:bool=False
     ) -> tuple:
     return get_cells_relevant_for_disk_by_type(
-       grid_spacing=grid_spacing, radius=radius, include_boundary=include_boundary, return_type='contained_by_all'
+       grid_spacing=grid_spacing, r=r, include_boundary=include_boundary, return_type='contained_by_all'
     )
 #
 
 def filter_cells_alw_overlapped(
         grid_spacing:float=250,
-        radius:float=750,
+        r:float=750,
         include_boundary:bool=False
     ) -> tuple:
     return get_cells_relevant_for_disk_by_type(
-       grid_spacing=grid_spacing, radius=radius, include_boundary=include_boundary, return_type='overlapped_by_trgl'
+       grid_spacing=grid_spacing, r=r, include_boundary=include_boundary, return_type='overlapped_by_trgl'
     )
 #
 
 def filter_cells_alw_overlapped(
         grid_spacing:float=250,
-        radius:float=750,
+        r:float=750,
         include_boundary:bool=False
     ) -> tuple:
     return get_cells_relevant_for_disk_by_type(
-       grid_spacing=grid_spacing, radius=radius, include_boundary=include_boundary, return_type='overlapped_by_trgl'
+       grid_spacing=grid_spacing, r=r, include_boundary=include_boundary, return_type='overlapped_by_trgl'
     )
 #
 
@@ -341,7 +341,7 @@ def check_if_always_overlaps_convex_set(
         cells:_np_array,
         convex_set_vertices:_np_array = _np_array([[0,0],[.5,0],[.5,.5]]),
         vertex_is_inside_convex_set=True,
-        radius:float=0.00750,
+        r:float=0.00750,
         grid_spacing:float=0.00250, 
         include_boundary:bool=False,
 ):
@@ -358,7 +358,7 @@ def check_if_always_overlaps_convex_set(
     )
 
     set_always_overlaps_cells = _np_all([
-            (dist_lower_bounds[:,i] <= radius) if include_boundary and point_in_set or 0. in cell else (dist_lower_bounds[:,i] < radius) 
+            (dist_lower_bounds[:,i] <= r) if include_boundary and point_in_set or 0. in cell else (dist_lower_bounds[:,i] < r) 
             for i,point_in_set, cell in zip(range(dist_lower_bounds.shape[1]), vertex_is_inside_convex_set, cells)
         ], axis=0)
     
@@ -369,7 +369,7 @@ def check_if_always_overlaps_full_convex_set(
         cells:_np_array,
         convex_set_vertices:_np_array = _np_array([[0,0],[.5,0],[.5,.5]]),
         vertex_is_inside_convex_set=True,
-        radius:float=0.00750,
+        r:float=0.00750,
         grid_spacing:float=0.00250,
         include_boundary:bool=False,
 ):
@@ -383,7 +383,7 @@ def check_if_always_overlaps_full_convex_set(
         (pt_x-vtx_x)**2+(pt_y-vtx_y)**2 for (pt_x, pt_y), vtx_x, vtx_y in [
             (get_cell_closest_point_to_point((vtx_x, vtx_y), cell), vtx_x, vtx_y) for (vtx_x, vtx_y) in convex_set_vertices
         ]
-        ]) <= (radius/grid_spacing)**2 
+        ]) <= (r/grid_spacing)**2 
         for cell in cells]
 
     return always_overlaps_full_convex_set
@@ -393,7 +393,7 @@ def check_if_never_contains_convex_set(
         cells:_np_array,
         convex_set_vertices:_np_array = _np_array([[0,0],[.5,0],[.5,.5]]),
         vertex_is_inside_convex_set=True,
-        radius:float=0.00750,
+        r:float=0.00750,
         grid_spacing:float=0.00250,
         include_boundary:bool=False,
 ):
@@ -409,9 +409,9 @@ def check_if_never_contains_convex_set(
         for cell in cells]
     )
 
-    set_maybe_contains_cells = _np_any(dist_upper_bounds <= radius, axis=1)
+    set_maybe_contains_cells = _np_any(dist_upper_bounds <= r, axis=1)
     set_maybe_contains_cells = _np_any([
-            (dist_upper_bounds[:,i] <= radius) if include_boundary and point_in_set else (dist_upper_bounds[:,i] < radius) 
+            (dist_upper_bounds[:,i] <= r) if include_boundary and point_in_set else (dist_upper_bounds[:,i] < r) 
             for i,point_in_set in zip(range(dist_upper_bounds.shape[1]), vertex_is_inside_convex_set)
         ], axis=0)
     set_never_contains_cells = _np_invert(set_maybe_contains_cells)
@@ -460,7 +460,7 @@ def check_if_never_contains_convex_set(
 
 
 def get_always_contained_potentially_overlapped_cells(
-        radius:float=750,
+        r:float=750,
         grid_spacing:float=750,
         count_only:bool=True
     ) -> tuple:
@@ -476,7 +476,7 @@ def get_always_contained_potentially_overlapped_cells(
     TODO wording needed to say home grid cell
 
     Args:
-      radius (float):
+      r (float):
         the radius of disk drawn around any point within the cell, in which other points are searched,
         this is used to check whether other grid cells are fully contained in that disk or overlaped
         by any possble point in the grid cell
@@ -505,7 +505,7 @@ def get_always_contained_potentially_overlapped_cells(
      
      """
 
-    ratio = radius/grid_spacing
+    ratio = r/grid_spacing
     cell_steps_max = _math_ceil(ratio+1)
     overlap_count, overlap_count = 0,0
 

@@ -63,7 +63,7 @@ class DiskSearchSource(DiskSearchObject):
         # return assign_points_to_cell_regions(
             grid=self.grid,
             pts=self.pts,
-            radius=self.grid.search.radius,
+            r=self.grid.search.r,
             include_boundary=self.grid.search.include_boundary,
             y=self.y,
             x=self.x,
@@ -144,7 +144,7 @@ class DiskSearch(object):
         self.update_search_params(
             grid=grid,
             exclude_pt_itself=exclude_pt_itself,
-            radius=r,
+            r=r,
             include_boundary=include_boundary,
         )
         #
@@ -155,7 +155,7 @@ class DiskSearch(object):
         self,
         grid,
         exclude_pt_itself:bool=None,
-        radius:float=0.0075,
+        r:float=0.0075,
         include_boundary:bool=False,
         relation_tgt_to_src:str=None,
     ):
@@ -164,18 +164,18 @@ class DiskSearch(object):
         if relation_tgt_to_src is not None:
             self.relation_tgt_to_src = relation_tgt_to_src
         
-        # early return if radius and include_boundary have not changed
-        if hasattr(self, 'radius') and hasattr(self, 'include_boundary'):
-            if self.radius == radius and self.include_boundary == include_boundary:
+        # early return if r and include_boundary have not changed
+        if hasattr(self, 'r') and hasattr(self, 'include_boundary'):
+            if self.r == r and self.include_boundary == include_boundary:
                 return
         
         # store params
-        self.radius = radius
+        self.r = r
         self.include_boundary = include_boundary
         self.overlap_checks = []
         self.contain_checks = []
         
-        # get relative position of cells that are always included within radius for current gridsize    
+        # get relative position of cells that are always included within r for current gridsize    
         (
         self.cells_contained_in_all_disks, 
         self.cells_contained_in_all_trgl_disks, 
@@ -183,7 +183,7 @@ class DiskSearch(object):
         self.cells_maybe_overlapping_a_trgl_disk
         ) = get_cells_relevant_for_disk_by_type(
                 grid_spacing=grid.spacing,
-                radius=radius,
+                r=r,
                 include_boundary=include_boundary,
         )
         # hierarchically order all cells with respect to any point in triangle. 
@@ -192,12 +192,12 @@ class DiskSearch(object):
         # e.g. (2,3) is weakly closer than (?,?) as any pt in triangle is P(x,y<=0.5*grid.spacing)
         triangle_1_vertices = _np_array([[0,0],[0.5,0],[0.5,0.5]])
         vertices_is_inside_triangle_1 = _np_array([True,True,False],dtype=bool)
-        # TODO radius,grid_spacing, include_boundary could be removed from weak_order_tree generation
+        # TODO r,grid_spacing, include_boundary could be removed from weak_order_tree generation
         self.weak_order_tree = gen_weak_order_rel_to_convex_set(
                 cells=self.cells_maybe_overlapping_a_trgl_disk,
                 convex_set_vertices = triangle_1_vertices,
                 vertex_is_inside_convex_set = vertices_is_inside_triangle_1,
-                radius=radius,
+                r=r,
                 grid_spacing=grid.spacing,
                 include_boundary=include_boundary,
         )
@@ -371,7 +371,7 @@ class DiskSearch(object):
             grid=self.grid,
             pts_source=self.source.pts,
             pts_target=self.target.pts,
-            radius=self.radius,
+            r=self.r,
             columns=self.target.columns,
             y=self.source.y,
             x=self.source.x,

@@ -1,4 +1,4 @@
-# intersection of two circles with same radius
+# intersection of two circles with same r
 from numpy import (linspace as _np_linspace, array as _np_array, abs as _np_abs, dot as _np_dot, roll as _np_roll)
 from math import sin as _math_sin, cos as _math_cos, pi as _math_pi
 from matplotlib import pyplot as plt
@@ -139,20 +139,20 @@ class Edge(object):
             rotation = angle_to((0,0), self.center)
             
             # ax.plot(
-            #     [self.center[0], self.center[0]+self.radius*_math_cos((rotation+self.angle_min)/360*2*_math_pi)],
-            #     [self.center[1], self.center[1]+self.radius*_math_sin((rotation+self.angle_min)/360*2*_math_pi)],
+            #     [self.center[0], self.center[0]+self.r*_math_cos((rotation+self.angle_min)/360*2*_math_pi)],
+            #     [self.center[1], self.center[1]+self.r*_math_sin((rotation+self.angle_min)/360*2*_math_pi)],
             #     marker='.', color='red',alpha=0.3,)
             # ax.plot(
-            #     [self.center[0], self.center[0]+self.radius*_math_cos((rotation+self.angle_max)/360*2*_math_pi)],
-            #     [self.center[1], self.center[1]+self.radius*_math_sin((rotation+self.angle_max)/360*2*_math_pi)],
+            #     [self.center[0], self.center[0]+self.r*_math_cos((rotation+self.angle_max)/360*2*_math_pi)],
+            #     [self.center[1], self.center[1]+self.r*_math_sin((rotation+self.angle_max)/360*2*_math_pi)],
             #     marker='.', color='green',alpha=0.3,)
             ax.plot(
-                [self.center[0], self.center[0]+self.radius*_math_cos((rotation+self.angle_vtx1)/360*2*_math_pi)],
-                [self.center[1], self.center[1]+self.radius*_math_sin((rotation+self.angle_vtx1)/360*2*_math_pi)],
+                [self.center[0], self.center[0]+self.r*_math_cos((rotation+self.angle_vtx1)/360*2*_math_pi)],
+                [self.center[1], self.center[1]+self.r*_math_sin((rotation+self.angle_vtx1)/360*2*_math_pi)],
                 marker='.', color='red',alpha=0.3,)
             ax.plot(
-                [self.center[0], self.center[0]+self.radius*_math_cos((rotation+self.angle_vtx2)/360*2*_math_pi)],
-                [self.center[1], self.center[1]+self.radius*_math_sin((rotation+self.angle_vtx2)/360*2*_math_pi)],
+                [self.center[0], self.center[0]+self.r*_math_cos((rotation+self.angle_vtx2)/360*2*_math_pi)],
+                [self.center[1], self.center[1]+self.r*_math_sin((rotation+self.angle_vtx2)/360*2*_math_pi)],
                 marker='.', color='green',alpha=0.3,)
             x_coords = [x for x,y in self.coords]
             y_coords = [y for x,y in self.coords]
@@ -173,7 +173,7 @@ class Edge(object):
                     arc_center=self.center,
                     arc_angle_min=self.angle_min,
                     arc_angle_max=self.angle_max,
-                    radius=self.radius,
+                    r=self.r,
                 )
             elif edge.type == 'Circle':
                 return intersections_pts_arc_to_circle(
@@ -181,7 +181,7 @@ class Edge(object):
                     arc_center=self.center,
                     arc_angle_min=self.angle_min,
                     arc_angle_max=self.angle_max,
-                    radius=self.radius,
+                    r=self.r,
                 )
         if self.type not in ['Arc','LineSegment']:
             print("Types",self.type, edge.type)
@@ -191,7 +191,7 @@ class Edge(object):
         
         return circle_line_segment_intersection(
             circle_center=arc.center,
-            circle_radius=arc.radius,
+            circle_radius=arc.r,
             pt1=line.vtx1.xy,
             pt2=line.vtx2.xy,
             full_line=False,
@@ -233,11 +233,11 @@ class LineSegment(Edge):
 
 class Arc(Edge):
     """Arc around center (limited by two points on circle if supplied) """
-    def __init__(self, center, radius, all_edges:dict, vtx1=None, vtx2=None, outside_angle:bool=False, contains:tuple=None, overlaps:tuple=None):
+    def __init__(self, center, r, all_edges:dict, vtx1=None, vtx2=None, outside_angle:bool=False, contains:tuple=None, overlaps:tuple=None):
         super().__init__(vtx1, vtx2, all_edges, contains=contains, overlaps=overlaps)
         self.type = "Arc"
         self.center = center
-        self.radius = radius
+        self.r = r
         self.vtx1 = vtx1
         self.vtx2 = vtx2
 
@@ -252,7 +252,7 @@ class Arc(Edge):
         if new_vtx.xy in self.coords:
             return [self]
         self.all_edges.pop(self.coords, None)
-        arc_kwargs = {'center': self.center, 'radius': self.radius, 'all_edges': self.all_edges, **{key: getattr(self, key) for key in ['contains', 'overlaps'] if hasattr(self, key)}}
+        arc_kwargs = {'center': self.center, 'r': self.r, 'all_edges': self.all_edges, **{key: getattr(self, key) for key in ['contains', 'overlaps'] if hasattr(self, key)}}
 
         return [Arc(vtx1=self.vtx1, vtx2=new_vtx, **arc_kwargs), Arc(vtx1=new_vtx, vtx2=self.vtx2, **arc_kwargs)]
     #
@@ -267,16 +267,16 @@ class Arc(Edge):
         new_vtx2 = Vertex(*transform_coord(self.vtx2.xy, i), all_vtx=self.all_vtx)
         # flip order for regions 2,4,6,8
         edge_kwargs = {key: tuple(transform_cell(cell=_np_array(getattr(self, key)), i=i)) for key in ['contains', 'overlaps'] if hasattr(self, key)}
-        if i%2 == 1: return Arc(new_center, radius=self.radius, all_edges=self.all_edges, vtx1=new_vtx1, vtx2=new_vtx2, **edge_kwargs)
-        return Arc(new_center, radius=self.radius, all_edges=self.all_edges, vtx1=new_vtx2, vtx2=new_vtx1, **edge_kwargs)
+        if i%2 == 1: return Arc(new_center, r=self.r, all_edges=self.all_edges, vtx1=new_vtx1, vtx2=new_vtx2, **edge_kwargs)
+        return Arc(new_center, r=self.r, all_edges=self.all_edges, vtx1=new_vtx2, vtx2=new_vtx1, **edge_kwargs)
 #
 
 class Circle(object):
     """TODO potentially add as subclass of Edge?"""
-    def __init__(self, center, radius):
+    def __init__(self, center, r):
         self.type = "Circle"
         self.center = center
-        self.radius = radius
+        self.r = r
         self.angle_min, self.angle_max = (0,360)
     #
 #
@@ -344,7 +344,7 @@ class OffsetRegion(object):
                 total_angle = abs(edge.angle_max - edge.angle_min)
                 n_steps = -int(-(total_angle * arc_steps_per_degree))
                 cx, cy = edge.center
-                r = edge.radius
+                r = edge.r
                 rotation = angle_to((0,0), edge.center)
                 for angle_step in _np_linspace(edge.angle_min, edge.angle_max, n_steps):
                     x = cx + r * _math_cos((rotation+angle_step)/360*2*_math_pi)
@@ -366,7 +366,7 @@ class OffsetRegion(object):
                 total_angle = abs(edge.angle_max - edge.angle_min)
                 n_steps = -int(-(total_angle * arc_steps_per_degree))
                 cx, cy = edge.center
-                r = edge.radius
+                r = edge.r
                 rotation = angle_to((0,0), edge.center)
                 for angle_step in _np_linspace(edge.angle_min, edge.angle_max, n_steps):
                     xs.append(cx + r * _math_cos((rotation+angle_step)/360*2*_math_pi))
@@ -495,8 +495,8 @@ class OffsetRegion(object):
             x,y=vtx_not_on_intersection_edge
             # TODO as polygon is not necessarily convex centroid may lay outide, s.t this check may produce wrong results.  
             # BETTER APPROACH. Chose a point that is not on the current intersection edge. 
-            # print('radius', intersection_edge.radius, ((mean_x-intersection_edge.center[0])**2 + (mean_y-intersection_edge.center[1])**2)**.5)
-            result = intersection_edge.radius**2 > ((x - intersection_edge.center[0])**2 + (y - intersection_edge.center[1])**2)
+            # print('r', intersection_edge.r, ((mean_x-intersection_edge.center[0])**2 + (mean_y-intersection_edge.center[1])**2)**.5)
+            result = intersection_edge.r**2 > ((x - intersection_edge.center[0])**2 + (y - intersection_edge.center[1])**2)
         self.checks.append({**check, 'result': result})
     #
 
@@ -531,7 +531,7 @@ class OffsetRegion(object):
             raise ValueError("TODO IMPLEMENT MULTIPLE INTERSECTIONS", pts_to_split_at, intersection_edge.center)
         
         line_kwargs = {'all_edges':self.all_edges, **{key: getattr(intersection_edge, key) for key in ['contains', 'overlaps'] if hasattr(intersection_edge, key)}}
-        arc_kwargs = {'center': intersection_edge.center, 'radius': intersection_edge.radius, **line_kwargs}
+        arc_kwargs = {'center': intersection_edge.center, 'r': intersection_edge.r, **line_kwargs}
 
         if len(pts_to_split_at) == 1:
             if not 'pts' in pts_to_split_at[0]:
@@ -581,7 +581,7 @@ class OffsetRegion(object):
                 self.plot_single(ax=ax, color='#caa', plot_edges=False)
                 reg_without_itx.plot_single(ax=ax, color='green', alpha=0.5, hatch='/', plot_edges=False)
                 reg_itx.plot_single(ax=ax, color='red', alpha=0.5, hatch='\\', plot_edges=False)
-                GeoSeries([Point(intersection_edge.center).buffer(intersection_edge.radius, 40)]).plot(ax=ax, edgecolor='black', facecolor='None')
+                GeoSeries([Point(intersection_edge.center).buffer(intersection_edge.r, 40)]).plot(ax=ax, edgecolor='black', facecolor='None')
                 ax.set_title("1")
             self.delete()
 
@@ -660,7 +660,7 @@ class OffsetRegion(object):
                         reg_without_itx.plot_single(ax=ax, color='green', alpha=0.5, hatch='/', plot_edges=False, x_lim=None, y_lim=None, plot_vertices=True)
                     if i == 2:
                         reg_itx.plot_single(ax=ax, color='red', alpha=0.5, plot_edges=False, x_lim=None, y_lim=None, plot_vertices=True)
-                    GeoSeries([Point(intersection_edge.center).buffer(intersection_edge.radius, 40)]).plot(ax=ax, edgecolor='black', facecolor='None')
+                    GeoSeries([Point(intersection_edge.center).buffer(intersection_edge.r, 40)]).plot(ax=ax, edgecolor='black', facecolor='None')
                     if i == 0:
                         ax.set_title("T st:"+str(start['touches'])+", end:"+str(end['touches'])+ 'i st:'+str(start['i'])+' i end:'+str(end['i'])+
                                      ' nedges'+str(len(self.edges))+'+'+str(include_first_in_without_itx) + str(first_region_edge.vtx2.xy == self.edges[start['i']].vtx1.xy) )

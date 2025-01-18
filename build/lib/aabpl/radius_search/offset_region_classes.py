@@ -1,11 +1,13 @@
+# intersection of two circles with same radius
 from numpy import (linspace as _np_linspace, array as _np_array, abs as _np_abs, dot as _np_dot, roll as _np_roll)
-from math import (sin as _math_sin, cos as _math_cos, pi as _math_pi)
+from math import sin as _math_sin, cos as _math_cos, pi as _math_pi
 from matplotlib import pyplot as plt
 from aabpl.utils.general import angles_to_origin, angle_to, pt_is_left_of_vector
 from aabpl.utils.rotations import transform_cell_pattern, transform_coord, transform_cell
 from aabpl.utils.intersections import circle_line_segment_intersection, line_intersection, intersections_pts_arc_to_circle
 from shapely.geometry import Polygon, LineString, Point
 from geopandas import GeoSeries
+
 
 # for each circle remember the meaning of the check (contains / overlaps)
 # for each intersection point save what circle it comes from

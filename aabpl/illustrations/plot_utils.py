@@ -224,20 +224,20 @@ def create_trgl1_patch(
 def create_circle_arc_coords(
     pts:_np_array, 
     arc:_np_array,
-    radius:float,
+    r:float,
     rotation_angles:float=None
 ):
     if rotation_angles is None:
         n=len(pts)
         rotation_angles=_np_arange(n) / n * 2 *_math_pi
-    r=radius
+    r=r
     poly_coords = flatten_list([[(r*_math_cos(t) + pt_x, r*_math_sin(t) + pt_y) for t in angle+arc]  for (pt_x,pt_y),angle in zip(pts, rotation_angles)])
 
     return poly_coords
 
 def create_buffered_square_patch(
         side_length:float,
-        radius:float=750,
+        r:float=750,
         nsteps:int = 25,
         facecolor:str='None', 
         edgecolor:str='green',
@@ -256,7 +256,7 @@ def create_buffered_square_patch(
             (+x + x_off, -x + y_off), # bottom right
         ),
         arc = _math_pi * _np_linspace(0, .5,nsteps),
-        radius = radius,
+        r = r,
     )
 
     return _plt_Polygon(poly_coords, facecolor=facecolor, edgecolor=edgecolor, **kwargs)
@@ -264,7 +264,7 @@ def create_buffered_square_patch(
   
 def create_debuffered_square_patch(
         side_length:float,
-        radius:float=750,
+        r:float=750,
         nsteps:int = 25,
         facecolor:str='None', 
         edgecolor:str='red',
@@ -276,7 +276,7 @@ def create_debuffered_square_patch(
     
     """
     x = side_length/2
-    alpha = _math_acos(x/2/radius)/_math_pi
+    alpha = _math_acos(x/2/r)/_math_pi
     beta = 0.5-alpha
     print("ALPA",alpha)
     poly_coords = create_circle_arc_coords(pts=(
@@ -286,14 +286,14 @@ def create_debuffered_square_patch(
             (-x + x_off, +x + y_off), # bottom right
         ),
         arc=_math_pi * _np_linspace(beta, alpha,nsteps,endpoint=True),
-        radius=radius,
+        r=r,
     )
     return _plt_Polygon(poly_coords,facecolor=facecolor,edgecolor=edgecolor, **kwargs)
 #
 
 def create_buffered_trgl1_patch(
         side_length:float = 250,
-        radius:float = 750,
+        r:float = 750,
         nsteps:int = 25,
         facecolor:str='None', 
         edgecolor:str='yellow',
@@ -306,7 +306,6 @@ def create_buffered_trgl1_patch(
     
     """
     x = side_length
-    r = radius
     poly_coords =  (
         # top right/left
         [(r*_math_cos(t) + x + x_off, r*_math_sin(t) + x + y_off) for t in _math_pi * _np_linspace(0, 0.75,nsteps)] +
@@ -320,7 +319,7 @@ def create_buffered_trgl1_patch(
 
 def create_debuffered_trgl1_patch(
         side_length:float = 250,
-        radius:float = 750,
+        r:float = 750,
         nsteps:int = 25,
         x_off:float=0,
         y_off:float=0,
@@ -331,7 +330,6 @@ def create_debuffered_trgl1_patch(
     """
     
     """
-    r = radius
     x = side_length
     alpha = _math_acos(x/2/r)/_math_pi
     beta = 0.5-alpha
@@ -348,15 +346,14 @@ def create_debuffered_trgl1_patch(
 
 def  dual_circle_union_patch(
         centroids:_np_array,
-        radius:float,
+        r:float,
         nsteps:int=100,
         **kwargs,
         ):
     dist = _np_linalg_norm(centroids[1]-centroids[0])
-    if dist >= radius:
+    if dist >= r:
         print("too far apart. 2 circles are not implemented")
         return
-    r = radius
     alpha = _math_acos(dist/2/r)
     left_x, left_y = centroids[0]
     right_x, right_y = centroids[1]
@@ -380,7 +377,7 @@ def add_circle_patches(
     edgecolor_outside_center_cell=True,
     convex_set_boundaries:_np_array= _np_array([(-0.5,-0.5), (0.5,-0.5),(0.5,0.5),(-0.5,0.5)]),
     grid_spacing:float=1, 
-    radius:float=3, 
+    r:float=3, 
     **kwargs,
 ):
     circles_outside_center_cell = []
@@ -404,7 +401,7 @@ def add_circle_patches(
                     # 
                     if edgecolor_outside not in [False, None, 'None']:
                         circles_outside_center_cell.append(create_buffered_square_patch(
-                            side_length=grid_spacing, radius=radius,
+                            side_length=grid_spacing, r=r,
                             edgecolor=edgecolor_outside,
                             x_off = (col - _np_sign(col))*grid_spacing,
                             y_off = (row - _np_sign(row))*grid_spacing,
@@ -420,27 +417,27 @@ def add_circle_patches(
                     if edgecolor_outside not in [False, None, 'None']:
                         for xy in _np_unique(closest_cell_vertex,axis=0):
                             circles_outside_center_cell.append(_plt_Circle(
-                                xy=xy*grid_spacing, radius=radius, facecolor='None',edgecolor=edgecolor_outside, **kwargs
+                                xy=xy*grid_spacing, r=r, facecolor='None',edgecolor=edgecolor_outside, **kwargs
                             ))
                     # circle_patches_segment.append()
                     pass
             if len(farthest_points)==2:
                 if row != 0 or col != 0:  
                     circles_outside_center_cell.append(
-                        dual_circle_union_patch(farthest_points, radius=radius, facecolor='None',edgecolor=edgecolor_outside, **kwargs)
+                        dual_circle_union_patch(farthest_points, r=r, facecolor='None',edgecolor=edgecolor_outside, **kwargs)
                     )
                 else:
                     print("WARNING THIS IS NOT IMPLEMENTED",farthest_points)
                     for farthest_point in farthest_points:
                         circles_outside_center_cell.append(_plt_Circle(
-                            xy=farthest_point, radius=radius, facecolor='None',edgecolor=edgecolor_outside, **kwargs
+                            xy=farthest_point, r=r, facecolor='None',edgecolor=edgecolor_outside, **kwargs
                         ))        
             else:
                 if len(farthest_points)>2:
                     print("WARNING THIS IS NOT IMPLEMENTED", farthest_points)
                 for farthest_point in farthest_points:
                     circles_outside_center_cell.append(_plt_Circle(
-                        xy=farthest_point, radius=radius, facecolor='None',edgecolor=edgecolor_outside, **kwargs
+                        xy=farthest_point, r=r, facecolor='None',edgecolor=edgecolor_outside, **kwargs
                     ))        
                     # circle_patches_segment.append()
             #
@@ -454,7 +451,7 @@ def add_circle_patches(
 
 def create_circle_patches(
         grid_spacing:float,
-        radius:float=750,
+        r:float=750,
         x_off:float=0,
         y_off:float=0,
         nsteps:int = 25,
@@ -467,7 +464,7 @@ def create_circle_patches(
     """
     outer_poly_patch = create_buffered_square_patch(
         side_length=grid_spacing,
-        radius=radius,
+        r=r,
         nsteps=nsteps,
         facecolor=facecolor, 
         edgecolor='green',
@@ -477,7 +474,7 @@ def create_circle_patches(
     )
     inner_poly_patch = create_debuffered_square_patch(
         side_length=grid_spacing,
-        radius=radius,
+        r=r,
         nsteps=nsteps,
         facecolor=facecolor, 
         edgecolor='green',

@@ -113,9 +113,9 @@ def transform_cell_pattern(
 @time_func_perf
 def get_pt_to_cell_centroid_triangle_offset(
     grid:dict,
-    pts_df:_pd_DataFrame,
-    x_coord_name:str='lon',
-    y_coord_name:str='lat',
+    pts:_pd_DataFrame,
+    x:str='lon',
+    y:str='lat',
     row_name:str='id_y',
     col_name:str='id_x',
 )->tuple:
@@ -128,9 +128,9 @@ def get_pt_to_cell_centroid_triangle_offset(
         TODO
     Returns:
       triangle_offset_info (tuple): 
-      - cntrd_offset_xy (numpy.array): Point offset to centroid of its cell. Shape=len(pts_df),2
-      - cntrd_trngl_offset_xy (numpy.array): Point offset to centroid coord transformed into Triangle1. Shape=len(pts_df),2
-      - triangle_ids (numpy.array): int 1-8 indicating Triangle in which point offset to centroid coord falls. Shape=len(pts_df),
+      - cntrd_offset_xy (numpy.array): Point offset to centroid of its cell. Shape=len(pts),2
+      - cntrd_trngl_offset_xy (numpy.array): Point offset to centroid coord transformed into Triangle1. Shape=len(pts),2
+      - triangle_ids (numpy.array): int 1-8 indicating Triangle in which point offset to centroid coord falls. Shape=len(pts),
         
     """    
     # unpack values from Grid dictionary
@@ -141,30 +141,30 @@ def get_pt_to_cell_centroid_triangle_offset(
     # each point is contained in grid cell. Calculate the offset of each point to the centroid of its grid cell.
     # TODO cut may contain repeated expensive operation - thus already assigned cell vectors could be used to just query cell centroid by cell_id from dict 
     # lon/x offset
-    offset_x = pts_df[x_coord_name] - _pd_cut(
-        x=pts_df[x_coord_name],
+    offset_x = pts[x] - _pd_cut(
+        x=pts[x],
         bins=x_steps, labels=[(x_low+x_up)/2 for x_low,x_up in zip(x_steps[:-1], x_steps[1:])],
         include_lowest=True).astype(float)
     
     # lat/y offset
-    offset_y = pts_df[y_coord_name] - _pd_cut(
-        x=pts_df[y_coord_name],
+    offset_y = pts[y] - _pd_cut(
+        x=pts[y],
         bins=y_steps, labels=[(y_low+y_up)/2 for y_low,y_up in zip(y_steps[:-1], y_steps[1:])],
         # bins=y_steps, labels=[(y_low+y_up)/2 for y_low,y_up in zip(y_steps[1:], y_steps[:-1])],
         include_lowest=True).astype(float)
     
     # id_y_mult = grid.id_y_mult
-    # cell_centroid = _np_array([grid.row_col_to_centroid[row*id_y_mult+col] for row,col in pts_df[[row_name, col_name]]])
+    # cell_centroid = _np_array([grid.row_col_to_centroid[row*id_y_mult+col] for row,col in pts[[row_name, col_name]]])
 
-    # offset_x = cell_centroid[:,0] - pts_df[x_coord_name]
-    # offset_y = cell_centroid[:,1] - pts_df[y_coord_name]
-    pts_df['offset_x'] = offset_x.copy()
-    pts_df['offset_y'] = offset_y.copy()
+    # offset_x = cell_centroid[:,0] - pts[x]
+    # offset_y = cell_centroid[:,1] - pts[y]
+    pts['offset_x'] = offset_x.copy()
+    pts['offset_y'] = offset_y.copy()
     # combine into single 2D _np_array of shape=(n_pts, 2)
     cntrd_offset_xy = _np_column_stack([offset_x, offset_y])
     # infer triangle in which the points falls
     triangle_ids = classify_point_triangle(x=offset_x,y=offset_y)
-    pts_df['triangle_id'] = triangle_ids
+    pts['triangle_id'] = triangle_ids
     # Transform offset pt s.t. each offset pt is contained in triangle 1.
     # as we have a store the triangle id, we can reverse the transformation later on.
     cntrd_trngl_offset_xy = _np_sort(abs(cntrd_offset_xy),axis=1)[:,::-1]
@@ -176,9 +176,9 @@ def get_pt_to_cell_centroid_triangle_offset(
 @time_func_perf
 def get_pt_to_cell_centroid_cell_offset(
     grid:dict,
-    pts_df:_pd_DataFrame,
-    x_coord_name:str='lon',
-    y_coord_name:str='lat',
+    pts:_pd_DataFrame,
+    x:str='lon',
+    y:str='lat',
     row_name:str='id_y',
     col_name:str='id_x',
 )->_np_array:
@@ -191,9 +191,9 @@ def get_pt_to_cell_centroid_cell_offset(
         TODO
     Returns:
       triangle_offset_info (tuple): 
-      - cntrd_offset_xy (numpy.array): Point offset to centroid of its cell. Shape=len(pts_df),2
-      - cntrd_trngl_offset_xy (numpy.array): Point offset to centroid coord transformed into Triangle1. Shape=len(pts_df),2
-      - triangle_ids (numpy.array): int 1-8 indicating Triangle in which point offset to centroid coord falls. Shape=len(pts_df),
+      - cntrd_offset_xy (numpy.array): Point offset to centroid of its cell. Shape=len(pts),2
+      - cntrd_trngl_offset_xy (numpy.array): Point offset to centroid coord transformed into Triangle1. Shape=len(pts),2
+      - triangle_ids (numpy.array): int 1-8 indicating Triangle in which point offset to centroid coord falls. Shape=len(pts),
         
     """    
     # unpack values from Grid dictionary
@@ -204,25 +204,25 @@ def get_pt_to_cell_centroid_cell_offset(
     # each point is contained in grid cell. Calculate the offset of each point to the centroid of its grid cell.
     # TODO cut may contain repeated expensive operation - thus already assigned cell vectors could be used to just query cell centroid by cell_id from dict 
     # lon/x offset
-    offset_x = pts_df[x_coord_name] - _pd_cut(
-        x=pts_df[x_coord_name],
+    offset_x = pts[x] - _pd_cut(
+        x=pts[x],
         bins=x_steps, labels=[(x_low+x_up)/2 for x_low,x_up in zip(x_steps[:-1], x_steps[1:])],
         include_lowest=True).astype(float)
     
     # lat/y offset
-    offset_y = pts_df[y_coord_name] - _pd_cut(
-        x=pts_df[y_coord_name],
+    offset_y = pts[y] - _pd_cut(
+        x=pts[y],
         bins=y_steps, labels=[(y_low+y_up)/2 for y_low,y_up in zip(y_steps[1:], y_steps[:-1])],
         # bins=y_steps[::-1], labels=[(y_low+y_up)/2 for y_low,y_up in zip(y_steps[1:], y_steps[:-1])][::-1],
         include_lowest=True).astype(float)
     
     # id_y_mult = grid.id_y_mult
-    # cell_centroid = _np_array([grid.row_col_to_centroid[row*id_y_mult+col] for row,col in pts_df[[row_name, col_name]]])
+    # cell_centroid = _np_array([grid.row_col_to_centroid[row*id_y_mult+col] for row,col in pts[[row_name, col_name]]])
     offset_xy_unscaled = _np_column_stack([offset_x, offset_y]) / grid.spacing
-    # offset_x = cell_centroid[:,0] - pts_df[x_coord_name]
-    # offset_y = cell_centroid[:,1] - pts_df[y_coord_name]
-    pts_df['offset_x'] = offset_xy_unscaled[:,0].copy()
-    pts_df['offset_y'] = offset_xy_unscaled[:,1].copy()
+    # offset_x = cell_centroid[:,0] - pts[x]
+    # offset_y = cell_centroid[:,1] - pts[y]
+    pts['offset_x'] = offset_xy_unscaled[:,0].copy()
+    pts['offset_y'] = offset_xy_unscaled[:,1].copy()
     # combine into single 2D _np_array of shape=(n_pts, 2)
     
     return offset_xy_unscaled
@@ -309,11 +309,11 @@ def create_cell_region(
 @time_func_perf
 def assign_points_to_cell_regions(
     grid:dict,
-    pts_df,
+    pts,
     radius:float=0.0075,
     include_boundary:bool=False,
-    x_coord_name:str='lon',
-    y_coord_name:str='lat',
+    x:str='lon',
+    y:str='lat',
     row_name:str='id_y',
     col_name:str='id_x',
     cell_region_name:str='cell_region',
@@ -325,28 +325,28 @@ def assign_points_to_cell_regions(
     TODO explain
     """
 
-    pts_df.sort_values([y_coord_name, x_coord_name], inplace=True)
-    n_pts = len(pts_df)
+    pts.sort_values([y, x], inplace=True)
+    n_pts = len(pts)
 
     # TODO can this function be split up here?
     (cntrd_offset_xy, cntrd_trngl_offset_xy, triangle_ids) = get_pt_to_cell_centroid_triangle_offset(
         grid=grid,
-        pts_df=pts_df,
-        x_coord_name=x_coord_name,
-        y_coord_name=y_coord_name,
+        pts=pts,
+        x=x,
+        y=y,
         row_name=row_name,
         col_name=col_name,
     )
 
-    pts_df['triangle_id'] = triangle_ids # TODO remove this
+    pts['triangle_id'] = triangle_ids # TODO remove this
     # intialize 2D matrices to store results  
     disks_by_cells_contains = _np_zeros((n_pts, grid.search.weak_order_tree.n_checks_if_contained),dtype=bool)
     disks_by_cells_overlaps = _np_zeros((n_pts, grid.search.weak_order_tree.n_checks_if_overlapped),dtype=bool)
     
     # apply recursive checks on cells (defined in family_tree_flat) on whether disks around pts fully or partially contain them 
     scaled_to_grid_cntrd_trngl_offset_xy = cntrd_trngl_offset_xy / grid.spacing
-    pts_df['scaled_cntrd_trngl_offset_x']=scaled_to_grid_cntrd_trngl_offset_xy[:,0]
-    pts_df['scaled_cntrd_trngl_offset_y']=scaled_to_grid_cntrd_trngl_offset_xy[:,1]
+    pts['scaled_cntrd_trngl_offset_x']=scaled_to_grid_cntrd_trngl_offset_xy[:,0]
+    pts['scaled_cntrd_trngl_offset_y']=scaled_to_grid_cntrd_trngl_offset_xy[:,1]
     recursive_cell_region_inference(
         grid=grid,
         transformed_offset_xy=scaled_to_grid_cntrd_trngl_offset_xy,
@@ -431,7 +431,7 @@ def assign_points_to_cell_regions(
         # region_id += 100
 
     # SAVE cell_region_id TO POINT DATAFRAME
-    pts_df[cell_region_name] = region_ids
+    pts[cell_region_name] = region_ids
     
     # add triangle id (to recover full information of pts after forcing them into triangle 1) and substract 1 (as triangle ids start with 1)
     # except for the a potential region around centroid that is shared among all triangles
@@ -458,15 +458,15 @@ def assign_points_to_cell_regions(
             ' are fully contained additional to',len(grid.search.cells_contained_in_all_disks),'that are contained for any cell.'
         )
         print(
-            str(len(pts_df.index) - _np_logical_or(pts_df[col_name]==-1, pts_df[row_name]==-1).sum())+
-            '/'+str(len(pts_df.index)) +
-            ' Points assigned to '+str(len(_np_unique(pts_df[[row_name, col_name]].values,axis=0)))+
+            str(len(pts.index) - _np_logical_or(pts[col_name]==-1, pts[row_name]==-1).sum())+
+            '/'+str(len(pts.index)) +
+            ' Points assigned to '+str(len(_np_unique(pts[[row_name, col_name]].values,axis=0)))+
             '/'
             
             
             +str(len(grid.ids))+' cells ' +
-            'with '+ str(len(pts_df[cell_region_name].unique())) +' regions resulting in '+
-            str(len(_np_unique(pts_df[[row_name, col_name,cell_region_name]].values,axis=0))) +' unique cell region combinations.'
+            'with '+ str(len(pts[cell_region_name].unique())) +' regions resulting in '+
+            str(len(_np_unique(pts[[row_name, col_name,cell_region_name]].values,axis=0))) +' unique cell region combinations.'
             
         )
     # now convert results of recursive function into an integer that call a dicitionary to retrieve relevant cells
@@ -478,11 +478,11 @@ def assign_points_to_cell_regions(
 @time_func_perf
 def assign_points_to_mirco_regions(
     grid:dict,
-    pts_df,
+    pts,
     radius:float=0.0075,
     include_boundary:bool=False,
-    x_coord_name:str='lon',
-    y_coord_name:str='lat',
+    x:str='lon',
+    y:str='lat',
     row_name:str='id_y',
     col_name:str='id_x',
     cell_region_name:str='cell_region',
@@ -497,15 +497,15 @@ def assign_points_to_mirco_regions(
     TODO explain
     """
 
-    pts_df.sort_values([y_coord_name, x_coord_name], inplace=True)
-    n_pts = len(pts_df)
+    pts.sort_values([y, x], inplace=True)
+    n_pts = len(pts)
 
     # TODO can this function be split up here?
     offset_xy_unscaled = get_pt_to_cell_centroid_cell_offset(
         grid=grid,
-        pts_df=pts_df,
-        x_coord_name=x_coord_name,
-        y_coord_name=y_coord_name,
+        pts=pts,
+        x=x,
+        y=y,
         row_name=row_name,
         col_name=col_name,
     )
@@ -530,30 +530,30 @@ def assign_points_to_mirco_regions(
     offset_all_y_vals[ 0] -= 0.01
     offset_all_y_vals[-1] += 0.01
 
-    pts_df['initial_sort'] = range(len(pts_df))
-    pts_df.sort_values('offset_x', inplace=True)
+    pts['initial_sort'] = range(len(pts))
+    pts.sort_values('offset_x', inplace=True)
 
     micro_raster_x = _pd_cut(
-        x = pts_df['offset_x'],
+        x = pts['offset_x'],
         bins = offset_all_x_vals,
         labels = lbls_x,
         include_lowest = True
     ).astype(int)
-    # pts_df['offset_ny'] = -pts_df['offset_y']
+    # pts['offset_ny'] = -pts['offset_y']
     micro_raster_y = _pd_cut(
-        x = pts_df['offset_y'],
+        x = pts['offset_y'],
         bins = offset_all_y_vals,
         labels = lbls_y,
         include_lowest = True
     ).astype(int)
     # TODO remove this next line
-    pts_df['micro_raster_x'] = micro_raster_x
-    pts_df['micro_raster_y'] = micro_raster_y
+    pts['micro_raster_x'] = micro_raster_x
+    pts['micro_raster_y'] = micro_raster_y
     
-    pts_df['region_comb_nr'] = [raster_cell_to_region_comb_nr[(ix, iy)] for ix,iy in zip(micro_raster_x, micro_raster_y)]
-    pts_df.sort_values('region_comb_nr', inplace=True)
-    region_comb_nr = pts_df['region_comb_nr'].values
-    pts_offset_xy = pts_df[['offset_x', 'offset_y']].values
+    pts['region_comb_nr'] = [raster_cell_to_region_comb_nr[(ix, iy)] for ix,iy in zip(micro_raster_x, micro_raster_y)]
+    pts.sort_values('region_comb_nr', inplace=True)
+    region_comb_nr = pts['region_comb_nr'].values
+    pts_offset_xy = pts[['offset_x', 'offset_y']].values
     n_pts = len(pts_offset_xy)
     i=0
     pts_offset_region = -_np_ones(n_pts, dtype=int)
@@ -568,20 +568,20 @@ def assign_points_to_mirco_regions(
         res = check(pts_offset_xy[i:j])
         pts_offset_region[i:j] = res
         i = j
-    pts_df[cell_region_name] = pts_offset_region
+    pts[cell_region_name] = pts_offset_region
     
-    pts_df.sort_values('initial_sort', inplace=True)
+    pts.sort_values('initial_sort', inplace=True)
 
     grid.search.id_to_offset_regions = id_to_offset_regions
     grid.search.region_id_to_contained_cells = {id: reg.contained_cells for id,reg in id_to_offset_regions.items()}
     grid.search.region_id_to_overlapped_cells = {id: reg.overlapped_cells for id,reg in id_to_offset_regions.items()}
 
     if 'testing' != 'testing':
-        pts_df.drop('initial_sort', axis=1, inplace=True)
+        pts.drop('initial_sort', axis=1, inplace=True)
         print('Mean contained:', sum([len(v) for v in grid.search.region_id_to_contained_cells.values()])/len(grid.search.region_id_to_contained_cells))
         print('Mean overlapped:', sum([len(v) for v in grid.search.region_id_to_overlapped_cells.values()])/len(grid.search.region_id_to_overlapped_cells))
     else:
-        # pts_df['triangle_id'] = classify_point_triangle(x=pts_df['offset_x'], y=pts_df['offset_y']) # TODO remove this
-        pts_df.drop(['initial_sort', 'micro_raster_x', 'micro_raster_y','offset_x', 'offset_y'], axis=1, inplace=True)
+        # pts['triangle_id'] = classify_point_triangle(x=pts['offset_x'], y=pts['offset_y']) # TODO remove this
+        pts.drop(['initial_sort', 'micro_raster_x', 'micro_raster_y','offset_x', 'offset_y'], axis=1, inplace=True)
    
 #

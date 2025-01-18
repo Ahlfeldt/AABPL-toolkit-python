@@ -1,7 +1,4 @@
-from numpy import (
-    array as _np_array,
-    zeros as _np_zeros,
-)
+from numpy import array as _np_array, zeros as _np_zeros
 from numpy.linalg import norm as _np_linalg_norm
 from pandas import (DataFrame as _pd_DataFrame, cut as _pd_cut, concat as _pd_concat) 
 from aabpl.utils.general import flatten_list
@@ -9,18 +6,17 @@ from aabpl.illustrations.illustrate_point_to_disk import illustrate_point_disk
 from aabpl.illustrations.plot_pt_vars import create_plots_for_vars
 from aabpl.testing.test_performance import time_func_perf
 
-_np_array = time_func_perf(_np_array)
 
 ################ aggreagate_point_data_to_disks_vectorized ######################################################################################
 @time_func_perf
 def aggreagate_point_data_to_disks_vectorized(
     grid:dict,
-    pts_df_search_source:_pd_DataFrame,
-    pts_df_search_target:_pd_DataFrame=None,
+    pts_source:_pd_DataFrame,
+    pts_target:_pd_DataFrame=None,
     radius:float=0.0075,
-    sum_names:list=['employment'],
-    y_coord_name:str='lat',
-    x_coord_name:str='lon',
+    columns:list=['employment'],
+    y:str='lat',
+    x:str='lon',
     row_name:str='id_y',
     col_name:str='id_x',
     cell_region_name:str='cell_region',
@@ -33,8 +29,8 @@ def aggreagate_point_data_to_disks_vectorized(
     """
     
     """
-    if pts_df_search_target is None:
-        pts_df_search_target = pts_df_search_source 
+    if pts_target is None:
+        pts_target = pts_source 
     
     # unpack grid_data 
     grid_id_to_pt_ids = grid.id_to_pt_ids
@@ -49,29 +45,29 @@ def aggreagate_point_data_to_disks_vectorized(
     id_y_mult=grid.id_y_mult
     pt_id_to_xy_coords = grid.search.target.pt_id_to_xy_coords
     pt_id_to_vals = grid.search.target.pt_id_to_vals
-    n_pts = len(pts_df_search_source)
+    n_pts = len(pts_source)
 
     # initialize columns and/or reset to zero 
-    sum_radius_names = [(cname+sum_suffix) for cname in sum_names]
-    pts_df_search_source[sum_radius_names] = 0
+    sum_radius_names = [(cname+sum_suffix) for cname in columns]
+    pts_source[sum_radius_names] = 0
     
   
-    sums_within_disks = _np_zeros((n_pts, len(sum_names)))
+    sums_within_disks = _np_zeros((n_pts, len(columns)))
     
     if plot_pt_disk is not None:
         if not 'pt_id' in plot_pt_disk:
-            plot_pt_disk['pt_id'] = pts_df_search_source.index[int(n_pts//2)]
+            plot_pt_disk['pt_id'] = pts_source.index[int(n_pts//2)]
         
-    zero_sums = _np_zeros(len(sum_names),dtype=int) if len(sum_names) > 1 else 0
-    pts_df_search_source['initial_sort'] = range(len(pts_df_search_source))
-    pts_df_search_source.sort_values([row_name, col_name, cell_region_name], inplace=True)
+    zero_sums = _np_zeros(len(columns),dtype=int) if len(columns) > 1 else 0
+    pts_source['initial_sort'] = range(len(pts_source))
+    pts_source.sort_values([row_name, col_name, cell_region_name], inplace=True)
     last_pt_row_col = (-1, -1)
     last_cell_region_id = -1
     counter_new_cell = 0
     counter_new_contain_region = 0
     counter_new_overlap_region = 0
 
-    if len(sum_names) > 1:
+    if len(columns) > 1:
         @time_func_perf
         def sum_contained_all_offset_regions(
                 pt_row,
@@ -94,7 +90,7 @@ def aggreagate_point_data_to_disks_vectorized(
             return sum([grid_id_to_sums[g_id] for g_id in cells_cntd_by_pt_cell]) 
         #
     
-    if len(sum_names) > 1:
+    if len(columns) > 1:
         @time_func_perf
         def sum_contained_by_offset_region(
                 pt_row,
@@ -133,7 +129,7 @@ def aggreagate_point_data_to_disks_vectorized(
     
     
 
-    if len(sum_names) > 1:
+    if len(columns) > 1:
         @time_func_perf
         def sum_overlapped_pts_in_radius(
             pts_in_cells_overlapped_by_pt_region,
@@ -171,12 +167,12 @@ def aggreagate_point_data_to_disks_vectorized(
     
     for (i, pt_id, a_pt_xycoord, (pt_row,pt_col), contain_region_id, overlap_region_id, cell_region_id) in zip(
         range(n_pts),
-        pts_df_search_source.index,
-        pts_df_search_source[[x_coord_name, y_coord_name,]].values, 
-        pts_df_search_source[[row_name, col_name]].values,
-        pts_df_search_source[cell_region_name].values // grid.search.contain_region_mult,
-        pts_df_search_source[cell_region_name].values % grid.search.contain_region_mult,
-        pts_df_search_source[cell_region_name].values,
+        pts_source.index,
+        pts_source[[x, y,]].values, 
+        pts_source[[row_name, col_name]].values,
+        pts_source[cell_region_name].values // grid.search.contain_region_mult,
+        pts_source[cell_region_name].values % grid.search.contain_region_mult,
+        pts_source[cell_region_name].values,
         
         
         ):
@@ -246,12 +242,12 @@ def aggreagate_point_data_to_disks_vectorized(
             axis=1) <= radius)]
             illustrate_point_disk(
                 grid=grid,
-                pts_df_search_source=pts_df_search_source,
-                pts_df_search_target=pts_df_search_target,
+                pts_source=pts_source,
+                pts_target=pts_target,
                 radius=radius,
-                sum_names=sum_names,
-                x_coord_name=x_coord_name,
-                y_coord_name=y_coord_name,
+                columns=columns,
+                x=x,
+                y=y,
                 cells_cntd_by_pt_cell=[(row+pt_row,col+pt_col) for row,col in cells_contained_in_all_disks],
                 cells_contained_by_pt_region=[(row+pt_row,col+pt_col) for row,col in region_id_to_contained_cells[cell_region_id]],
                 cells_overlapped_by_pt_region=[(row+pt_row,col+pt_col) for row,col in region_id_to_overlapped_cells[cell_region_id]],
@@ -271,20 +267,20 @@ def aggreagate_point_data_to_disks_vectorized(
         last_contain_region_id = contain_region_id
         last_overlap_region_id = overlap_region_id
     #
-    pts_df_search_source[sum_radius_names] = pts_df_search_source[sum_radius_names].values + sums_within_disks
+    pts_source[sum_radius_names] = pts_source[sum_radius_names].values + sums_within_disks
             
     if exclude_pt_itself and grid.search.tgt_df_contains_src_df:
         # substract data from point itself unless specified otherwise
-        pts_df_search_source[sum_radius_names] = pts_df_search_source[sum_radius_names].values - pts_df_search_source[sum_names]
+        pts_source[sum_radius_names] = pts_source[sum_radius_names].values - pts_source[columns]
     
     # print(
     #     "Share of pts in",
-    #     "\n- same cell as previous:", 100-int(counter_new_cell/len(pts_df_search_source)*100),"%",
-    #     "\n- same cell and containing same surrounding cells:",100 - int(counter_new_contain_region/len(pts_df_search_source)*100),"%",
-    #     "\n- same cell and overlapping same surrounding cells",100 - int(counter_new_overlap_region/len(pts_df_search_source)*100),"%")
+    #     "\n- same cell as previous:", 100-int(counter_new_cell/len(pts_source)*100),"%",
+    #     "\n- same cell and containing same surrounding cells:",100 - int(counter_new_contain_region/len(pts_source)*100),"%",
+    #     "\n- same cell and overlapping same surrounding cells",100 - int(counter_new_overlap_region/len(pts_source)*100),"%")
     def plot_vars(
         self = grid,
-        colnames = _np_array([sum_names, sum_radius_names]), 
+        colnames = _np_array([columns, sum_radius_names]), 
         filename:str='',
         **plot_kwargs:dict,
     ):
@@ -301,14 +297,14 @@ def aggreagate_point_data_to_disks_vectorized(
         print('create plot for radius sums')
         create_plots_for_vars(
             grid=grid,
-            colnames=_np_array([sum_names, sum_radius_names]),
+            colnames=_np_array([columns, sum_radius_names]),
             plot_kwargs=plot_radius_sums,
         )
     #
-    pts_df_search_source.sort_values(['initial_sort'], inplace=True)
-    pts_df_search_source.drop('initial_sort', axis=1, inplace=True)
+    pts_source.sort_values(['initial_sort'], inplace=True)
+    pts_source.drop('initial_sort', axis=1, inplace=True)
 
-    return pts_df_search_source[sum_radius_names]
+    return pts_source[sum_radius_names]
 #
 
 

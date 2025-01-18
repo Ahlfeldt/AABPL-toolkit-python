@@ -36,8 +36,8 @@ def create_plots_for_vars(
         fig, axs = _plt_subplots(nrows,1, figsize=figsize)
 
     xmin, xmax, ymin, ymax = grid.total_bounds.xmin, grid.total_bounds.xmax, grid.total_bounds.ymin, grid.total_bounds.ymax,
-    xs = grid.search.source.pts_df[grid.search.source.x]
-    ys = grid.search.source.pts_df[grid.search.source.y]
+    xs = grid.search.source.pts[grid.search.source.x]
+    ys = grid.search.source.pts[grid.search.source.y]
     for i, colname in enumerate(colnames.flat):
         # SELECT AX (IF MULTIPLE)
         ax = axs.flat[i] if nrows > 1 else axs
@@ -47,7 +47,7 @@ def create_plots_for_vars(
         ax.set_title(ax_title)
         
         # ADD DISTRIUBTION PLOT
-        c = grid.search.source.pts_df[colname]# vmin=c.min(), vmax=c.max(),
+        c = grid.search.source.pts[colname]# vmin=c.min(), vmax=c.max(),
         scttr = ax.scatter(x=xs,y=ys,c=c, norm="log", **plot_kwargs)
         
         fig.colorbar(scttr, ax=ax)

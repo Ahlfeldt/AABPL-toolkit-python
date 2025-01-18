@@ -13,7 +13,7 @@ def create_distribution_plot(
         cluster_threshold_values:list,
         k_th_percentiles:list,
         sum_radius_names,
-        radius=None,
+        r=None,
         x_coord_name:str='lon',
         y_coord_name:str='lat',
         filename:str='',
@@ -51,7 +51,7 @@ def create_distribution_plot(
     
     fig.suptitle(
         "Values for indicator" + ("" if ncols==1 else "s") + 
-        ("" if radius is None else (" within "+ str(radius) +" distance")) +
+        ("" if r is None else (" within "+ str(r) +" distance")) +
         " around " + str(n_random_points)+ " randomly points drawn within valid area."
     )
 

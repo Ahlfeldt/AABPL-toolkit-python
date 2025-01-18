@@ -1,7 +1,4 @@
-# intersection of two circles with same radius
-from numpy import (linspace as _np_linspace, array as _np_array, sign as _np_sign)
-from math import sin as _math_sin, cos as _math_cos, atan2 as _math_atan2, pi as _math_pi, acos as _math_acos , sin as _math_asin, log10 as _math_log10
-from matplotlib.patches import (Rectangle as _plt_Rectangle, Polygon as _plt_Polygon, Circle as _plt_Circle)
+from numpy import array as _np_array
 
 ################ transform_cell_pattern ######################################################################################
 def transform_cell_pattern(

@@ -88,7 +88,7 @@ def add_cell_counter_plot(
     """
     adds new axis to fig and create a step plot on that counts number of cells:
     - which are fully contained s.t. the sum of emplyoment will be requested
-    - which (might be) intersected s.t. all points within will need to be checked whether they are within radius  
+    - which (might be) intersected s.t. all points within will need to be checked whether they are within r  
     Returns: axes 
     """
     ax_counter = fig.add_axes([0.6, 0.43, 0.3, 0.25])
@@ -129,7 +129,7 @@ def update_main_axis_frame(
         ax_main,
         ax_min:float=0, 
         ax_max:float=1,
-        radius:float=750,
+        r:float=750,
     ) -> list:
     # clear previous picture
     ax_main.clear()
@@ -147,7 +147,7 @@ def update_main_axis_frame(
     # create patches for circle around bottom left and top right corner of center grid cell
     listOfPatches += create_circle_patches(
         grid_spacing=grid_spacing,
-        radius=radius
+        r=r
     )
 
     for patchToAdd in listOfPatches:
@@ -158,8 +158,8 @@ def update_main_axis_frame(
     ]]
 
     # set tickmarks and limits
-    ax_main.set_yticks([radius-grid_spacing/2, radius, radius+grid_spacing/2]) 
-    ax_main.set_xticks([radius-grid_spacing/2, radius, radius+grid_spacing/2]) 
+    ax_main.set_yticks([r-grid_spacing/2, r, r+grid_spacing/2]) 
+    ax_main.set_xticks([r-grid_spacing/2, r, r+grid_spacing/2]) 
     ax_main.set_xlim(ax_min,ax_max)
     ax_main.set_ylim(ax_min,ax_max)
     ax_main.set_aspect('equal', adjustable='box')
@@ -190,7 +190,7 @@ def create_optimal_grid_spacing_gif (
         allGridSizes:_pd_DataFrame,
         largest:float=400,
         smallest:float=80,
-        radius:float=750,
+        r:float=750,
         frames_between_relevant:int = 6,
         FuncAnimation_interval:int=500,
         FuncAnimation_repeat:bool=True,
@@ -247,7 +247,7 @@ def create_optimal_grid_spacing_gif (
             ax_main=ax_main, 
             ax_min=ax_min, 
             ax_max=ax_max,
-            radius=radius,
+            r=r,
         )
         
         #

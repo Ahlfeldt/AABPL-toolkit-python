@@ -1,6 +1,6 @@
-from numpy import (array as _np_array)
+from numpy import array as _np_array
 from pandas import (DataFrame as _pd_DataFrame, cut as _pd_cut, concat as _pd_concat) 
-from aabpl.utils.general import DataFrameRelation, arr_to_tpls
+from aabpl.utils.general import ( DataFrameRelation, arr_to_tpls)
 from aabpl.utils.distances_to_cell import get_cells_relevant_for_disk_by_type
 from .two_dimensional_weak_ordering_class import gen_weak_order_rel_to_convex_set
 from .pts_to_cells import assign_points_to_cells, aggregate_point_data_to_cells
@@ -18,9 +18,9 @@ class DiskSearchObject(object):
     ):
         return assign_points_to_cells(
             grid=self.grid,
-            pts_df=self.pts_df,
-            y_coord_name=self.y,
-            x_coord_name=self.x,
+            pts=self.pts,
+            y=self.y,
+            x=self.x,
             row_name=self.row_name,
             col_name=self.col_name,
             silent=silent,
@@ -33,23 +33,22 @@ class DiskSearchSource(DiskSearchObject):
     def __init__(
         self,
         grid,
-        pts_df:_pd_DataFrame,
+        pts:_pd_DataFrame,
         y:str='lat',
         x:str='lon',
         row_name:str='id_y',
         col_name:str='id_x',
-        cell_region_name:str='cell_region',
         sum_suffix:str='_750m',
     ):
         self.grid = grid 
-        self.pts_df = pts_df
+        self.pts = pts
         self.y = y
         self.x = x
         self.row_name = row_name
         self.col_name = col_name
-        self.cell_region_name = cell_region_name 
+        self.cell_region_name = next(('cell_reg'+str(i) for i in (['']+list(range(len(pts.columns)))) if not 'cell_reg'+str(i) in pts.columns)) 
         self.sum_suffix = sum_suffix
-    #
+    #next(('helper_col'+i for i in (['']+list(range(len(pts_target.columns))))))
 
     def assign_pts_to_cell_regions(
             self,
@@ -63,11 +62,11 @@ class DiskSearchSource(DiskSearchObject):
         return assign_points_to_mirco_regions( 
         # return assign_points_to_cell_regions(
             grid=self.grid,
-            pts_df=self.pts_df,
+            pts=self.pts,
             radius=self.grid.search.radius,
             include_boundary=self.grid.search.include_boundary,
-            y_coord_name=self.y_coord_name,
-            x_coord_name=self.x_coord_name,
+            y=self.y,
+            x=self.x,
             row_name=self.row_name,
             col_name=self.col_name,
             cell_region_name=self.cell_region_name,
@@ -85,27 +84,27 @@ class DiskSearchTarget(DiskSearchObject):
     def __init__(
         self,
         grid,
-        pts_df:_pd_DataFrame,
-        sum_names:list=['employment'],
-        y_coord_name:str='lat',
-        x_coord_name:str='lon',
+        pts:_pd_DataFrame,
+        columns:list=['employment'],
+        y:str='lat',
+        x:str='lon',
         row_name:str='id_y',
         col_name:str='id_x',
     ):
         self.grid = grid 
-        self.pts_df = pts_df
-        self.sum_names = sum_names
-        self.x_coord_name = x_coord_name
-        self.y_coord_name = y_coord_name
+        self.pts = pts
+        self.columns = columns
+        self.x = x
+        self.y = y
         self.row_name = row_name
         self.col_name = col_name
         
         # prepare dicts for fast lookup of values for point ids
         self.pt_id_to_xy_coords = {
-            pt_id:xy for (pt_id,xy) in zip(pts_df.index, pts_df[[x_coord_name,y_coord_name]].values)
+            pt_id:xy for (pt_id,xy) in zip(pts.index, pts[[x,y]].values)
         }
         self.pt_id_to_vals = {
-            pt_id:pt_vals for (pt_id,pt_vals) in zip(pts_df.index, pts_df[sum_names].values)
+            pt_id:pt_vals for (pt_id,pt_vals) in zip(pts.index, pts[columns].values)
         }
     #
     
@@ -115,8 +114,8 @@ class DiskSearchTarget(DiskSearchObject):
     ):
         return aggregate_point_data_to_cells(
             grid=self.grid,
-            pts_df=self.pts_df,
-            sum_names=self.sum_names,
+            pts=self.pts,
+            columns=self.columns,
             row_name=self.row_name,
             col_name=self.col_name,
             silent=silent,
@@ -130,8 +129,8 @@ class DiskSearch(object):
     def __init__(
         self,
         grid,
+        r:float=0.0075,
         exclude_pt_itself:bool=True,
-        radius:float=0.0075,
         include_boundary:bool=False,
     ):
             
@@ -145,7 +144,7 @@ class DiskSearch(object):
         self.update_search_params(
             grid=grid,
             exclude_pt_itself=exclude_pt_itself,
-            radius=radius,
+            radius=r,
             include_boundary=include_boundary,
         )
         #
@@ -212,14 +211,14 @@ class DiskSearch(object):
     )->bool:
         if not hasattr(self, 'target'): return False
         if not hasattr(self, 'source'): return False
-        if not hasattr(self.target, 'pts_df'): return False
-        if not hasattr(self.source, 'pts_df'): return False
-        return DataFrameRelation.check_if_df_is_contained(self.source.pts_df, self.target.pts_df,silent=silent)
+        if not hasattr(self.target, 'pts'): return False
+        if not hasattr(self.source, 'pts'): return False
+        return DataFrameRelation.check_if_df_is_contained(self.source.pts, self.target.pts,silent=silent)
     
     # @time_func_perf
     def check_if_search_obj_already_exist(
         self,
-        pts_df:_pd_DataFrame,
+        pts:_pd_DataFrame,
         obj:str=['source','target'],
         silent:bool=False,
         **kwargs
@@ -241,16 +240,16 @@ class DiskSearch(object):
             all([hasattr(self.target, k) and 
                 v == getattr(self.target, k)
                 for k,v in kwargs.items()]) and
-                hasattr(self.target, 'pts_df') and 
-                DataFrameRelation.check_if_df_is_contained(pts_df, self.target.pts_df,silent=silent)
+                hasattr(self.target, 'pts') and 
+                DataFrameRelation.check_if_df_is_contained(pts, self.target.pts,silent=silent)
         )
         alr_assg_to_cell_regions = obj=='source' and (
             hasattr(self, 'source') and all([
                 hasattr(self.source, k) and 
                 v == getattr(self.source, k)
                 for k,v in kwargs.items()]) and
-                hasattr(self.source, 'pts_df') and 
-                DataFrameRelation.check_if_df_is_contained(pts_df, self.source.pts_df,silent=silent)
+                hasattr(self.source, 'pts') and 
+                DataFrameRelation.check_if_df_is_contained(pts, self.source.pts,silent=silent)
         )
         alr_assg_to_cells = (alr_added_pts_to_grid or alr_assg_to_cell_regions)
         
@@ -260,16 +259,12 @@ class DiskSearch(object):
     @time_func_perf
     def set_source(
         self,
-
-        pts_df:_pd_DataFrame,
-        y_coord_name:str='lat',
-        x_coord_name:str='lon',
+        pts:_pd_DataFrame,
+        y:str='lat',
+        x:str='lon',
         row_name:str='id_y',
         col_name:str='id_x',
-        cell_region_name:str='cell_region',
-
         sum_suffix:str='_750m',
-
         plot_cell_reg_assign:dict=None,
         plot_offset_checks:dict=None,
         plot_offset_regions:dict=None,
@@ -287,12 +282,11 @@ class DiskSearch(object):
 
         self.source = DiskSearchSource(
             grid=self.grid,
-            pts_df=pts_df,
-            y_coord_name=y_coord_name,
-            x_coord_name=x_coord_name,
+            pts=pts,
+            y=y,
+            x=x,
             row_name=row_name,
             col_name=col_name,
-            cell_region_name=cell_region_name,
             sum_suffix=sum_suffix,
         )
         
@@ -300,7 +294,7 @@ class DiskSearch(object):
 
         if not alr_assg_to_cells:
             self.source.assign_pts_to_cells(silent=silent,)
-            # self.source.pts_df.sort_values(
+            # self.source.pts.sort_values(
             #     [self.source.row_name, self.source.col_name],
             #     inplace=True
             # )
@@ -313,7 +307,7 @@ class DiskSearch(object):
                 plot_offset_raster=plot_offset_raster,
                 silent=silent,
             )
-            # self.source.pts_df.sort_values(
+            # self.source.pts.sort_values(
             #     [self.source.row_name, self.source.col_name, self.source.cell_region_name],
             #     inplace=True
             # )
@@ -324,10 +318,10 @@ class DiskSearch(object):
     def set_target(
         self,
 
-        pts_df:_pd_DataFrame,
-        sum_names:list=['employment'],
-        y_coord_name:str='lat',
-        x_coord_name:str='lon',
+        pts:_pd_DataFrame,
+        columns:list=['employment'],
+        y:str='lat',
+        x:str='lon',
         row_name:str='id_y',
         col_name:str='id_x',
 
@@ -342,10 +336,10 @@ class DiskSearch(object):
 
         self.target = DiskSearchTarget(
             grid=self.grid,
-            pts_df=pts_df,
-            sum_names=sum_names,
-            y_coord_name=y_coord_name,
-            x_coord_name=x_coord_name,
+            pts=pts,
+            columns=columns,
+            y=y,
+            x=x,
             row_name=row_name,
             col_name=col_name,
         )
@@ -356,7 +350,7 @@ class DiskSearch(object):
             self.target.assign_pts_to_cells(silent=silent,)
 
             # also sort according to grid cell region!
-            # self.target.pts_df.sort_values(
+            # self.target.pts.sort_values(
             #     [self.target.row_name, self.target.col_name],
             #     inplace=True
             # )
@@ -375,12 +369,12 @@ class DiskSearch(object):
         
         return aggreagate_point_data_to_disks_vectorized(
             grid=self.grid,
-            pts_df_search_source=self.source.pts_df,
-            pts_df_search_target=self.target.pts_df,
+            pts_source=self.source.pts,
+            pts_target=self.target.pts,
             radius=self.radius,
-            sum_names=self.target.sum_names,
-            y_coord_name=self.source.y_coord_name,
-            x_coord_name=self.source.x_coord_name,
+            columns=self.target.columns,
+            y=self.source.y,
+            x=self.source.x,
             row_name=self.source.row_name,
             col_name=self.source.col_name,
             cell_region_name=self.source.cell_region_name,

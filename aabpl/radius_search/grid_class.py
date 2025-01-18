@@ -79,7 +79,7 @@ class Grid(object):
         initial_crs:str,
         local_crs:str,
         set_fixed_spacing:float=None,
-        radius:float=750,
+        r:float=750,
         n_points:int=10000,
         silent = False,
         ):
@@ -91,12 +91,12 @@ class Grid(object):
             spacing = set_fixed_spacing
         else:
             # find optimal spacing TODO
-            print("TODO find optimal spacing for",radius, n_points)
+            print("TODO find optimal spacing for",r, n_points)
             spacing = 1.
         self.spacing = spacing
 
         # TODO total_bounds should also contain excluded area if not contained 
-        # min(points.total_bounds+radius, max(points.total_bounds, excluded_area_total_bound))  
+        # min(points.total_bounds+r, max(points.total_bounds, excluded_area_total_bound))  
         self.initial_crs = initial_crs
         self.local_crs = local_crs
         x_padding = ((xmin-xmax) % spacing)/2

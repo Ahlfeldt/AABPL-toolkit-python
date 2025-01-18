@@ -1,6 +1,7 @@
 
 from numpy import (
     array as _np_array,
+    append as _np_append,
     invert as _np_invert,
     zeros as _np_zeros,
     min as _np_min, 
@@ -440,7 +441,6 @@ def aggreagate_point_data_to_disks_vectorized_nested(
     row_name:str='id_y',
     col_name:str='id_x',
     cell_name:str='cell_id',
-    cell_region_name:str='cell_region',
     sum_suffix:str='_750m',
     exclude_pt_itself:bool=True,
     reset_sum_cols_to_zero:bool=True,

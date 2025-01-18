@@ -38,7 +38,7 @@ def add_circle_check_to_dict(
         nev_cn:bool,
         alw_ov:bool,
         check_dict,
-        radius:float,
+        r:float,
         grid_spacing:float,
 ):
     """
@@ -51,7 +51,7 @@ def add_circle_check_to_dict(
     if not alw_ov:
         closest_pt = tuple([float(v) for v in get_cell_closest_point_to_point(trgl_pt, cell)])
         if closest_pt not in check_dict:
-            check_dict[closest_pt] = {'split_edge': Circle(center=closest_pt, radius = radius / grid_spacing)}
+            check_dict[closest_pt] = {'split_edge': Circle(center=closest_pt, r=r/grid_spacing)}
         check_dict[closest_pt]['overlaps'] = cell
         check_dict[closest_pt]['split_edge'].overlaps = tuple([*cell])
     #
@@ -59,7 +59,7 @@ def add_circle_check_to_dict(
     if not nev_cn:
         farthest_pt = tuple([float(v) for v in get_cell_farthest_vertex_to_point(point_in_triangle1, cell)[0]])
         if farthest_pt not in check_dict:
-            check_dict[farthest_pt] = {'split_edge': Circle(center=farthest_pt, radius = radius / grid_spacing)}
+            check_dict[farthest_pt] = {'split_edge': Circle(center=farthest_pt, r=r/grid_spacing)}
 
         check_dict[farthest_pt]['contains'] = cell
         check_dict[farthest_pt]['split_edge'].contains = tuple([*cell])
@@ -72,7 +72,7 @@ def add_line_check_to_dict(
         alw_ov:bool,
         check_dict,
         all_regions:dict,
-        radius:float,
+        r:float,
         grid_spacing:float,
 ):
     """
@@ -87,19 +87,19 @@ def add_line_check_to_dict(
     all_vtx = an_edge.vtx1.all_vtx
     
     if row == 0 and col == 0:
-        raise ValueError('Not implemented. Choose grid spacing s.t. searcg radius**2 > (2*grid_spacing**2).')    
+        raise ValueError('Not implemented. Choose grid spacing s.t. search radius**2 > (2*grid_spacing**2).')    
     
     if not alw_ov:
         if col == 0.:
             split_edge = LineSegment(
-                vtx1=Vertex(0.0 if row > 0 else 0.5,  (row - (.5 - radius) * _np_sign(row)), all_vtx),
-                vtx2=Vertex(0.0 if row < 0 else 0.5,  (row - (.5 - radius) * _np_sign(row)), all_vtx), 
+                vtx1=Vertex(0.0 if row > 0 else 0.5,  (row - (.5 - r) * _np_sign(row)), all_vtx),
+                vtx2=Vertex(0.0 if row < 0 else 0.5,  (row - (.5 - r) * _np_sign(row)), all_vtx), 
                 all_edges=all_edges
             )
         else:
             split_edge = LineSegment(
-                vtx1=Vertex((col - (.5 - radius) * _np_sign(col)), 0.5 if col > 0 else 0.0, all_vtx),
-                vtx2=Vertex((col - (.5 - radius) * _np_sign(col)), 0.5 if col < 0 else 0.0, all_vtx), 
+                vtx1=Vertex((col - (.5 - r) * _np_sign(col)), 0.5 if col > 0 else 0.0, all_vtx),
+                vtx2=Vertex((col - (.5 - r) * _np_sign(col)), 0.5 if col < 0 else 0.0, all_vtx), 
                 all_edges=all_edges
             )
         split_edge.overlaps = (row, col)
@@ -111,7 +111,7 @@ def add_line_check_to_dict(
             -0.5 if row == 0 else row + .5 * _np_sign(row)
         )
         if farthest_pt not in check_dict:
-            check_dict[farthest_pt] = {'split_edge': Circle(center=farthest_pt, radius = radius / grid_spacing)}
+            check_dict[farthest_pt] = {'split_edge': Circle(center=farthest_pt, r=r/grid_spacing)}
         
         check_dict[farthest_pt]['split_edge'].contains = (row, col)
         check_dict[farthest_pt]['contains'] = cell
@@ -123,13 +123,13 @@ def add_line_check_to_dict(
 def create_check_dict(
     cells_to_check,
     all_regions:dict,
-    radius:float=3,
+    r:float=3,
     grid_spacing:float=1,
     include_boundary: bool = False        
 ):
     """
     Gets all cells that are potentially overlap or conain or contain set if buffered by radius
-    TODO ensure radius/grid_spacing covers all cases
+    TODO ensure r/grid_spacing covers all cases
     """
     check_dict = dict()
     triangle_1_vertices = _np_array([[0, 0], [0.5, 0], [0.5, 0.5]])
@@ -137,7 +137,7 @@ def create_check_dict(
     cells_always_overlapped = check_if_always_overlaps_full_convex_set(
         cells=cells_to_check,
         convex_set_vertices=triangle_1_vertices,
-        radius=radius,
+        r=r,
         grid_spacing=grid_spacing,
         vertex_is_inside_convex_set=True,
         include_boundary=include_boundary,
@@ -146,7 +146,7 @@ def create_check_dict(
     cells_never_contained = check_if_never_contains_convex_set(
         cells=cells_to_check,
         convex_set_vertices=triangle_1_vertices,
-        radius=radius,
+        r=r,
         grid_spacing=grid_spacing,
         vertex_is_inside_convex_set=True,
         include_boundary=include_boundary,
@@ -157,9 +157,9 @@ def create_check_dict(
         if alw_ov and nev_cn:
             cells_alw_only_overlapped.append(cell) # TODO this can be removed - no longer necessary to store those.
         if 0 in cell: # cell in same column or row
-            add_line_check_to_dict(cell=cell, nev_cn=nev_cn, alw_ov=alw_ov, check_dict=check_dict, all_regions=all_regions, radius=radius, grid_spacing=grid_spacing,)
+            add_line_check_to_dict(cell=cell, nev_cn=nev_cn, alw_ov=alw_ov, check_dict=check_dict, all_regions=all_regions, r=r, grid_spacing=grid_spacing,)
         else:
-            add_circle_check_to_dict(cell=cell, nev_cn=nev_cn, alw_ov=alw_ov, check_dict=check_dict, radius=radius, grid_spacing=grid_spacing,)
+            add_circle_check_to_dict(cell=cell, nev_cn=nev_cn, alw_ov=alw_ov, check_dict=check_dict, r=r, grid_spacing=grid_spacing,)
         #
     #
     return check_dict, cells_to_check[cells_always_overlapped]
@@ -168,7 +168,7 @@ def create_check_dict(
 def apply_checks_to_create_regions(
         check_dict,
         trgl_regions:dict,
-        radius:float=3,
+        r:float=3,
         plot_offset_checks:dict=None,
         axs = None
     ):
@@ -197,7 +197,7 @@ def apply_checks_to_create_regions(
             if split_edge.type != 'LineSegment':
                 x,y = [float(c) for c in key]
                 split_edge = check['split_edge']
-                GeoSeries([Point((x,y)).buffer(radius,30)]).plot(ax=ax, color='None', edgecolor='blue')
+                GeoSeries([Point((x,y)).buffer(r,30)]).plot(ax=ax, color='None', edgecolor='blue')
                 ax.set_title(str((x,y))+ "center.")
             else:
                 GeoSeries([LineString([split_edge.vtx1.xy, split_edge.vtx2.xy])]).plot(ax=ax, color='None', edgecolor='red')
@@ -217,7 +217,7 @@ def cleanup_region_check_results(
         cells_always_overlapped:list,
         all_cells:_np_array,
         grid_spacing:float,
-        radius:float, 
+        r:float, 
         plot_offset_regions:dict=None):
     # now all checks are added to regions
     # ensure that each region.checks has the same length!
@@ -258,7 +258,7 @@ def cleanup_region_check_results(
                 overlapped_cells=region.overlapped_cells,
                 all_cells=all_cells,
                 ax=axs.flat[n*2 + 1],
-                radius=radius,
+                r=r,
                 grid_spacing=grid_spacing,
             )
     #
@@ -504,26 +504,26 @@ def sort_trgl_region_into_raster(
     return raster_cell_to_regions, offset_x_bins, offset_y_bins, unique_reg_id_combs_in_raster_cells
 #
 
-def create_radius_check(edge, radius:float, include_boundary:bool):
+def create_radius_check(edge, r:float, include_boundary:bool):
     (x,y) = edge.center
     if include_boundary:
-        return lambda pts: _np_linalg_norm(pts - (x,y), axis=1) <= radius
-    return lambda pts: _np_linalg_norm(pts - (x,y), axis=1) < radius
+        return lambda pts: _np_linalg_norm(pts - (x,y), axis=1) <= r
+    return lambda pts: _np_linalg_norm(pts - (x,y), axis=1) < r
 #
 
-def create_line_check(edge, radius:float, include_boundary:bool):
+def create_line_check(edge, r:float, include_boundary:bool):
     col_index = int(edge.vtx1.y == edge.vtx2.y)
     val = edge.vtx1.xy[col_index]
     if include_boundary:
-        return lambda pts: abs(pts[:,col_index] - val) <= radius
-    return lambda pts: abs(pts[:,col_index] - val) < radius
+        return lambda pts: abs(pts[:,col_index] - val) <= r
+    return lambda pts: abs(pts[:,col_index] - val) < r
 
 #
 
-def create_pt_checks(edge, radius:float, include_boundary:bool=False):
+def create_pt_checks(edge, r:float, include_boundary:bool=False):
     if edge.type == 'Arc':
-        return create_radius_check(edge, radius, include_boundary)
-    return create_line_check(edge, radius, include_boundary)
+        return create_radius_check(edge, r, include_boundary)
+    return create_line_check(edge, r, include_boundary)
 #
 
 def edge_is_shared_with_region_id(
@@ -613,7 +613,7 @@ def determine_offset_region_for_pts_inner(
 def prepare_raster_to_offset_region_checks(
         id_to_offset_regions,
         unique_reg_id_combs_in_raster_cells,
-        radius, 
+        r, 
         include_boundary,
     ):
     
@@ -637,7 +637,7 @@ def prepare_raster_to_offset_region_checks(
                 # shared_with_reg_id = edge_is_shared_with_region_id(reversed_coords, regions[i+1:])
                 shared_with_reg_id = edge_is_shared_with_region_id2(edge, regions[i+1:])
                 if not shared_with_reg_id is None:
-                    edge_check = create_pt_checks(edge, radius=radius, include_boundary=include_boundary)
+                    edge_check = create_pt_checks(edge, r=r, include_boundary=include_boundary)
                     check_edges_for_regions.append((edge, edge_check))
         
         # print("len(check_edges_for_regions)", len(check_edges_for_regions), len(regions), set([reg.trgl_nr for reg in regions]))
@@ -821,7 +821,7 @@ def create_region_comb_nr_to_check_lookup(
 @time_func_perf
 def prepare_offset_regions(
         grid_spacing:float,
-        radius:float,
+        r:float,
         include_boundary:bool=False,
         plot_offset_checks:dict=None,
         plot_offset_regions:dict=None,
@@ -829,12 +829,12 @@ def prepare_offset_regions(
         silent:bool=True,
 ):
     cells_contained_in_all_disks, cells_contained_in_all_trgl_disks, cells_maybe_overlapping_a_disk, cells_maybe_overlapping_a_trgl_disk = get_cells_relevant_for_disk_by_type(
-        grid_spacing=grid_spacing, radius=radius, include_boundary=False
+        grid_spacing=grid_spacing, r=r, include_boundary=False
         )
 
     trgl_regions = create_triangle_1_region()
     check_dict, cells_always_overlapped = create_check_dict(cells_maybe_overlapping_a_trgl_disk, trgl_regions)
-    apply_checks_to_create_regions(check_dict=check_dict, trgl_regions=trgl_regions, radius=radius, plot_offset_checks=plot_offset_checks)
+    apply_checks_to_create_regions(check_dict=check_dict, trgl_regions=trgl_regions, r=r, plot_offset_checks=plot_offset_checks)
     
     cleanup_region_check_results(
         trgl_regions=trgl_regions, 
@@ -842,7 +842,7 @@ def prepare_offset_regions(
         cells_always_overlapped=cells_always_overlapped,
         all_cells=cells_maybe_overlapping_a_trgl_disk,
         plot_offset_regions=plot_offset_regions,
-        radius=radius,
+        r=r,
         grid_spacing=grid_spacing,
     )
     
@@ -858,7 +858,7 @@ def prepare_offset_regions(
     offset_reg_id_comb_to_check = prepare_raster_to_offset_region_checks(
         id_to_offset_regions=id_to_offset_regions,
         unique_reg_id_combs_in_raster_cells=unique_reg_id_combs_in_trgl_raster_cells,
-        radius=radius,
+        r=r,
         include_boundary=True,
         )
 
@@ -887,7 +887,7 @@ def prepare_offset_regions(
     offset_reg_id_comb_to_check = prepare_raster_to_offset_region_checks( 
         id_to_offset_regions=id_to_offset_regions,
         unique_reg_id_combs_in_raster_cells=unique_reg_id_combs_in_raster_cells,
-        radius=radius,
+        r=r,
         include_boundary=include_boundary,
         )
     

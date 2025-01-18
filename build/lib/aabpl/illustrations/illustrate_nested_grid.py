@@ -1,11 +1,6 @@
-from numpy import (
-    unique as _np_unique,
-    ones as _np_ones,
-)
+from numpy import (unique as _np_unique, ones as _np_ones,)
 from matplotlib.pyplot import (get_cmap as _plt_get_cmap, subplots as _plt_subplots)
 from matplotlib.patches import Rectangle as _plt_Rectangle
-
-
 
 def illustrate_nested_grid(
             grid:dict,

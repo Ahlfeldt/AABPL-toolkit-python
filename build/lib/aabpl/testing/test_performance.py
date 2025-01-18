@@ -1,7 +1,6 @@
 from time import process_time
 from pandas import DataFrame as _pd_DataFrame, concat as _pd_concat
 import matplotlib.pyplot as plt
-from matplotlib.colors import LinearSegmentedColormap
 from numpy import (array as _np_array, arange as _np_arange, linspace as _np_linspace)
 from functools import wraps
 

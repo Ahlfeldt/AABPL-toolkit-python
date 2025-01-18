@@ -1,17 +1,7 @@
-from numpy import (
-    array as _np_array, 
-    unique as _np_unique, 
-    linspace, invert, flip, transpose, 
-    concatenate, 
-    sign as _np_sign, 
-    zeros, min, max, equal, where, 
-    logical_or, logical_and, all, newaxis
-)
 from math import ceil as _math_ceil
-from pandas import DataFrame as _pd_DataFrame
 from matplotlib.pyplot import (subplots as _plt_subplots, figure as _plt_figure)
-from matplotlib.patches import Rectangle as _plt_Rectangle
-from ..utils.general import ( flatten_list, )
+from matplotlib.patches import Circle as _plt_circle, Rectangle as _plt_Rectangle
+from ..utils.general import flatten_list
 
 
 def plot_cell_pattern(

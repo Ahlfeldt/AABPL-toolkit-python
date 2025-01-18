@@ -31,7 +31,7 @@ def illustrate_point_disk(
     pts_in_cell_contained_by_pt_region:list,
     pts_source:_pd_DataFrame,
     pts_target:_pd_DataFrame,
-    radius:float=750,
+    r:float=750,
     sum_names:list=['employment'],
     y_coord_name:str='lat',
     x_coord_name:str='lon',
@@ -73,7 +73,7 @@ def illustrate_point_disk(
     ################################################################################################################
     ax = axs#[0]
     # print("(pt_x, pt_y)",(pt_x, pt_y))
-    # print("cells", [ ((c-.5)*grid.spacing+grid.total_bounds.xmin, (r-.5)*grid.spacing+grid.total_bounds.ymin) for r,c in cells_cntd_by_pt_cell])
+    # print("cells", [ ((c-.5)*grid.spacing+grid.total_bounds.xmin, (row-.5)*grid.spacing+grid.total_bounds.ymin) for row,c in cells_cntd_by_pt_cell])
     # print(
     #     [[(grid.row_col_to_centroid[cell], color) for cell in cells] for cells,color in zip(
     #     [cells_cntd_by_pt_cell, cells_contained_by_pt_region, cells_overlapped_by_pt_region],
@@ -102,10 +102,10 @@ def illustrate_point_disk(
     #     x_off=grid.total_bounds.xmin+grid.spacing/2,
     #     y_off=grid.total_bounds.ymin+grid.spacing/2,
     # )
-    ax.add_patch(_plt_circle(xy=(pt_x, pt_y), radius=radius, facecolor='#00f3',edgecolor='#00f',linewidth=2,))
-    ax.add_patch(_plt_circle(xy=(pt_x, pt_y), radius=radius/20, alpha=1))
-    # ax.add_patch(create_buffered_square_patch(side_length=grid.spacing, radius=radius, x_off=hc_x, y_off=hc_y))
-    # ax.add_patch(create_debuffered_square_patch(side_length=grid.spacing, radius=radius, linewidth=2, x_off=hc_x, y_off=hc_y ))
+    ax.add_patch(_plt_circle(xy=(pt_x, pt_y), radius=r, facecolor='#00f3',edgecolor='#00f',linewidth=2,))
+    ax.add_patch(_plt_circle(xy=(pt_x, pt_y), radius=r/20, alpha=1))
+    # ax.add_patch(create_buffered_square_patch(side_length=grid.spacing, r=r, x_off=hc_x, y_off=hc_y))
+    # ax.add_patch(create_debuffered_square_patch(side_length=grid.spacing, r=r, linewidth=2, x_off=hc_x, y_off=hc_y ))
     
     # ax.add_patch(create_trgl1_patch(side_length=grid.spacing/2, linewidth=2, x_off=hc_x, y_off=hc_y ))
     # ax.add_patch(create_buffered_trgl1_patch(side_length=grid.spacing/2, linewidth=2, x_off=hc_x, y_off=hc_y ))
@@ -134,15 +134,15 @@ def illustrate_point_disk(
         x=pts_target.loc[pts_in_cells_overlapped_by_pt_region, x_coord_name],
         y =pts_target.loc[pts_in_cells_overlapped_by_pt_region, y_coord_name],
         s=fig.get_figheight()/2, color='red', marker='+')
-    # pts in overlapped cells inside radius
+    # pts in overlapped cells inside r
     ax.scatter(
         x=pts_target.loc[pts_in_radius, x_coord_name],
         y =pts_target.loc[pts_in_radius, y_coord_name],
         s=fig.get_figheight()/2, color='black', marker='o')
     
     # for (i, ax) in enumerate(axs):
-    ax.set_xlim(pt_x-1.35*radius,pt_x+1.35*radius)
-    ax.set_ylim(pt_y-1.35*radius,pt_y+1.35*radius)
+    ax.set_xlim(pt_x-1.35*r,pt_x+1.35*r)
+    ax.set_ylim(pt_y-1.35*r,pt_y+1.35*r)
     ax.set_aspect('equal', adjustable='box')
     #
 #

@@ -327,7 +327,7 @@ def gen_weak_order_rel_to_convex_set(
         cells:_np_array,
         convex_set_vertices:_np_array = _np_array([[0,0],[.5,0],[.5,.5]]),
         vertex_is_inside_convex_set=True,
-        radius:float=0.00750,
+        r:float=0.00750,
         grid_spacing:float=0.00250,
         include_boundary:bool=False,
 )->tuple:
@@ -379,18 +379,18 @@ def gen_weak_order_rel_to_convex_set(
 
     # store if for some cells all the complete set always or never fullfills a condition
     trgl_always_overlaps_cells = (
-        _np_all(dist_lower_bounds <= radius, axis=1)
+        _np_all(dist_lower_bounds <= r, axis=1)
     ) if include_boundary else (
-        _np_all(dist_lower_bounds < radius, axis=1)
+        _np_all(dist_lower_bounds < r, axis=1)
     )
     trgl_always_overlaps_cells = _np_all([
-            (dist_lower_bounds[:,i] <= radius) if include_boundary and point_in_set else (dist_lower_bounds[:,i] < radius) 
+            (dist_lower_bounds[:,i] <= r) if include_boundary and point_in_set else (dist_lower_bounds[:,i] < r) 
             for i,point_in_set in zip(range(dist_lower_bounds.shape[1]), vertex_is_inside_convex_set)
         ], axis=0)
     
-    trgl_maybe_contains_cells = _np_any(dist_upper_bounds <= radius, axis=1)
+    trgl_maybe_contains_cells = _np_any(dist_upper_bounds <= r, axis=1)
     trgl_maybe_contains_cells = _np_any([
-            (dist_upper_bounds[:,i] <= radius) if include_boundary and point_in_set else (dist_upper_bounds[:,i] < radius) 
+            (dist_upper_bounds[:,i] <= r) if include_boundary and point_in_set else (dist_upper_bounds[:,i] < r) 
             for i,point_in_set in zip(range(dist_upper_bounds.shape[1]), vertex_is_inside_convex_set)
         ], axis=0)
 
@@ -421,7 +421,7 @@ def recursive_cell_region_inference(
         disks_by_cells_overlaps:_np_array,
         family_tree_pos:WeakOrderTree,
         grid_spacing:float=200,
-        radius:float=750,
+        r:float=750,
         include_boundary:bool=False,
 ):
     """
@@ -452,12 +452,12 @@ def recursive_cell_region_inference(
                 grid_spacing * min_dist_points_to_cell(
                     pts_xy=transformed_offset_xy, 
                     cell=_np_array(person.id)
-                ) <= radius
+                ) <= r
             ) if include_boundary else (
                 grid_spacing * min_dist_points_to_cell(
                     pts_xy=transformed_offset_xy, 
                     cell=_np_array(person.id)
-                ) < radius
+                ) < r
             )
             grid.search.overlap_checks.append((person.id, len(reference_ids), sum(check_overlap)))
             # if tuple([person.id[0],person.id[1]])==(3,3):
@@ -472,7 +472,7 @@ def recursive_cell_region_inference(
             check_contains = grid_spacing * max_dist_points_to_cell(
                 pts_xy=transformed_offset_xy, 
                 cell=_np_array(person.id)
-            ) <= radius
+            ) <= r
             grid.search.contain_checks.append((person.id, len(reference_ids), sum(check_contains)))
             
             # store result: set value to true in contains regions _np_array
@@ -494,7 +494,7 @@ def recursive_cell_region_inference(
             disks_by_cells_overlaps=disks_by_cells_overlaps,
             family_tree_pos=person.children,
             grid_spacing=grid_spacing,
-            radius=radius,
+            r=r,
             include_boundary=include_boundary,
         )
         #

@@ -8,7 +8,7 @@ def plot_cell_pattern(
     contained_cells, 
     overlapped_cells, 
     all_cells,
-    radius:float,
+    r:float,
     grid_spacing:float, 
     add_idxs:bool=True,
     **plot_kwargs,
@@ -47,7 +47,7 @@ def plot_cell_pattern(
         if add_idxs and color == colors[0]:
             ax.annotate(text=str(row)+","+str(col), xy=(col,row),horizontalalignment='center')
 
-    ratio = radius/grid_spacing
+    ratio = r/grid_spacing
     cell_steps_max = _math_ceil(ratio+1.5)
 
     ax.set_xlim((-cell_steps_max,+cell_steps_max))

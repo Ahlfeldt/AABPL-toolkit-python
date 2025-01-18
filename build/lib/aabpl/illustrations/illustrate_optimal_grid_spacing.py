@@ -3,7 +3,6 @@ from matplotlib import pyplot as plt
 from matplotlib.animation import (FuncAnimation as _plt_FuncAnimation, PillowWriter as _plt_PillowWriter)
 from matplotlib.figure import Figure as _plt_Figure
 from matplotlib.axes._axes import Axes as _plt_Axes
-# from math import ceil,asin,acos
 from .plot_utils import (
     create_grid_cell_patches, 
     create_circle_patches

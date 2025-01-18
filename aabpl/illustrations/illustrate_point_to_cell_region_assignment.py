@@ -39,7 +39,7 @@ def illustrate_point_to_cell_region_assignment(
     region_ids,
     offset_xy,
     transformed_offset_xy,
-    radius:float=750,
+    r:float=750,
     include_boundary:bool=False,
     **plot_cell_reg_assign,
 ):
@@ -65,7 +65,7 @@ def illustrate_point_to_cell_region_assignment(
 
     # unpack vals
     grid_spacing = grid.spacing
-    cell_steps_max = -int(-radius/grid_spacing)+1
+    cell_steps_max = -int(-r/grid_spacing)+1
     trgl_region_ids = _np_array([region_id//100 for region_id in region_ids])
     unique_region_ids = _np_unique([region_id for region_id in grid.search.region_id_to_contained_cells])
     unique_trgl_region_ids = _np_unique([region_id//100 for region_id in unique_region_ids])
@@ -81,7 +81,7 @@ def illustrate_point_to_cell_region_assignment(
      cells_maybe_overlapping_a_disk, 
      cells_maybe_overlapping_a_trgl_disk) = get_cells_relevant_for_disk_by_type(
             grid_spacing=grid_spacing,
-            radius=radius,
+            r=r,
             include_boundary=include_boundary,
     )
 
@@ -115,8 +115,8 @@ def illustrate_point_to_cell_region_assignment(
         ax=ax, grid_spacing=grid_spacing
     )
     
-    ax.add_patch(create_buffered_square_patch(side_length=grid_spacing, radius=radius))
-    ax.add_patch(create_debuffered_square_patch(side_length=grid_spacing, radius=radius, linewidth=2, edgecolor="red", facecolor="None"))
+    ax.add_patch(create_buffered_square_patch(side_length=grid_spacing, r=r))
+    ax.add_patch(create_debuffered_square_patch(side_length=grid_spacing, r=r, linewidth=2, edgecolor="red", facecolor="None"))
 
     ################################################################################################################
     ax = flat_axs[1]
@@ -128,8 +128,8 @@ def illustrate_point_to_cell_region_assignment(
     )
 
     ax.add_patch(create_trgl1_patch(side_length=grid_spacing/2, linewidth=2))
-    ax.add_patch(create_buffered_trgl1_patch(side_length=grid_spacing/2, radius=radius, linewidth=2))
-    ax.add_patch(create_debuffered_trgl1_patch(side_length=grid_spacing/2, radius=radius, linewidth=2))
+    ax.add_patch(create_buffered_trgl1_patch(side_length=grid_spacing/2, r=r, linewidth=2))
+    ax.add_patch(create_debuffered_trgl1_patch(side_length=grid_spacing/2, r=r, linewidth=2))
 
     ################################################################################################################
     ax = flat_axs[2]
@@ -290,7 +290,7 @@ def illustrate_point_to_cell_region_assignment(
         edgecolor_outside_center_cell=True,
         convex_set_boundaries= _np_array([(0.0,0.0),(0.5,0.0),(0.5,0.5)]),
         grid_spacing=grid_spacing, 
-        radius=radius, 
+        r=r, 
         linewidth=2
     )
 
@@ -317,7 +317,7 @@ def illustrate_point_to_cell_region_assignment(
         edgecolor_outside_center_cell=True,
         convex_set_boundaries= _np_array([(-0.5,-0.5), (0.5,-0.5),(0.5,0.5),(-0.5,0.5)]),
         grid_spacing=grid_spacing, 
-        radius=radius, 
+        r=r, 
         linewidth=1.5,
         linestyle='-.',
     )

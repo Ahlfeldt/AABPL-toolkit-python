@@ -310,7 +310,7 @@ def create_cell_region(
 def assign_points_to_cell_regions(
     grid:dict,
     pts,
-    radius:float=0.0075,
+    r:float=0.0075,
     include_boundary:bool=False,
     x:str='lon',
     y:str='lat',
@@ -355,7 +355,7 @@ def assign_points_to_cell_regions(
         disks_by_cells_overlaps=disks_by_cells_overlaps,
         family_tree_pos=grid.search.weak_order_tree.root,
         grid_spacing=grid.spacing,
-        radius=radius,
+        r=r,
         include_boundary=include_boundary,
     )
     #
@@ -442,7 +442,7 @@ def assign_points_to_cell_regions(
             region_ids=region_ids,
             offset_xy = cntrd_offset_xy,
             transformed_offset_xy=cntrd_trngl_offset_xy,
-            radius=radius,
+            r=r,
             include_boundary=include_boundary,
             **plot_cell_reg_assign,
         )
@@ -479,7 +479,7 @@ def assign_points_to_cell_regions(
 def assign_points_to_mirco_regions(
     grid:dict,
     pts,
-    radius:float=0.0075,
+    r:float=0.0075,
     include_boundary:bool=False,
     x:str='lon',
     y:str='lat',
@@ -513,7 +513,7 @@ def assign_points_to_mirco_regions(
     
     # print("Type offset_xy_unscaled", offset_xy_unscaled)
     raster_cell_to_region_comb_nr, offset_region_comb_nr_to_check, offset_all_x_vals, offset_all_y_vals, id_to_offset_regions, contain_region_mult = prepare_offset_regions(
-        grid_spacing=1, radius=radius/grid.spacing, include_boundary=include_boundary, 
+        grid_spacing=1, r=r/grid.spacing, include_boundary=include_boundary, 
         plot_offset_checks=plot_offset_checks, plot_offset_regions=plot_offset_regions, plot_offset_raster=plot_offset_raster,
         silent=silent,
     )
