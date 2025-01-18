@@ -63,7 +63,7 @@ def ensure_local_crs(
     if not target_crs is None:
         local_crs = convert_coords_to_local_crs(pts=pts, initial_crs=initial_crs, target_crs=target_crs, x=x, y=y, proj_x=proj_x, proj_y=proj_y,silent=silent)
         if local_crs == initial_crs:
-            pts.drop(colums=[proj_x, proj_y], inplace=True)
+            pts.drop(columns=[proj_x, proj_y], inplace=True)
         else:
             x = proj_x
             y = proj_y

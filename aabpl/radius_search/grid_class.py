@@ -8,7 +8,7 @@ from numpy import (
 )
 from pyproj import Transformer
 from pandas import DataFrame as _pd_DataFrame
-from math import log10 as _math_log10#,ceil,asin,acos
+from math import log10 as _math_log10
 from aabpl.utils.general import flatten_list, arr_to_tpls
 from aabpl.illustrations.plot_utils import map_2D_to_rgb, get_2D_rgb_colobar_kwargs
 from .radius_search_class import (
@@ -101,15 +101,12 @@ class Grid(object):
         self.local_crs = local_crs
         x_padding = ((xmin-xmax) % spacing)/2
         y_padding = ((ymin-ymax) % spacing)/2
-        
-        self.n_x_steps = n_x_steps = -int((xmin-xmax)/spacing) # round up
-        self.n_y_steps = n_y_steps = -int((ymin-ymax)/spacing) # round up 
         self.total_bounds = total_bounds = Bounds(xmin=xmin-x_padding,xmax=xmax+x_padding,ymin=ymin-y_padding,ymax=ymax+y_padding)
+        self.n_x_steps = n_x_steps = -int((self.total_bounds.xmin-self.total_bounds.xmax)/spacing)+1 # round up
+        self.n_y_steps = n_y_steps = -int((self.total_bounds.ymin-self.total_bounds.ymax)/spacing)+1 # round up 
         
         self.x_steps = x_steps = _np_linspace(total_bounds.xmin, total_bounds.xmax, n_x_steps)
-        # self.y_steps = y_steps = _np_linspace(total_bounds.ymax, total_bounds.ymin, n_y_steps)
         self.y_steps = y_steps = _np_linspace(total_bounds.ymin, total_bounds.ymax, n_y_steps)
-        
         self.id_y_mult = id_y_mult = 10**(int(_math_log10(n_x_steps))+1)
         
         self.row_ids = _np_arange(n_y_steps-1)

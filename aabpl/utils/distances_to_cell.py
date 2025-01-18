@@ -247,7 +247,7 @@ def get_cells_relevant_for_disk_by_type(
     # create all cells within square
     unassigned_cells_in_max_steps_square = _np_array(flatten_list([[(row,col) for col in range(-cell_steps_max, cell_steps_max+1)] for row in range(-cell_steps_max, cell_steps_max+1)]))
     # compare farthest vertex of cells: bool if cell is in contained in disk of radius centered around any pt within grid cell 
-    cell_is_contained_in_all_disks = grid_spacing * max_possible_dist_cells_to_cell(unassigned_cells_in_max_steps_square) <= radius
+    cell_is_contained_in_all_disks = grid_spacing * max_possible_dist_cells_to_cell(unassigned_cells_in_max_steps_square) <= r
     cells_contained_in_all_disks = unassigned_cells_in_max_steps_square[cell_is_contained_in_all_disks,:]
     
     if 'contained_by_all' == return_type:
