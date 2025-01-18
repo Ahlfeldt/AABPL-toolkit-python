@@ -685,7 +685,7 @@ class Grid(object):
         
         clusters = self.clusters[cluster_column]
         cell_to_cluster = clusters['cell_to_cluster']
-        max_cluster_id = max(list(clusters['cell_to_cluster'].values()))
+        max_cluster_id = max(list(cell_to_cluster.values())) if len(cell_to_cluster)>0 else 1
         imshow_kwargs = {
             'xmin':self.x_steps.min(),
             'ymin':self.y_steps.min(),

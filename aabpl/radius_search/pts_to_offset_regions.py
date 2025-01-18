@@ -532,7 +532,7 @@ def assign_points_to_mirco_regions(
 
     pts['initial_sort'] = range(len(pts))
     pts.sort_values('offset_x', inplace=True)
-    print("min max offset_x", pts['offset_x'].min(), pts['offset_x'].max())
+
     micro_raster_x = _pd_cut(
         x = pts['offset_x'],
         bins = offset_all_x_vals,
