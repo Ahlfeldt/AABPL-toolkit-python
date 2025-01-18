@@ -19,8 +19,8 @@ class DiskSearchObject(object):
         return assign_points_to_cells(
             grid=self.grid,
             pts_df=self.pts_df,
-            y_coord_name=self.y_coord_name,
-            x_coord_name=self.x_coord_name,
+            y_coord_name=self.y,
+            x_coord_name=self.x,
             row_name=self.row_name,
             col_name=self.col_name,
             silent=silent,
@@ -34,8 +34,8 @@ class DiskSearchSource(DiskSearchObject):
         self,
         grid,
         pts_df:_pd_DataFrame,
-        y_coord_name:str='lat',
-        x_coord_name:str='lon',
+        y:str='lat',
+        x:str='lon',
         row_name:str='id_y',
         col_name:str='id_x',
         cell_region_name:str='cell_region',
@@ -43,8 +43,8 @@ class DiskSearchSource(DiskSearchObject):
     ):
         self.grid = grid 
         self.pts_df = pts_df
-        self.y_coord_name = y_coord_name
-        self.x_coord_name = x_coord_name
+        self.y = y
+        self.x = x
         self.row_name = row_name
         self.col_name = col_name
         self.cell_region_name = cell_region_name 

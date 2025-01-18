@@ -21,8 +21,8 @@ from aabpl.testing.test_performance import time_func_perf
 def assign_points_to_cells(
     grid:dict,
     pts_df:_pd_DataFrame,
-    y_coord_name:str='lat',
-    x_coord_name:str='lon',
+    y:str='lat',
+    x:str='lon',
     row_name:str='id_y',
     col_name:str='id_x',
     silent:bool = False,
@@ -34,13 +34,13 @@ def assign_points_to_cells(
     sorts by 1) y coordinate and 2) by x coordinate
 
     Args:
-    <y_coord_name>
+    <y>
     
     Returns:
     gridcell_id_name: name to be appended in pts_df to indicate gridcell. If False then information will not be stored in pts_df 
     """
     # TO Do this might be significantly faster when looping through pts_df instead of through cells
-    pts_df.sort_values([y_coord_name, x_coord_name], inplace=True)
+    pts_df.sort_values([y, x], inplace=True)
 
     # . 
     row_ids = grid.row_ids
@@ -62,7 +62,7 @@ def assign_points_to_cells(
     # to do change to cut
     # for each row select relevant points, then refine selection with columns to obtain cells
     pts_df[row_name] = _pd_cut(
-        x = pts_df[y_coord_name],
+        x = pts_df[y],
         # bins = y_steps[::-1],
         # labels = row_ids[::-1],
         bins = y_steps,
@@ -71,7 +71,7 @@ def assign_points_to_cells(
     ).astype(int)
     
     pts_df[col_name] = _pd_cut(
-        x = pts_df[x_coord_name],
+        x = pts_df[x],
         bins = x_steps,
         labels = col_ids,
         include_lowest = True
