@@ -107,7 +107,7 @@ def filter_pts_on_arc(
 def  intersections_pts_two_circles_same_radius(
         center_1,
         center_2,
-        radius:float,
+        r:float,
         precision:int=13
         ):
     """
@@ -117,15 +117,14 @@ def  intersections_pts_two_circles_same_radius(
     circle_2_x, circle_2_y = center_2
 
     dist = ((circle_1_x-circle_2_x)**2 + (circle_1_y-circle_2_y)**2)**.5
-    if dist > 2*radius:
+    if dist > 2*r:
         return []
-    if dist == 2*radius:
+    if dist == 2*r:
         return [(
             round((circle_1_x + circle_2_x) / 2, precision), 
             round((circle_1_y + circle_2_y) / 2, precision),
             )]
 
-    r = radius
     alpha = _math_acos(dist/2/r)
     slope_angle = angle(circle_1_x, circle_1_y, circle_2_x, circle_2_y)
     angle_itx1 = alpha-slope_angle
@@ -147,7 +146,7 @@ def  intersections_pts_two_circles_same_radius(
 def intersections_pts_arc_to_circle(
         circle_center,
         arc_center,
-        radius:float,
+        r:float,
         arc_angle_min:float=0,
         arc_angle_max:float=360,
         precision:int=10,
@@ -158,7 +157,7 @@ def intersections_pts_arc_to_circle(
     # pts = intersections_pts_two_circles_same_radius(
     #         center_1=circle_center,
     #         center_2=arc_center,
-    #         radius=radius,
+    #         r=r,
     #     )
     # filtered_pts = filter_pts_on_arc(
     #     pts=pts,
@@ -175,7 +174,7 @@ def intersections_pts_arc_to_circle(
         pts=intersections_pts_two_circles_same_radius(
             center_1=circle_center,
             center_2=arc_center,
-            radius=radius,
+            r=r,
             precision=13,
         ),
         arc_center=arc_center,

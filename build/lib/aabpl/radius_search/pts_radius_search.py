@@ -13,7 +13,7 @@ def aggreagate_point_data_to_disks_vectorized(
     grid:dict,
     pts_source:_pd_DataFrame,
     pts_target:_pd_DataFrame=None,
-    radius:float=0.0075,
+    r:float=0.0075,
     columns:list=['employment'],
     y:str='lat',
     x:str='lon',
@@ -139,7 +139,7 @@ def aggreagate_point_data_to_disks_vectorized(
                 pts_in_radius = pts_in_cells_overlapped_by_pt_region[(_np_linalg_norm( # create a mask of boolean values indicating if point are within radius 
                     _np_array([pt_id_to_xy_coords[pt_id] for pt_id in pts_in_cells_overlapped_by_pt_region]) -
                     a_pt_xycoord, 
-                axis=1) <= radius)]
+                axis=1) <= r)]
                 
                 return _np_array([pt_id_to_vals[pt_id] for pt_id in pts_in_radius]).sum(axis=0) if len(pts_in_radius) > 0 else zero_sums
                 # else no points in radius thus return vector of _np_zeros
@@ -154,7 +154,7 @@ def aggreagate_point_data_to_disks_vectorized(
                 pts_in_radius = pts_in_cells_overlapped_by_pt_region[(_np_linalg_norm( # create a mask of boolean values indicating if point are within radius 
                     _np_array([pt_id_to_xy_coords[pt_id] for pt_id in pts_in_cells_overlapped_by_pt_region]) -
                     a_pt_xycoord, 
-                axis=1) <= radius)]
+                axis=1) <= r)]
                 
                 return sum([pt_id_to_vals[pt_id] for pt_id in pts_in_radius]) if len(pts_in_radius) > 0 else 0
                 # else no points in radius thus return vector of _np_zeros
@@ -217,7 +217,7 @@ def aggreagate_point_data_to_disks_vectorized(
         #     pts_in_radius = pts_in_cells_overlapped_by_pt_region[(_np_linalg_norm( # create a mask of boolean values indicating if point are within radius 
         #         _np_array([pt_id_to_xy_coords[pt_id] for pt_id in pts_in_cells_overlapped_by_pt_region]) -
         #         a_pt_xycoord, 
-        #     axis=1) <= radius)]
+        #     axis=1) <= r)]
             
         #     overlapping_cells_sums = _np_array([pt_id_to_vals[pt_id] for pt_id in pts_in_radius]).sum(axis=0) if len(pts_in_radius) > 0 else zero_sums
         # else:
@@ -239,12 +239,12 @@ def aggreagate_point_data_to_disks_vectorized(
             pts_in_radius = pts_in_cells_overlapped_by_pt_region[(_np_linalg_norm( # create a mask of boolean values indicating if point are within radius 
                 _np_array([pt_id_to_xy_coords[pt_id] for pt_id in pts_in_cells_overlapped_by_pt_region]) -
                 a_pt_xycoord, 
-            axis=1) <= radius)]
+            axis=1) <= r)]
             illustrate_point_disk(
                 grid=grid,
                 pts_source=pts_source,
                 pts_target=pts_target,
-                radius=radius,
+                r=r,
                 columns=columns,
                 x=x,
                 y=y,

@@ -303,7 +303,7 @@ def nested_distance_checks_directional(
         pt_lon:float,
         pt_is_north_of_cell:bool,
         pt_is_east_of_cell:bool,
-        radius:float=0.0074,
+        r:float=0.0074,
         zeros:_np_array=_np_zeros(1,dtype=int),
 ):
     """
@@ -318,7 +318,7 @@ def nested_distance_checks_directional(
     farthest_vertex_in_disk = (
             (pt_lat-(cell_lat_min if pt_is_north_of_cell else cell_lat_max))**2 + 
             (pt_lon-(cell_lon_min if pt_is_east_of_cell  else cell_lon_max))**2
-            )**.5 <= radius
+            )**.5 <= r
 
     # cell contained in disk if
     if farthest_vertex_in_disk:
@@ -327,7 +327,7 @@ def nested_distance_checks_directional(
     closest_vertex_in_disk = (
             (pt_lat-(cell_lat_max if pt_is_north_of_cell else cell_lat_min))**2 + 
             (pt_lon-(cell_lon_max if pt_is_east_of_cell  else cell_lon_min))**2
-            )**.5 <= radius
+            )**.5 <= r
 
     # overlapped if
     if closest_vertex_in_disk:
@@ -339,13 +339,13 @@ def nested_distance_checks_directional(
                     pt_lon=pt_lon,
                     pt_is_north_of_cell=pt_is_north_of_cell,
                     pt_is_east_of_cell=pt_is_east_of_cell,
-                    radius=radius,
+                    r=r,
                     zeros=zeros,
             ) for quadrant in cell_dict['quadrants']]).sum(axis=0)
         
         # else: There are not quadrants - thus deepest level has been reached   
         # check which pts are within disk and retrieve their vals and create sum
-        return cell_dict['pts_vals'][_np_linalg_norm(cell_dict['pts_lat_lon']-_np_array([pt_lat,pt_lon]),axis=1)<=radius].sum(axis=0) 
+        return cell_dict['pts_vals'][_np_linalg_norm(cell_dict['pts_lat_lon']-_np_array([pt_lat,pt_lon]),axis=1)<=r].sum(axis=0) 
     
     # cell does not intersects disk
     return zeros
@@ -355,7 +355,7 @@ def nested_distance_checks(
         cell_dict:dict,
             pt_lat:float,
             pt_lon:float,
-            radius:float=0.0074,
+            r:float=0.0074,
             zeros:_np_array=_np_zeros(1,dtype=int),
 ):
     """
@@ -363,7 +363,7 @@ def nested_distance_checks(
     """
     # directly evalute pairwise distance if at lowest nest level to avoid unnessary overhead
     if 'pts_vals' in cell_dict:
-        return cell_dict['pts_vals'][_np_linalg_norm(cell_dict['pts_lat_lon']-_np_array([pt_lat,pt_lon]),axis=1)<=radius].sum(axis=0)
+        return cell_dict['pts_vals'][_np_linalg_norm(cell_dict['pts_lat_lon']-_np_array([pt_lat,pt_lon]),axis=1)<=r].sum(axis=0)
 
 
     # unpack for better readability
@@ -388,7 +388,7 @@ def nested_distance_checks(
                     pt_is_north_of_cell=pt_lat>cell_lat_min,
                     # pt is east of cell lower if true else its west (as beeing in between is excluded)
                     pt_is_east_of_cell=pt_lon>cell_lon_min,
-                    radius=radius,
+                    r=r,
                     zeros=zeros,
             )
     
@@ -396,7 +396,7 @@ def nested_distance_checks(
                 cell_dict=quadrant,
                     pt_lat=pt_lat,
                     pt_lon=pt_lon,
-                    radius=radius,
+                    r=r,
                     zeros=zeros,
             ) for quadrant in cell_dict['quadrants']]).sum(axis=0) 
 
@@ -405,10 +405,10 @@ def nested_distance_checks(
 
 
     # else point is in between cell bounds at leas in one dimension thus two points have to be checked
-    vertex_1_in_disk = ((pt_lat-cell_lat_min)**2+(pt_lon-cell_lon_min)**2)**.5 <= radius
-    vertex_2_in_disk = ((pt_lat-cell_lat_max)**2+(pt_lon-cell_lon_min)**2)**.5 <= radius
-    vertex_3_in_disk = ((pt_lat-cell_lat_min)**2+(pt_lon-cell_lon_max)**2)**.5 <= radius
-    vertex_4_in_disk = ((pt_lat-cell_lat_max)**2+(pt_lon-cell_lon_max)**2)**.5 <= radius
+    vertex_1_in_disk = ((pt_lat-cell_lat_min)**2+(pt_lon-cell_lon_min)**2)**.5 <= r
+    vertex_2_in_disk = ((pt_lat-cell_lat_max)**2+(pt_lon-cell_lon_min)**2)**.5 <= r
+    vertex_3_in_disk = ((pt_lat-cell_lat_min)**2+(pt_lon-cell_lon_max)**2)**.5 <= r
+    vertex_4_in_disk = ((pt_lat-cell_lat_max)**2+(pt_lon-cell_lon_max)**2)**.5 <= r
 
     # if cell contained in disk return cell sum
     if _np_all([vertex_1_in_disk, vertex_2_in_disk, vertex_3_in_disk, vertex_4_in_disk]):
@@ -423,7 +423,7 @@ def nested_distance_checks(
                 cell_dict=quadrant,
                     pt_lat=pt_lat,
                     pt_lon=pt_lon,
-                    radius=radius,
+                    r=r,
                     zeros=zeros,
             ) for quadrant in cell_dict['quadrants']]).sum(axis=0) 
     # cell does not intersects disk
@@ -434,7 +434,7 @@ def nested_distance_checks(
 def aggreagate_point_data_to_disks_vectorized_nested(
     grid:dict,
     pts_df:_pd_DataFrame,
-    radius:float=0.0075,
+    r:float=0.0075,
     sum_names:list=['employment'],
     y_coord_name:str='lat',
     x_coord_name:str='lon',

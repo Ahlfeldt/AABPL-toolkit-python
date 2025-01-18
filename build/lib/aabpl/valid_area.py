@@ -13,7 +13,7 @@ def disk_cell_intersection_area(
     disk_center_pt:_np_array,      
     cell:float=0.0075,
     grid_spacing:float=0.0075,
-    radius:float=0.0075,
+    r:float=0.0075,
     silent = False,
 ):
     """

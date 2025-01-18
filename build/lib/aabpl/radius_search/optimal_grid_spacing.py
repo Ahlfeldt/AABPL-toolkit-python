@@ -11,7 +11,7 @@ def get_next_relevant_grid_spacing(
         upper_bound:float=400,
         lower_bound:float=80,
         precision:float=0.1,
-        radius:float=750,
+        r:float=750,
         smallest_contain_count:int=0, 
         smallest_overlap_count:int=0
 )->tuple:
@@ -30,7 +30,7 @@ def get_next_relevant_grid_spacing(
         current = (upper_bound * (5+early_it) + lower_bound*(5-early_it)) / 10
         
         
-        contain_count, overlap_count = get_always_contained_potentially_overlapped_cells(grid_spacing=current, radius=radius, countOnly=True)
+        contain_count, overlap_count = get_always_contained_potentially_overlapped_cells(grid_spacing=current, r=r, countOnly=True)
         #
         changeDetected = (
             relevantGridSizes.iloc[-1]['contain_count'] != contain_count or
@@ -56,7 +56,7 @@ def find_relevant_grid_spacings(
     largest:float=400,
     smallest:float=80,
     precision:float=.1,
-    radius:float=750,
+    r:float=750,
     plot_opt_spacing:dict={},     
     GIF:bool=True,     
 )->_pd_DataFrame:
@@ -79,7 +79,7 @@ def find_relevant_grid_spacings(
     print('Start searching for relevant gridsizes.')
     
     smallest_contain_count, smallest_overlap_count = get_always_contained_potentially_overlapped_cells(
-        grid_spacing=smallest, radius=radius, countOnly=True)
+        grid_spacing=smallest, r=r, countOnly=True)
 
     while current > smallest:
         current = get_next_relevant_grid_spacing(
@@ -87,13 +87,13 @@ def find_relevant_grid_spacings(
             upper_bound = current,
             lower_bound = smallest,
             precision=precision,
-            radius=radius,
+            r=r,
             smallest_contain_count=smallest_contain_count, 
             smallest_overlap_count=smallest_overlap_count
         )
 
         contain_count, overlap_count, contain_ids, overlap_ids, cell_steps_max = get_always_contained_potentially_overlapped_cells(
-            grid_spacing=current, radius=radius, countOnly=False)
+            grid_spacing=current, r=r, countOnly=False)
 
         relevantGridSizes.loc[current]= {
                     'grid_spacing': current,
@@ -106,8 +106,8 @@ def find_relevant_grid_spacings(
 
     #
 
-    relevantGridSizes['share_contain'] = (relevantGridSizes['contain_count']*relevantGridSizes['grid_spacing']**2)/(pi*radius**2)
-    relevantGridSizes['share_overlap'] = (relevantGridSizes['overlap_count']*relevantGridSizes['grid_spacing']**2)/(pi*radius**2)
+    relevantGridSizes['share_contain'] = (relevantGridSizes['contain_count']*relevantGridSizes['grid_spacing']**2)/(pi*r**2)
+    relevantGridSizes['share_overlap'] = (relevantGridSizes['overlap_count']*relevantGridSizes['grid_spacing']**2)/(pi*r**2)
     
     print('Found '+str(len(relevantGridSizes))+' relevant Gridsizes.')
 
@@ -119,7 +119,7 @@ def fill_in_all_grid_spacing_steps(
         largest:float=400,
         smallest:float=80,
         stepsize:float=.1,
-        radius:float=750
+        r:float=750
     ) -> _pd_DataFrame:
     """
     TODO Currently not used
@@ -139,8 +139,8 @@ def fill_in_all_grid_spacing_steps(
         selected_ids = relevantGridSizes[relevantGridSizesVec_temp>=i]
         allGridSizes.loc[i] = selected_ids.iloc[-1]
         if i != selected_ids['grid_spacing'].iloc[-1]:
-            allGridSizes.loc[i,'share_contain'] = (allGridSizes.loc[i, 'contain_count']*i**2)/(pi*radius**2)
-            allGridSizes.loc[i,'share_overlap'] = (allGridSizes.loc[i, 'overlap_count']*i**2)/(pi*radius**2)
+            allGridSizes.loc[i,'share_contain'] = (allGridSizes.loc[i, 'contain_count']*i**2)/(pi*r**2)
+            allGridSizes.loc[i,'share_overlap'] = (allGridSizes.loc[i, 'overlap_count']*i**2)/(pi*r**2)
         allGridSizes.loc[i, 'grid_spacing'] = i
 
     allGridSizes = allGridSizes.astype(relevantGridSizes.dtypes.to_dict()) # ensure correct data types
@@ -154,7 +154,7 @@ def wrap_optimal_grid_fun(
     smallest:float=80,
     stepsize:float=.5,
     precision:float=.01,
-    radius:float=750,
+    r:float=750,
     plot_opt_spacing:dict={},     
     GIF:bool=True,
     frames_between_relevant:int=6,
@@ -174,7 +174,7 @@ def wrap_optimal_grid_fun(
         largest=largest,
         smallest=smallest,
         precision=precision,
-        radius=radius
+        r=r
     )
     
     allGridSizes = fill_in_all_grid_spacing_steps(
@@ -182,7 +182,7 @@ def wrap_optimal_grid_fun(
         largest=largest,
         smallest=smallest,
         stepsize=stepsize,
-        radius=radius,
+        r=r,
     )
         
     if GIF:
@@ -191,7 +191,7 @@ def wrap_optimal_grid_fun(
             allGridSizes=allGridSizes,
             largest=largest,
             smallest=smallest,
-            radius=radius,
+            r=r,
             frames_between_relevant=frames_between_relevant,
             FuncAnimation_interval=FuncAnimation_interval,
             FuncAnimation_repeat=FuncAnimation_repeat,
@@ -210,7 +210,7 @@ def select_optimal_grid_spacing(
         x_max:float=11*100.,
         y_min:float=0.,
         y_max:float=2*100.,
-        radius:float=750,
+        r:float=750,
         n_points:int=1e6,
         n_queries:int=1,
 )->float:
@@ -224,7 +224,7 @@ def select_optimal_grid_spacing(
         smallest=60,
         stepsize=.2,
         precision=1e-13,
-        radius=radius,
+        r=r,
         plot_opt_spacing={},     
         GIF=False,
         frames_between_relevant=20,
