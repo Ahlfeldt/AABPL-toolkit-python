@@ -14,14 +14,15 @@ def create_distribution_plot(
         k_th_percentiles:list,
         sum_radius_names,
         r=None,
-        x_coord_name:str='lon',
-        y_coord_name:str='lat',
+        x:str='lon',
+        y:str='lat',
         filename:str='',
         plot_kwargs:dict={},
 ):
     """
     TODO Descripiton
     """
+    x_coord_name, y_coord_name = x,y
     disk_sums_for_random_points = rndm_pts[sum_radius_names]
     (n_random_points, ncols) = disk_sums_for_random_points.shape
     # specify default plot kwargs and add defaults
