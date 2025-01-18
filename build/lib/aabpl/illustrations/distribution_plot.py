@@ -8,8 +8,8 @@ from numpy import (
 from matplotlib.pyplot import (subplots as _plt_subplots, colorbar as _plt_colorbar, get_cmap as _plt_get_cmap)
 
 def create_distribution_plot(
-        pts_df:_pd_DataFrame,
-        rndm_pts_df:_pd_DataFrame,
+        pts:_pd_DataFrame,
+        rndm_pts:_pd_DataFrame,
         cluster_threshold_values:list,
         k_th_percentiles:list,
         sum_radius_names,
@@ -22,7 +22,7 @@ def create_distribution_plot(
     """
     TODO Descripiton
     """
-    disk_sums_for_random_points = rndm_pts_df[sum_radius_names]
+    disk_sums_for_random_points = rndm_pts[sum_radius_names]
     (n_random_points, ncols) = disk_sums_for_random_points.shape
     # specify default plot kwargs and add defaults
     default_kwargs = {
@@ -57,9 +57,9 @@ def create_distribution_plot(
 
     xmin, xmax = 0, 100
     xs_random_pts = _np_linspace(xmin,xmax,n_random_points)
-    xs_pts = _np_linspace(xmin,xmax,len(pts_df))
+    xs_pts = _np_linspace(xmin,xmax,len(pts))
     random_vals = disk_sums_for_random_points.values
-    pts_df_vals = pts_df[sum_radius_names].values
+    pts_vals = pts[sum_radius_names].values
 
     for (i, colname, cluster_threshold_value, k_th_percentile) in zip(
         range(ncols), sum_radius_names, cluster_threshold_values, k_th_percentiles):
@@ -115,7 +115,7 @@ def create_distribution_plot(
 
 
         # CUMULATIVE DISTRIBUTION ORIGNAL POINTS
-        ys = sorted(pts_df_vals[:,i])
+        ys = sorted(pts_vals[:,i])
         ymin, ymax = min(ys), max(ys)
         # SELECT AX (IF MULTIPLE)
         ax = axs.flat[ncols+i]
@@ -143,9 +143,9 @@ def create_distribution_plot(
         ax.set_ylim([ymin,ymax])
         
         
-        xmin, xmax =  min([pts_df[x_coord_name].min(), rndm_pts_df[x_coord_name].min()]), max([pts_df[x_coord_name].max(), rndm_pts_df[x_coord_name].max()])
-        ymin, ymax =  min([pts_df[y_coord_name].min(), rndm_pts_df[y_coord_name].min()]), max([pts_df[y_coord_name].max(), rndm_pts_df[y_coord_name].max()])
-        vmin, vmax = min([pts_df_vals[:,i].min(), random_vals[:,i].min()]), max([pts_df_vals[:,i].max(), random_vals[:,i].max()])
+        xmin, xmax =  min([pts[x_coord_name].min(), rndm_pts[x_coord_name].min()]), max([pts[x_coord_name].max(), rndm_pts[x_coord_name].max()])
+        ymin, ymax =  min([pts[y_coord_name].min(), rndm_pts[y_coord_name].min()]), max([pts[y_coord_name].max(), rndm_pts[y_coord_name].max()])
+        vmin, vmax = min([pts_vals[:,i].min(), random_vals[:,i].min()]), max([pts_vals[:,i].max(), random_vals[:,i].max()])
         cmap = _plt_get_cmap('Reds')
         cmap.set_under('#ccc')
         # SCATTER RANDOM POINTS
@@ -154,7 +154,7 @@ def create_distribution_plot(
         ax.set_title("Radius sums for random points for " + colname)
         # ADD DISTRIUBTION PLOT
         ax.set_facecolor('#ccc')
-        sc = ax.scatter(x=rndm_pts_df[x_coord_name],y=rndm_pts_df[y_coord_name],c=random_vals[:,i], s=0.01, vmin=_np_spacing(0.0), vmax=vmax, cmap=cmap)
+        sc = ax.scatter(x=rndm_pts[x_coord_name],y=rndm_pts[y_coord_name],c=random_vals[:,i], s=0.01, vmin=_np_spacing(0.0), vmax=vmax, cmap=cmap)
         _plt_colorbar(sc, extend='min')
         # SET LIMITS
         ax.set_xlim([xmin,xmax])
@@ -166,7 +166,7 @@ def create_distribution_plot(
         ax.set_title("Radius sums for points for " + colname)
         # ADD DISTRIUBTION PLOT
         ax.set_facecolor('#ccc')
-        sc = ax.scatter(x=pts_df[x_coord_name],y=pts_df[y_coord_name],c=pts_df_vals[:,i], s=0.01, vmin=_np_spacing(0.0), vmax=vmax, cmap=cmap)
+        sc = ax.scatter(x=pts[x_coord_name],y=pts[y_coord_name],c=pts_vals[:,i], s=0.01, vmin=_np_spacing(0.0), vmax=vmax, cmap=cmap)
         _plt_colorbar(sc, extend='min')
         # SET LIMITS
         ax.set_xlim([xmin,xmax])

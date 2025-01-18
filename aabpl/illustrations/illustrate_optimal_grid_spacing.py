@@ -1,14 +1,10 @@
-from numpy import (array, unique, linspace, invert, flip, transpose, concatenate, sign, zeros, 
-    min as _np_min, max as _np_max, equal, where, logical_or, logical_and, all, newaxis)
 from pandas import DataFrame as _pd_DataFrame
 from matplotlib import pyplot as plt
 from matplotlib.animation import (FuncAnimation as _plt_FuncAnimation, PillowWriter as _plt_PillowWriter)
 from matplotlib.figure import Figure as _plt_Figure
 from matplotlib.axes._axes import Axes as _plt_Axes
-# from math import ceil,asin,acos
 from .plot_utils import (
     create_grid_cell_patches, 
-    create_grid_cell_patches_by_type, 
     create_circle_patches
 )
 

@@ -129,20 +129,18 @@ def draw_random_points_within_valid_area(
 
 def get_distribution_for_random_points(
     grid:dict,
-    pts_df:_pd_DataFrame,
-    radius:float=0.0075,
+    pts:_pd_DataFrame,
     n_random_points:int=int(1e5),
     k_th_percentiles:float=[99.5],
-    sum_names:list=['employment'],
-    x_coord_name:str='lon',
-    y_coord_name:str='lat',
+    columns:list=[],
+    x:str='lon',
+    y:str='lat',
     row_name:str='id_y',
     col_name:str='id_x',
     sum_suffix:str='_750m',
     plot_distribution:dict={},
     random_seed:int=None,
     silent:bool=False,
-    maybe_allow_for_some_random_vals_for_pts=None,
 ):
     """
     execute methods
@@ -154,7 +152,7 @@ def get_distribution_for_random_points(
     TODO Check if how cluster value 
     """
     if type(k_th_percentiles) != list:
-        k_th_percentiles = [k_th_percentiles for i in range(len(sum_names))]
+        k_th_percentiles = [k_th_percentiles for i in range(len(columns))]
     if any([k_th_percentile >= 100 or k_th_percentile <= 0 for k_th_percentile in k_th_percentiles]):
         raise ValueError(
             'Values for k_th_percentiles must be >0 and <100. Provided values do not fullfill that condition',
@@ -170,15 +168,15 @@ def get_distribution_for_random_points(
         cell_height=grid.spacing,
     )
 
-    rndm_pts_df = _pd_DataFrame(
+    rndm_pts = _pd_DataFrame(
         data = random_point_coords,
-        columns=[x_coord_name,y_coord_name]
+        columns=[x,y]
     )
 
     grid.search.set_source(
-        pts_df=rndm_pts_df,
-        x_coord_name=x_coord_name,
-        y_coord_name=y_coord_name,
+        pts=rndm_pts,
+        x=x,
+        y=y,
         row_name=row_name,
         col_name=col_name,
         sum_suffix=sum_suffix,
@@ -186,23 +184,23 @@ def get_distribution_for_random_points(
     )
 
     grid.search.set_target(
-        pts_df=pts_df,
-        sum_names=sum_names,
-        x_coord_name=x_coord_name,
-        y_coord_name=y_coord_name,
+        pts=pts,
+        columns=columns,
+        x=x,
+        y=y,
         row_name=row_name,
         col_name=col_name,
         silent=silent,
     )
     
-    grid.rndm_pts_df = rndm_pts_df
+    grid.rndm_pts = rndm_pts
     
     grid.search.perform_search(silent=silent,)
 
-    sum_radius_names = [(cname+sum_suffix) for cname in sum_names]
-    disk_sums_for_random_points = rndm_pts_df[sum_radius_names].values
+    sum_radius_names = [(cname+sum_suffix) for cname in columns]
+    disk_sums_for_random_points = rndm_pts[sum_radius_names].values
 
     cluster_threshold_values  = [_np_percentile(disk_sums_for_random_points[:,i], k_th_percentile,axis=0) for i, k_th_percentile in enumerate(k_th_percentiles)]
     
   
-    return (cluster_threshold_values, rndm_pts_df)
+    return (cluster_threshold_values, rndm_pts)

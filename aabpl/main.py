@@ -8,11 +8,75 @@ from aabpl.radius_search.radius_search_class import DiskSearch
 from aabpl.radius_search.grid_class import Grid
 from aabpl.illustrations.plot_pt_vars import create_plots_for_vars
 from aabpl.illustrations.distribution_plot import create_distribution_plot
+
+def convert_coords_to_local_crs(
+        pts,
+        x:str='lon',
+        y:str='lat',
+        proj_x:str='proj_lon',
+        proj_y:str='proj_lat',
+        initial_crs:str="EPSG:4326",
+        target_crs:str='auto',
+        silent:bool=False,
+) -> str:
+    
+    # https://gis.stackexchange.com/a/269552
+    
+    if target_crs == 'auto': 
+        
+        # convert_wgs_to_utm function, see https://stackoverflow.com/a/40140326/4556479
+        def convert_wgs_to_utm(lon: float, lat: float):
+            """Based on lat and lng, return best utm epsg-code"""
+            utm_band = str((math.floor((lon + 180) / 6 ) % 60) + 1)
+            if len(utm_band) == 1:
+                utm_band = '0'+utm_band
+            if lat >= 0:
+                epsg_code = '326' + utm_band
+                return epsg_code
+            epsg_code = '327' + utm_band
+            return epsg_code
+            
+        # Get best UTM Zone SRID/EPSG Code for center coordinate pair
+        utm_code = convert_wgs_to_utm(*pts[[x,y]].mean(axis=0))
+        # define project_from_to with iteration
+        # see https://gis.stackexchange.com/a/127432/33092
+        local_crs = 'EPSG:'+str(utm_code)
+    else:
+        local_crs = target_crs
+    transformer = Transformer.from_crs(crs_from=initial_crs, crs_to=local_crs, always_xy=True)
+    pts[proj_x],pts[proj_y] = transformer.transform(pts[x], pts[y])
+    if not silent and initial_crs != local_crs:
+        print("Reproject from " +str(initial_crs)+' to '+local_crs)
+    return local_crs
+
+def ensure_local_crs(
+    pts:_pd_DataFrame=None,
+    x:str='lon',
+    y:str='lat',
+    initial_crs:str='EPSG:4326', 
+    target_crs:str='auto',
+    silent:bool=True,
+):
+        
+    proj_x = next(('proj_x'+str(i) for i in ['']+list(range(len(pts.columns))) if 'proj_x'+str(i) not in pts.columns))
+    proj_y = next(('proj_y'+str(i) for i in ['']+list(range(len(pts.columns))) if 'proj_y'+str(i) not in pts.columns))
+    if not target_crs is None:
+        local_crs = convert_coords_to_local_crs(pts=pts, initial_crs=initial_crs, target_crs=target_crs, x=x, y=y, proj_x=proj_x, proj_y=proj_y,silent=silent)
+        if local_crs == initial_crs:
+            pts.drop(colums=[proj_x, proj_y], inplace=True)
+        else:
+            x = proj_x
+            y = proj_y
+        return x,y,local_crs
+    return x,y,initial_crs
+
+
 # TODO remove cell_region from kwargs
 @time_func_perf
 def create_auto_grid_for_radius_search(
     pts_source:_pd_DataFrame,
-    crs:str,
+    initial_crs:str,
+    local_crs:str,
     r:float,
     x:str='lon',
     y:str='lat',
@@ -70,7 +134,8 @@ def create_auto_grid_for_radius_search(
             xmax=xmax,
             ymin=ymin,
             ymax=ymax,
-            crs=crs,
+            initial_crs=initial_crs,
+            local_crs=local_crs,
             set_fixed_spacing=r/3, # TODO don t set fixed spacing but
             silent=silent,
         )
@@ -94,6 +159,7 @@ def radius_search(
     tgt_row_name:str=None,
     tgt_col_name:str=None,
     grid:Grid=None,
+    proj_crs:str='auto',
     include_boundary:bool=False,
     plot_radius_sums:dict=None,
     plot_pt_disk:dict=None,
@@ -138,6 +204,8 @@ def radius_search(
         name for column that will be appended to pts indicating grid cell row. If None its assumed to be same as x (default=None)
     col_name (str):
         name for column that will be appended to pts indicating grid cell column (default='id_y')
+    proj_crs (crs):
+        crs projection into which pts for search (source and target) shall be mapped. If 'auto' local crs will be determined automatically. If None no reprojection will be performed (default='auto')
     grid (aabpl.Grid):
         grid of custom class containing points. If None it will automatically one (default=None)
     include_boundary (bool):
@@ -161,11 +229,24 @@ def radius_search(
     grid (aabl.Grid):
         a grid covering all points (custom class containing  
     """
+
+
+    x,y,local_crs = ensure_local_crs(pts=pts, x=x, y=y, initial_crs=crs, target_crs=proj_crs)
+    if pts_target is None:
+        pts_target = pts
+    else:
+        x,y,local_crs = ensure_local_crs(pts=pts_target, x=x, y=y, initial_crs=crs, target_crs=proj_crs)
+    if x_tgt is None:
+        x_tgt = x
+    if y_tgt is None:
+        y_tgt = y
+    
     # OVERWRITE DEFAULTS
     if grid is None:
         grid = create_auto_grid_for_radius_search(
             pts_source=pts,
-            crs=crs,
+            initial_crs=crs,
+            local_crs=local_crs,
             r=r,
             x=x,
             y=y,
@@ -174,12 +255,7 @@ def radius_search(
             y_tgt=y_tgt,
             silent=silent,
         )
-    if pts_target is None:
-        pts_target = pts
-    if x_tgt is None:
-        x_tgt = x
-    if y_tgt is None:
-        y_tgt = y
+    
     if tgt_row_name is None:
         tgt_row_name = row_name
     if tgt_col_name is None:
@@ -203,8 +279,8 @@ def radius_search(
     grid.search.set_target(
         pts=pts_target,
         columns=columns,
-        x_coord_name=x_tgt,
-        y_coord_name=y_tgt,
+        x=x_tgt,
+        y=y_tgt,
         row_name=tgt_row_name,
         col_name=tgt_col_name,
         silent=silent,
@@ -213,8 +289,8 @@ def radius_search(
     # prepare source points data
     grid.search.set_source(
         pts=pts,
-        x_coord_name=x,
-        y_coord_name=y,
+        x=x,
+        y=y,
         row_name=row_name,
         col_name=col_name,
         sum_suffix=sum_suffix,
@@ -247,6 +323,7 @@ def detect_cluster_pts(
     col_name:str='id_x',
     sum_suffix:str='_750m',
     cluster_suffix:str='_cluster',
+    proj_crs:str='auto',
     grid:Grid=None,
     include_boundary:bool=False,
     plot_distribution:dict=None,
@@ -328,10 +405,13 @@ def detect_cluster_pts(
         a grid covering all points (custom class) with cluster attributes stored to it  
     """
     # OVERWRITE DEFAULTS
+    
+    x,y,local_crs = ensure_local_crs(pts=pts, x=x, y=y, initial_crs=crs, target_crs=proj_crs)
     if grid is None:
         grid = create_auto_grid_for_radius_search(
             pts_source=pts,
-            crs=crs,
+            initial_crs=crs,
+            local_crs=local_crs,
             r=r,
             y=y,
             x=x,
@@ -347,8 +427,8 @@ def detect_cluster_pts(
     grid.search.set_target(
         pts=pts,
         columns=columns,
-        x_coord_name=x,
-        y_coord_name=y,
+        x=x,
+        y=y,
         row_name=row_name,
         col_name=col_name,
         silent=silent,
@@ -357,10 +437,9 @@ def detect_cluster_pts(
     (cluster_threshold_values, rndm_pts) = get_distribution_for_random_points(
         grid=grid,
         pts=pts,
-        r=r,
         columns=columns,
-        x_coord_name=x,
-        y_coord_name=y,
+        x=x,
+        y=y,
         row_name=row_name,
         col_name=col_name,
         sum_suffix=sum_suffix,
@@ -377,8 +456,8 @@ def detect_cluster_pts(
     
     grid.search.set_source(
         pts=pts,
-        x_coord_name=x,
-        y_coord_name=y,
+        x=x,
+        y=y,
         row_name=row_name,
         col_name=col_name,
         sum_suffix=sum_suffix,
@@ -402,8 +481,8 @@ def detect_cluster_pts(
         # print("disk_sums_for_random_points", disk_sums_for_random_points)
         create_distribution_plot(
             pts=pts,
-            x_coord_name=x,
-            y_coord_name=y,
+            x=x,
+            y=y,
             radius_sum_columns=[n+sum_suffix for n in columns],
             rndm_pts=rndm_pts,
             cluster_threshold_values=cluster_threshold_values,
@@ -415,8 +494,8 @@ def detect_cluster_pts(
 
     def plot_rand_dist(
             pts=pts,
-            x_coord_name=x,
-            y_coord_name=y,
+            x=x,
+            y=y,
             radius_sum_columns=[n+sum_suffix for n in columns],
             rndm_pts=rndm_pts,
             cluster_threshold_values=cluster_threshold_values,
@@ -428,8 +507,8 @@ def detect_cluster_pts(
     ):
         create_distribution_plot(
             pts=pts,
-            x_coord_name=x,
-            y_coord_name=y,
+            x=x,
+            y=y,
             radius_sum_columns=radius_sum_columns,
             rndm_pts=rndm_pts,
             cluster_threshold_values=cluster_threshold_values,
@@ -468,7 +547,7 @@ def detect_cluster_pts(
     return grid
 # done
 
-def detect_cells_with_cluster_pts(
+def detect_cluster_cells(
     pts:_pd_DataFrame,
     crs:str,
     r:float=750,
@@ -485,6 +564,7 @@ def detect_cells_with_cluster_pts(
     col_name:str='id_x',
     sum_suffix:str='_750m',
     cluster_suffix:str='_cluster',
+    proj_crs:str='auto',
     grid:Grid=None,
     include_boundary:bool=False,
     plot_distribution:dict=None,
@@ -566,7 +646,6 @@ def detect_cells_with_cluster_pts(
     grid (aabl.Grid):
         a grid covering all points (custom class) with cluster attributes stored to it  
     """
-    
     grid = detect_cluster_pts(
         pts=pts,
         crs=crs,
@@ -577,8 +656,8 @@ def detect_cells_with_cluster_pts(
         n_random_points=n_random_points,
         random_seed=random_seed,
         grid=grid,
-        x_coord_name=x,
-        y_coord_name=y,
+        x=x,
+        y=y,
         row_name=row_name,
         col_name=col_name,
         sum_suffix=sum_suffix,
@@ -607,39 +686,7 @@ def detect_cells_with_cluster_pts(
         )
     
     return grid
-def convert_coords_to_local_crs(
-        pts,
-        x:str='lon',
-        y:str='lat',
-        initial_crs:str="EPSG:4326",
-        silent:bool=False,
-) -> str:
-    
-    # https://gis.stackexchange.com/a/269552
-    
-    
-    # convert_wgs_to_utm function, see https://stackoverflow.com/a/40140326/4556479
-    def convert_wgs_to_utm(lon: float, lat: float):
-        """Based on lat and lng, return best utm epsg-code"""
-        utm_band = str((math.floor((lon + 180) / 6 ) % 60) + 1)
-        if len(utm_band) == 1:
-            utm_band = '0'+utm_band
-        if lat >= 0:
-            epsg_code = '326' + utm_band
-            return epsg_code
-        epsg_code = '327' + utm_band
-        return epsg_code
-        
-    # Get best UTM Zone SRID/EPSG Code for center coordinate pair
-    utm_code = convert_wgs_to_utm(*pts[[x,y]].mean(axis=0))
-    # define project_from_to with iteration
-    # see https://gis.stackexchange.com/a/127432/33092
-    local_crs = 'EPSG:'+str(utm_code)
-    transformer = Transformer.from_crs(crs_from=initial_crs, crs_to=local_crs, always_xy=True)
-    pts[x],pts[y] = transformer.transform(pts[x], pts[y])
-    if not silent and initial_crs != local_crs:
-        print("Reproject from " +str(initial_crs)+' to '+local_crs)
-    return local_crs
+
 # next thing would be to label cells as clustered or not
 # then to create orthogonal convex hull around clusters
 # then to maybe wrap everything in one final function  

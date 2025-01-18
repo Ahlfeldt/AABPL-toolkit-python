@@ -1,18 +1,14 @@
 # intersection of two circles with same radius
-from numpy import (linspace as _np_linspace, array as _np_array, sign as _np_sign, arange as _np_arange, invert as _np_invert, zeros as _np_zeros)
+from numpy import array as _np_array, sign as _np_sign, arange as _np_arange, invert as _np_invert, zeros as _np_zeros
 from numpy.linalg import norm as _np_linalg_norm
-from math import sin as _math_sin, cos as _math_cos, atan2 as _math_atan2, pi as _math_pi, acos as _math_acos , sin as _math_asin, log10 as _math_log10
+from math import log10 as _math_log10
 from matplotlib import pyplot as plt
-from matplotlib.patches import (Rectangle as _plt_Rectangle, Polygon as _plt_Polygon, Circle as _plt_Circle)
-from aabpl.utils.general import angle, angles_to_origin, angle_to, make_bins_from_vals, get_vals_from_bins
+from aabpl.utils.general import make_bins_from_vals, get_vals_from_bins
 from aabpl.utils.distances_to_cell import (get_cell_closest_point_to_point, get_cell_farthest_vertex_to_point,
- check_if_never_contains_convex_set, check_if_always_overlaps_full_convex_set,check_if_always_overlaps_convex_set, get_cells_relevant_for_disk_by_type)
-# from aabpl.utils.rotations import transform_cell_pattern, transform_coord, transform_cell
-# from aabpl.utils.intersections import circle_line_segment_intersection, line_intersection, intersections_pts_arc_to_circle
-from .offset_region_classes import OffsetRegion, Edge, Vertex, LineSegment, Circle
+ check_if_never_contains_convex_set, check_if_always_overlaps_full_convex_set, get_cells_relevant_for_disk_by_type)
+from .offset_region_classes import OffsetRegion, Vertex, LineSegment, Circle
 from aabpl.illustrations.illustrate_cell_pattern import plot_cell_pattern
 from aabpl.testing.test_performance import time_func_perf
-
 from shapely.geometry import Polygon, LineString, Point
 from geopandas import GeoSeries, GeoDataFrame
 

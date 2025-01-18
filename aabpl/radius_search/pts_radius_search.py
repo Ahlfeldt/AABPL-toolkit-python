@@ -1,23 +1,11 @@
-from numpy import (
-    array as _np_array,
-    ndarray as _np_ndarray,
-    arange as _np_arange,
-    hstack as _np_hstack,
-    zeros as _np_zeros,
-    unique as _np_unique, 
-    concatenate as _np_concatenate,
-    equal as _np_equal, 
-    logical_or as _np_logical_or, 
-    all as _np_all, 
-)
+from numpy import array as _np_array, zeros as _np_zeros
 from numpy.linalg import norm as _np_linalg_norm
 from pandas import (DataFrame as _pd_DataFrame, cut as _pd_cut, concat as _pd_concat) 
-from aabpl.utils.general import (   flatten_list, DataFrameRelation,arr_to_tpls )
-from aabpl.illustrations.illustrate_point_to_disk import (illustrate_point_disk)
+from aabpl.utils.general import flatten_list
+from aabpl.illustrations.illustrate_point_to_disk import illustrate_point_disk
 from aabpl.illustrations.plot_pt_vars import create_plots_for_vars
 from aabpl.testing.test_performance import time_func_perf
 
-_np_array = time_func_perf(_np_array)
 
 ################ aggreagate_point_data_to_disks_vectorized ######################################################################################
 @time_func_perf

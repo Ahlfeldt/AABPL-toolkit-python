@@ -29,8 +29,8 @@ def illustrate_point_disk(
     pts_in_cells_overlapped_by_pt_region:list,
     pts_in_radius:list,
     pts_in_cell_contained_by_pt_region:list,
-    pts_df_search_source:_pd_DataFrame,
-    pts_df_search_target:_pd_DataFrame,
+    pts_source:_pd_DataFrame,
+    pts_target:_pd_DataFrame,
     radius:float=750,
     sum_names:list=['employment'],
     y_coord_name:str='lat',
@@ -54,11 +54,11 @@ def illustrate_point_disk(
     fig = plot_kwargs.pop('fig')
     ax = plot_kwargs.pop('ax')
     pt_id = plot_kwargs.pop('pt_id')
-    print("row:",pts_df_search_source.loc[pt_id])
+    print("row:",pts_source.loc[pt_id])
     print("cells_cntd_by_pt_cell", cells_cntd_by_pt_cell)
     print("cells_contained_by_pt_region", cells_contained_by_pt_region)
     print("cells_overlapped_by_pt_region", cells_overlapped_by_pt_region)
-    pt_x, pt_y = pts_df_search_source.loc[pt_id,[x_coord_name,y_coord_name]]
+    pt_x, pt_y = pts_source.loc[pt_id,[x_coord_name,y_coord_name]]
     home_cell = grid.pt_id_to_row_col[pt_id]
     home_cell_centroid = grid.row_col_to_centroid[home_cell]
     hc_x,hc_y = home_cell_centroid
@@ -121,23 +121,23 @@ def illustrate_point_disk(
     
     # all pts
     ax.scatter(
-        x=pts_df_search_target[x_coord_name],
-        y =pts_df_search_target[y_coord_name],
+        x=pts_target[x_coord_name],
+        y =pts_target[y_coord_name],
         s=fig.get_figheight()/1, color='#777', marker='x')
     # pts in contained cells
     ax.scatter(
-        x=pts_df_search_target.loc[pts_in_cell_contained_by_pt_region, x_coord_name],
-        y =pts_df_search_target.loc[pts_in_cell_contained_by_pt_region, y_coord_name],
+        x=pts_target.loc[pts_in_cell_contained_by_pt_region, x_coord_name],
+        y =pts_target.loc[pts_in_cell_contained_by_pt_region, y_coord_name],
         s=fig.get_figheight()/2, color='yellow', marker='o')
     # pts in overlapped cells
     ax.scatter(
-        x=pts_df_search_target.loc[pts_in_cells_overlapped_by_pt_region, x_coord_name],
-        y =pts_df_search_target.loc[pts_in_cells_overlapped_by_pt_region, y_coord_name],
+        x=pts_target.loc[pts_in_cells_overlapped_by_pt_region, x_coord_name],
+        y =pts_target.loc[pts_in_cells_overlapped_by_pt_region, y_coord_name],
         s=fig.get_figheight()/2, color='red', marker='+')
     # pts in overlapped cells inside radius
     ax.scatter(
-        x=pts_df_search_target.loc[pts_in_radius, x_coord_name],
-        y =pts_df_search_target.loc[pts_in_radius, y_coord_name],
+        x=pts_target.loc[pts_in_radius, x_coord_name],
+        y =pts_target.loc[pts_in_radius, y_coord_name],
         s=fig.get_figheight()/2, color='black', marker='o')
     
     # for (i, ax) in enumerate(axs):

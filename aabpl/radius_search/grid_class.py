@@ -5,30 +5,21 @@ from numpy import (
     arange as _np_arange, 
     unique as _np_unique,
     zeros as _np_zeros,
-    spacing as _np_spacing,
-    invert, flip, transpose, concatenate, sign, zeros, 
-    min, max, equal, where, logical_or, logical_and, all, newaxis
 )
-# from numpy.linalg import norm
-# from numpy.random import randint, random
 from pyproj import Transformer
 from pandas import DataFrame as _pd_DataFrame
 from math import log10 as _math_log10#,ceil,asin,acos
-from aabpl.utils.general import ( flatten_list, visualize, depth, arr_to_tpls)
-from aabpl.illustrations.illustrate_optimal_grid_spacing import ( create_optimal_grid_spacing_gif, )
+from aabpl.utils.general import flatten_list, arr_to_tpls
 from aabpl.illustrations.plot_utils import map_2D_to_rgb, get_2D_rgb_colobar_kwargs
-from aabpl.utils.distances_to_cell import ( get_always_contained_potentially_overlapped_cells, )
-# from .nested_search import (aggregate_point_data_to_nested_cells, aggreagate_point_data_to_disks_vectorized_nested)
 from .radius_search_class import (
     aggregate_point_data_to_cells,
-    assign_points_to_cell_regions,
     aggreagate_point_data_to_disks_vectorized
 )
+from .pts_to_offset_regions import assign_points_to_cell_regions
 from aabpl.valid_area import disk_cell_intersection_area
-# from .radius_search.optimal_grid_spacing import (select_optimal_grid_spacing,)
 from aabpl.testing.test_performance import time_func_perf
 import matplotlib.pyplot as plt
-from matplotlib.pyplot import get_cmap as _plt_get_cmap, savefig as _plt_savefig
+from matplotlib.pyplot import get_cmap as _plt_get_cmap
 from shapely.geometry import Polygon, Point
 from shapely.ops import unary_union
 from geopandas import GeoDataFrame as _gpd_GeoDataFrame
@@ -85,7 +76,8 @@ class Grid(object):
         xmax:float,
         ymin:float,
         ymax:float,
-        crs:str,
+        initial_crs:str,
+        local_crs:str,
         set_fixed_spacing:float=None,
         radius:float=750,
         n_points:int=10000,
@@ -105,7 +97,8 @@ class Grid(object):
 
         # TODO total_bounds should also contain excluded area if not contained 
         # min(points.total_bounds+radius, max(points.total_bounds, excluded_area_total_bound))  
-        self.crs = crs
+        self.initial_crs = initial_crs
+        self.local_crs = local_crs
         x_padding = ((xmin-xmax) % spacing)/2
         y_padding = ((ymin-ymax) % spacing)/2
         
@@ -201,7 +194,7 @@ class Grid(object):
     assign_points_to_cell_regions = assign_points_to_cell_regions
     aggreagate_point_data_to_disks_vectorized = aggreagate_point_data_to_disks_vectorized
     # aggreagate_point_data_to_disks_vectorized_nested = aggreagate_point_data_to_disks_vectorized_nested
-    # append a variable to pts_df that indicates the share of valid area float[0,1] 
+    # append a variable to pts that indicates the share of valid area float[0,1] 
     disk_cell_intersection_area = disk_cell_intersection_area
 
     def add_cluster_tags_to_cells(
@@ -421,8 +414,8 @@ class Grid(object):
 
     def create_clusters(
         self,
-        pts_df:_pd_DataFrame,
-        sum_names:list=['employment'],
+        pts:_pd_DataFrame,
+        columns:list=['employment'],
         distance_thresholds=2500,
         make_convex:bool=True,
         row_name:str='id_y',
@@ -430,14 +423,14 @@ class Grid(object):
         cluster_suffix:str='_750m',
         plot_cluster_cells:dict=None,
     ):
-        for sum_column in sum_names:
-            cells_with_cluster = (pts_df[[row_name, col_name]][pts_df[sum_column + cluster_suffix]]).values
+        for column in columns:
+            cells_with_cluster = (pts[[row_name, col_name]][pts[column + cluster_suffix]]).values
             self.add_cluster_tags_to_cells(
                 cells_with_cluster=cells_with_cluster,
-                cluster_tag=sum_column,
+                cluster_tag=column,
             )
         
-        distance_thresholds = distance_thresholds if type(distance_thresholds) in [list, _np_array] else [distance_thresholds for n in sum_names]
+        distance_thresholds = distance_thresholds if type(distance_thresholds) in [list, _np_array] else [distance_thresholds for n in columns]
         self.merge_clusters(distance_thresholds=distance_thresholds)
         if make_convex:
             self.make_cluster_convex()
@@ -446,14 +439,14 @@ class Grid(object):
         self.connect_cells_to_clusters()
         self.add_geom_to_cluster()
 
-        for sum_column in sum_names:
-            cluster_column = sum_column + cluster_suffix
-            cell_to_cluster = self.clusters[sum_column]['cell_to_cluster']
-            vals = _np_zeros(len(pts_df),int)#-1
-            for i,(row,col) in enumerate(pts_df[[row_name, col_name]].values):
+        for column in columns:
+            cluster_column = column + cluster_suffix
+            cell_to_cluster = self.clusters[column]['cell_to_cluster']
+            vals = _np_zeros(len(pts),int)#-1
+            for i,(row,col) in enumerate(pts[[row_name, col_name]].values):
                 if (row, col) in cell_to_cluster: 
                     vals[i] = cell_to_cluster[(row, col)]
-            pts_df[cluster_column] = vals
+            pts[cluster_column] = vals
         
         if not plot_cluster_cells is None:
             self.plot_all_clusters()
@@ -474,7 +467,7 @@ class Grid(object):
             self,
             filename:str="full_grid",
             file_format:str=['shp','csv'][0],
-            target_crs:str="EPSG:4326"
+            # target_crs:str="EPSG:4326"
         ):
         for (cluster_column, clusters) in self.clusters.items():
             
@@ -484,7 +477,7 @@ class Grid(object):
             polys = []
             id_to_sums = self.id_to_sums
             centroids = _np_array(list(self.row_col_to_centroid.values()))
-            transformer = Transformer.from_crs(crs_from=self.crs, crs_to=target_crs, always_xy=True)
+            transformer = Transformer.from_crs(crs_from=self.local_crs, crs_to=self.initial_crs, always_xy=True)
             centroids_x, centroids_y = transformer.transform(centroids[:,0], centroids[:,1])
             
             for (i, row_col), ((xmin,ymin),(xmax,ymax)) in zip(enumerate(self.ids), self.id_to_bounds.values()):
@@ -499,9 +492,9 @@ class Grid(object):
                 'cluster_id': c_ids,
                 'sum': sums,},
                 geometry=polys,
-                crs=self.crs
+                crs=self.local_crs
                 )
-            df.to_crs(target_crs, inplace=True)
+            df.to_crs(self.initial_crs, inplace=True)
             # save
             filename = filename + (("_"+cluster_column) if len(self.clusters) > 1 else '') + '.'+file_format
             if file_format == 'shp':
@@ -516,7 +509,7 @@ class Grid(object):
             self,
             filename:str="sparse_grid",
             file_format:str=['shp','csv'][0],
-            target_crs:str="EPSG:4326"
+            # target_crs:str="EPSG:4326"
         ):
         """
         saving all grid cell filled with
@@ -529,7 +522,7 @@ class Grid(object):
             c_ids = _np_zeros(len(id_to_sums),int)
             sums = _np_zeros(len(id_to_sums),float)
             centroids = _np_array(list(self.row_col_to_centroid.values()))
-            transformer = Transformer.from_crs(crs_from=self.crs, crs_to=target_crs, always_xy=True)
+            transformer = Transformer.from_crs(crs_from=self.local_crs, crs_to=self.initial_crs, always_xy=True)
             centroids_x_full, centroids_y_full = transformer.transform(centroids[:,0], centroids[:,1])
             centroids_x = _np_zeros(len(id_to_sums),float)
             centroids_y = _np_zeros(len(id_to_sums),float)
@@ -551,9 +544,9 @@ class Grid(object):
                 'cluster_id': c_ids,
                 'sum': sums,},
                 geometry=polys,
-                crs=self.crs
+                crs=self.local_crs
                 )
-            df.to_crs(target_crs, inplace=True)
+            df.to_crs(self.initial_crs, inplace=True)
             # save
             filename = filename + (("_"+cluster_column) if len(self.clusters) > 1 else '') + '.'+file_format
             if file_format == 'shp':
@@ -568,7 +561,7 @@ class Grid(object):
             self,
             filename:str="grid_clusters",
             file_format:str=['shp','csv'][0],
-            target_crs:str="EPSG:4326"
+            # target_crs:str="EPSG:4326"
         ):
         for (cluster_column, clusters) in self.clusters.items():
             df = _gpd_GeoDataFrame({
@@ -580,10 +573,10 @@ class Grid(object):
                 'area': [pl['area'] for pl in clusters['prime_locs']],
                 },
                 geometry = [pl['geometry'] for pl in clusters['prime_locs']],
-                crs=self.crs)
-            transformer = Transformer.from_crs(crs_from=self.crs, crs_to=target_crs, always_xy=True)
+                crs=self.local_crs)
+            transformer = Transformer.from_crs(crs_from=self.local_crs, crs_to=self.initial_crs, always_xy=True)
             df['centroid_x'], df['centroid_y'] = transformer.transform(df['centroid_x'], df['centroid_y'])
-            df.to_crs(target_crs, inplace=True)
+            df.to_crs(self.initial_crs, inplace=True)
             # save
             filename = filename + (("_"+cluster_column) if len(self.clusters) > 1 else '') + '.'+file_format
             if file_format == 'shp':
