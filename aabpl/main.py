@@ -1,3 +1,5 @@
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
 from pandas import DataFrame as _pd_DataFrame
 from numpy import array as _np_array
 import math
@@ -8,7 +10,6 @@ from aabpl.radius_search.radius_search_class import DiskSearch
 from aabpl.radius_search.grid_class import Grid
 from aabpl.illustrations.plot_pt_vars import create_plots_for_vars
 from aabpl.illustrations.distribution_plot import create_distribution_plot
-
 def convert_coords_to_local_crs(
         pts,
         x:str='lon',
