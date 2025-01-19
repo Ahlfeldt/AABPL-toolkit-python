@@ -209,3 +209,18 @@ class DataFrameRelation(object):
         return is_contained
     #
 #
+def find_column_name(static_part:str, dynamic_part:str, existing_columns:list, maxlen:int=10):
+    for i in range(len(existing_columns)):
+        dynamic = dynamic_part[:-i]
+        for j in range(len(static_part)-1):
+            static = static_part[:-j]
+            for flip in [False,True]:
+                for sep in [1,0,2,3,4,5,6,7]:
+                    first,last = (static, dynamic)[flip], (static, dynamic)[not flip]
+                    name_to_test = first+('_'*sep)+last
+                    if len(name_to_test)<=maxlen:
+                        if name_to_test not in existing_columns:
+                            return name_to_test
+                    elif sep == 0:
+                        break
+    raise ValueError('Not able to find a column name that is satisfying condition and not already taken', static_part, dynamic_part, existing_columns, maxlen)

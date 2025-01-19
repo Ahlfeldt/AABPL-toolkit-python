@@ -11,6 +11,7 @@ def create_plots_for_vars(
     """
     TODO Descripiton
     """
+    print("colnames" , colnames)
     nrows = colnames.shape[0]
     ncols = 1 if len(colnames.shape)==1 else colnames.shape[1]
     # specify default plot kwargs and add defaults
@@ -34,7 +35,7 @@ def create_plots_for_vars(
         nrows = len(additional_varnames)
     
     if fig is None or axs is None:
-        fig, axs = _plt_subplots(nrows,1, figsize=figsize)
+        fig, axs = _plt_subplots(nrows,ncols, figsize=figsize)
 
     xmin, xmax, ymin, ymax = grid.total_bounds.xmin, grid.total_bounds.xmax, grid.total_bounds.ymin, grid.total_bounds.ymax,
     xs = grid.search.source.pts[grid.search.source.x]

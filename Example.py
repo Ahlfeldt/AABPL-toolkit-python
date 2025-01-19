@@ -70,13 +70,13 @@ grid = detect_cells_with_cluster_pts(
 
 ## Save DataFrames with radius sums and clusters
 # Using all the save options below is most likely excessive. 
-# saving the shapefile for save_grid_clusters and save_sparse_grid is most
+# saving the shapefile for save_cell_clusters and save_sparse_grid is most
 # likely sufficient
 
 # save files as needed
 # save only only clusters including their geometry, aggregate values, area and id
-grid.save_grid_clusters(filename=output_gis_folder+'grid_clusters', file_format='shp', target_crs=crs_of_your_csv)
-# grid.save_grid_clusters(filename=output_data_folder+'grid_clusters', file_format='csv', target_crs=crs_of_your_csv)
+grid.save_cell_clusters(filename=output_gis_folder+'grid_clusters', file_format='shp', target_crs=crs_of_your_csv)
+# grid.save_cell_clusters(filename=output_data_folder+'grid_clusters', file_format='csv', target_crs=crs_of_your_csv)
 # save sparse grid including cells only those cells that at least contain one point
 grid.save_sparse_grid(filename=output_gis_folder+'grid_clusters', file_format='shp', target_crs=crs_of_your_csv)
 # grid.save_sparse_grid(filename=output_data_folder+'grid_clusters', file_format='csv', target_crs=crs_of_your_csv)
@@ -87,7 +87,7 @@ grid.save_sparse_grid(filename=output_gis_folder+'grid_clusters', file_format='s
 pts_df.to_csv(output_data_folder+'pts_df_w_clusters.csv')
 
 # CREATE PLOTS
-grid.plot_all_clusters(output_maps_folder+'clusters_employment_750m_9975th')
+grid.plot_clusters(output_maps_folder+'clusters_employment_750m_9975th')
 grid.plot_vars(filename=output_maps_folder+'employment_vars')
 grid.plot_cluster_pts(filename=output_maps_folder+'employment_cluster_pts')
 grid.plot_rand_dist(filename=output_maps_folder+'rand_dist_employment')

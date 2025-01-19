@@ -10,6 +10,21 @@ from aabpl.radius_search.radius_search_class import DiskSearch
 from aabpl.radius_search.grid_class import Grid
 from aabpl.illustrations.plot_pt_vars import create_plots_for_vars
 from aabpl.illustrations.distribution_plot import create_distribution_plot
+
+def convert_wgs_to_utm(lon: float, lat: float):
+    """Based on lat and lng, return best utm epsg-code"""
+    # https://gis.stackexchange.com/a/269552
+    # convert_wgs_to_utm function, see https://stackoverflow.com/a/40140326/4556479
+    # see https://gis.stackexchange.com/a/127432/33092
+    utm_band = str((math.floor((lon + 180) / 6 ) % 60) + 1)
+    if len(utm_band) == 1:
+        utm_band = '0'+utm_band
+    if lat >= 0:
+        epsg_code = '326' + utm_band
+        return epsg_code
+    epsg_code = '327' + utm_band
+    return epsg_code
+
 def convert_coords_to_local_crs(
         pts,
         x:str='lon',
@@ -21,27 +36,9 @@ def convert_coords_to_local_crs(
         silent:bool=False,
 ) -> str:
     
-    # https://gis.stackexchange.com/a/269552
     
     if target_crs == 'auto': 
-        
-        # convert_wgs_to_utm function, see https://stackoverflow.com/a/40140326/4556479
-        def convert_wgs_to_utm(lon: float, lat: float):
-            """Based on lat and lng, return best utm epsg-code"""
-            utm_band = str((math.floor((lon + 180) / 6 ) % 60) + 1)
-            if len(utm_band) == 1:
-                utm_band = '0'+utm_band
-            if lat >= 0:
-                epsg_code = '326' + utm_band
-                return epsg_code
-            epsg_code = '327' + utm_band
-            return epsg_code
-            
-        # Get best UTM Zone SRID/EPSG Code for center coordinate pair
-        utm_code = convert_wgs_to_utm(*pts[[x,y]].mean(axis=0))
-        # define project_from_to with iteration
-        # see https://gis.stackexchange.com/a/127432/33092
-        local_crs = 'EPSG:'+str(utm_code)
+        local_crs = 'EPSG:'+str(convert_wgs_to_utm(*pts[[x,y]].mean(axis=0)))
     else:
         local_crs = target_crs
     transformer = Transformer.from_crs(crs_from=initial_crs, crs_to=local_crs, always_xy=True)
@@ -70,6 +67,109 @@ def ensure_local_crs(
             y = proj_y
         return x,y,local_crs
     return x,y,initial_crs
+
+def check_kwargs(
+        pts:_pd_DataFrame,
+        crs:str,
+        r:float,
+        columns:list=[],
+        x:str='lon',
+        y:str='lat',
+        row_name:str='id_y',
+        col_name:str='id_x',
+        pts_target:_pd_DataFrame=None,
+        x_tgt:str=None,
+        y_tgt:str=None,
+        row_name_tgt:str=None,
+        col_name_tgt:str=None,
+        grid:Grid=None,
+        proj_crs:str='auto',
+        silent:bool=True,
+):
+    """
+    check shared keyword arguments and apply defaults
+    """
+    if type(row_name) != str:
+        raise TypeError('`row_name` must be of type str. Instead provided of type',type(row_name),row_name)
+    if type(col_name) != str:
+        raise TypeError('`col_name` must be of type str. Instead provided of type',type(col_name),col_name)
+    if row_name_tgt is None:
+        row_name_tgt = row_name
+    elif type(row_name_tgt) != str:
+        raise TypeError('`row_name_tgt` must be of type str. Instead provided of type',type(row_name_tgt),row_name_tgt)
+    if col_name_tgt is None:
+        col_name_tgt = col_name
+    elif type(col_name_tgt) != str:
+        raise TypeError('`col_name_tgt` must be of type str. Instead provided of type',type(col_name_tgt),col_name_tgt)
+    if type(pts) != _pd_DataFrame:
+        raise TypeError('`pts` must be a pandas.DataFrame or None. Instead provided of type',type(pts))
+    if type(x) != str:
+        raise TypeError('`x` must be of type str. Instead provided of type',type(x),x)
+    if type(y) != str:
+        raise TypeError('`x` must be of type str. Instead provided of type',type(y),y)
+    if not x in pts.columns:
+        raise ValueError('`x` (x-coord column name) must be in columns of pts')
+    if not y in pts.columns:
+        raise ValueError('`y` (y-coord column name) must be in columns of pts')
+    if x_tgt is None:
+        x_tgt = x
+    if y_tgt is None:
+        y_tgt = y
+    same_target = pts_target is None or pts is pts_target
+    if pts_target is None:
+        pts_target = pts
+    else:
+        if type(pts_target) != _pd_DataFrame:
+            raise TypeError('`pts_target` must be a pandas.DataFrame or None. Instead provided of type',type(pts_target))
+    help_col = None
+    if type(columns) == str:
+        columns = [columns]
+    else:
+        if columns is None or len(columns)==0:
+            help_col = next(('helper_col'+str(i) for i in (['']+list(range(len(pts_target.columns)))) if not 'helper_col'+str(i) in pts_target.columns))
+            pts_target[help_col] = 1
+            columns = [help_col]
+        try:
+            if any([type(column)!=str for column in columns]):
+                raise TypeError
+        except:
+            raise TypeError('`columns` must be either a string of single column name or a list of column name strings')
+    if any([not column in pts_target.columns for column in columns]):
+        raise ValueError('not all columns(',columns,') are in columns of search target pts_target(',pts.columns,')')
+    if not x_tgt in pts_target.columns:
+        raise ValueError('`x_tgt` (x-coord column name) must be in columns of pts_target')
+    if not y_tgt in pts_target.columns:
+        raise ValueError('`y_tgt` (y-coord column name) must be in columns of pts_target')
+    
+    if proj_crs == 'auto': 
+        x_center = (min([pts[x].min(), pts_target[x_tgt].min()])+max([pts[x].max(), pts_target[x_tgt].max()]))/2
+        y_center = (min([pts[x].min(), pts_target[x_tgt].min()])+max([pts[x].max(), pts_target[x_tgt].max()]))/2
+        local_crs = 'EPSG:'+str(convert_wgs_to_utm(x_center, y_center))
+    else:
+        local_crs = proj_crs
+    if local_crs != proj_crs:
+        x,y,local_crs = ensure_local_crs(pts=pts, x=x, y=y, initial_crs=crs, target_crs=proj_crs)
+        if not same_target:
+            x_tgt,y_tgt,local_crs = ensure_local_crs(pts=pts_target, x=x_tgt, y=y_tgt, initial_crs=crs, target_crs=proj_crs)
+        else:
+            x_tgt,y_tgt = x,y
+    
+    # OVERWRITE DEFAULTS
+    if grid is None:
+        grid = create_auto_grid_for_radius_search(
+            pts_source=pts,
+            initial_crs=crs,
+            local_crs=local_crs,
+            r=r,
+            x=x,
+            y=y,
+            pts_target=pts_target,
+            x_tgt=x_tgt,
+            y_tgt=y_tgt,
+            silent=silent,
+        )
+
+    return (pts, local_crs, columns, x, y, pts_target, x_tgt, y_tgt, row_name_tgt, col_name_tgt, grid, help_col)
 
 
 # TODO remove cell_region from kwargs
@@ -157,8 +257,8 @@ def radius_search(
     pts_target:_pd_DataFrame=None,
     x_tgt:str=None,
     y_tgt:str=None,
-    tgt_row_name:str=None,
-    tgt_col_name:str=None,
+    row_name_tgt:str=None,
+    col_name_tgt:str=None,
     grid:Grid=None,
     proj_crs:str='auto',
     include_boundary:bool=False,
@@ -201,7 +301,7 @@ def radius_search(
         column name of x-coordinate (=longtitude) in pts_target. If None its assumed to be same as x (default=None)
     y_tgt (str):
         column name of y-coordinate (=lattitude) in pts_target. If None its assumed to be same as y (default=None)
-    tgt_row_name (str):
+    row_name_tgt (str):
         name for column that will be appended to pts indicating grid cell row. If None its assumed to be same as x (default=None)
     col_name (str):
         name for column that will be appended to pts indicating grid cell column (default='id_y')
@@ -231,41 +331,12 @@ def radius_search(
         a grid covering all points (custom class containing  
     """
 
-
-    x,y,local_crs = ensure_local_crs(pts=pts, x=x, y=y, initial_crs=crs, target_crs=proj_crs)
-    if pts_target is None:
-        pts_target = pts
-    else:
-        x,y,local_crs = ensure_local_crs(pts=pts_target, x=x, y=y, initial_crs=crs, target_crs=proj_crs)
-    if x_tgt is None:
-        x_tgt = x
-    if y_tgt is None:
-        y_tgt = y
-    
-    # OVERWRITE DEFAULTS
-    if grid is None:
-        grid = create_auto_grid_for_radius_search(
-            pts_source=pts,
-            initial_crs=crs,
-            local_crs=local_crs,
-            r=r,
-            x=x,
-            y=y,
-            pts_target=pts_target,
-            x_tgt=x_tgt,
-            y_tgt=y_tgt,
-            silent=silent,
-        )
-    
-    if tgt_row_name is None:
-        tgt_row_name = row_name
-    if tgt_col_name is None:
-        tgt_col_name = col_name
-    help_col = None
-    if columns is None or len(columns)==0:
-        help_col = [next(('helper_col'+str(i) for i in (['']+list(range(len(pts_target.columns)))) if not 'helper_col'+str(i) in pts_target.columns))]
-        pts_target[help_col] = 1
-        columns = [help_col]
+    (pts, local_crs, columns, x, y, pts_target, x_tgt, y_tgt, row_name_tgt, col_name_tgt, grid, help_col
+     ) = check_kwargs(
+            pts=pts, crs=crs, r=r, columns=columns, x=x, y=y, row_name=row_name,
+            col_name=col_name, pts_target=pts_target, x_tgt=x_tgt, y_tgt=y_tgt,
+            row_name_tgt=row_name_tgt, col_name_tgt=col_name_tgt, grid=grid, proj_crs=proj_crs, silent=silent,
+    )
 
     # initialize disk_search
     grid.search = DiskSearch(
@@ -282,8 +353,8 @@ def radius_search(
         columns=columns,
         x=x_tgt,
         y=y_tgt,
-        row_name=tgt_row_name,
-        col_name=tgt_col_name,
+        row_name=row_name_tgt,
+        col_name=col_name_tgt,
         silent=silent,
     )
 
@@ -315,7 +386,7 @@ def detect_cluster_pts(
     r:float=0.0075,
     columns:list=[],
     exclude_pt_itself:bool=True,
-    k_th_percentiles:float=[99.5],
+    k_th_percentiles:float=99.5,
     n_random_points:int=int(1e5),
     random_seed:int=None,
     x:str='lon',
@@ -325,6 +396,11 @@ def detect_cluster_pts(
     sum_suffix:str='_750m',
     cluster_suffix:str='_cluster',
     proj_crs:str='auto',
+    pts_target:_pd_DataFrame=None,
+    x_tgt:str=None,
+    y_tgt:str=None,
+    row_name_tgt:str=None,
+    col_name_tgt:str=None,
     grid:Grid=None,
     include_boundary:bool=False,
     plot_distribution:dict=None,
@@ -376,7 +452,7 @@ def detect_cluster_pts(
         column name of x-coordinate (=longtitude) in pts_target. If None its assumed to be same as x (default=None)
     y_tgt (str):
         column name of y-coordinate (=lattitude) in pts_target. If None its assumed to be same as y (default=None)
-    tgt_row_name (str):
+    row_name_tgt (str):
         name for column that will be appended to pts indicating grid cell row. If None its assumed to be same as x (default=None)
     col_name (str):
         name for column that will be appended to pts indicating grid cell column (default='id_y')
@@ -405,18 +481,14 @@ def detect_cluster_pts(
     grid (aabl.Grid):
         a grid covering all points (custom class) with cluster attributes stored to it  
     """
-    # OVERWRITE DEFAULTS
-    
-    x,y,local_crs = ensure_local_crs(pts=pts, x=x, y=y, initial_crs=crs, target_crs=proj_crs)
-    if grid is None:
-        grid = create_auto_grid_for_radius_search(
-            pts_source=pts,
-            initial_crs=crs,
-            local_crs=local_crs,
-            r=r,
-            y=y,
-            x=x,
-        )
+
+    (pts, local_crs, columns, x, y, pts_target, x_tgt, y_tgt, row_name_tgt, col_name_tgt, grid, help_col
+     ) = check_kwargs(
+            pts=pts, crs=crs, r=r, columns=columns, x=x, y=y, row_name=row_name,
+            col_name=col_name, pts_target=pts_target, x_tgt=x_tgt, y_tgt=y_tgt,
+            row_name_tgt=row_name_tgt, col_name_tgt=col_name_tgt, grid=grid, proj_crs=proj_crs, silent=silent,
+    )
+
     # initialize disk_search
     grid.search = DiskSearch(
         grid,
@@ -426,12 +498,12 @@ def detect_cluster_pts(
     )
 
     grid.search.set_target(
-        pts=pts,
+        pts=pts_target,
         columns=columns,
-        x=x,
-        y=y,
-        row_name=row_name,
-        col_name=col_name,
+        x=x_tgt,
+        y=y_tgt,
+        row_name=row_name_tgt,
+        col_name=col_name_tgt,
         silent=silent,
     )
 
@@ -473,9 +545,8 @@ def detect_cluster_pts(
     disk_sums_for_pts = grid.search.perform_search(silent=silent,plot_radius_sums=plot_radius_sums,plot_pt_disk=plot_pt_disk)
     
     # save bool of whether pt is part of a cluster 
-    pts[
-        [str(cname)+str(cluster_suffix) for cname in columns]
-    ] = disk_sums_for_pts>cluster_threshold_values
+    for j, cname in enumerate(columns):
+        pts[str(cname)+str(cluster_suffix)] = disk_sums_for_pts.values[:,j]>cluster_threshold_values[j]
 
 
     if plot_distribution is not None:
@@ -554,7 +625,7 @@ def detect_cluster_cells(
     r:float=750,
     columns:list=[],
     exclude_pt_itself:bool=True,
-    k_th_percentiles:float=[99.5],
+    k_th_percentiles:float=99.5,
     n_random_points:int=int(1e5),
     random_seed:int=None,
     distance_thresholds:float=2500,
@@ -566,6 +637,11 @@ def detect_cluster_cells(
     sum_suffix:str='_750m',
     cluster_suffix:str='_cluster',
     proj_crs:str='auto',
+    pts_target:_pd_DataFrame=None,
+    x_tgt:str=None,
+    y_tgt:str=None,
+    row_name_tgt:str=None,
+    col_name_tgt:str=None,
     grid:Grid=None,
     include_boundary:bool=False,
     plot_distribution:dict=None,
@@ -618,7 +694,7 @@ def detect_cluster_cells(
         column name of x-coordinate (=longtitude) in pts_target. If None its assumed to be same as x (default=None)
     y_tgt (str):
         column name of y-coordinate (=lattitude) in pts_target. If None its assumed to be same as y (default=None)
-    tgt_row_name (str):
+    row_name_tgt (str):
         name for column that will be appended to pts indicating grid cell row. If None its assumed to be same as x (default=None)
     col_name (str):
         name for column that will be appended to pts indicating grid cell column (default='id_y')
@@ -647,9 +723,15 @@ def detect_cluster_cells(
     grid (aabl.Grid):
         a grid covering all points (custom class) with cluster attributes stored to it  
     """
+    (pts, local_crs, columns, x, y, pts_target, x_tgt, y_tgt, row_name_tgt, col_name_tgt, grid, help_col
+     ) = check_kwargs(
+            pts=pts, crs=crs, r=r, columns=columns, x=x, y=y, row_name=row_name,
+            col_name=col_name, pts_target=pts_target, x_tgt=x_tgt, y_tgt=y_tgt,
+            row_name_tgt=row_name_tgt, col_name_tgt=col_name_tgt, grid=grid, proj_crs=proj_crs, silent=silent,
+    )
     grid = detect_cluster_pts(
         pts=pts,
-        crs=crs,
+        crs=local_crs,
         r=r,
         columns=columns,
         exclude_pt_itself=exclude_pt_itself,
@@ -663,6 +745,12 @@ def detect_cluster_cells(
         col_name=col_name,
         sum_suffix=sum_suffix,
         cluster_suffix=cluster_suffix,
+        proj_crs=local_crs,
+        pts_target=pts_target,
+        x_tgt=x_tgt,
+        y_tgt=y_tgt,
+        row_name_tgt=row_name_tgt,
+        col_name_tgt=col_name_tgt,
         include_boundary=include_boundary,
         plot_distribution=plot_distribution,
         plot_radius_sums=plot_radius_sums,
@@ -674,7 +762,7 @@ def detect_cluster_cells(
         plot_offset_raster=plot_offset_raster,
         silent=silent,
     )
-
+    
     grid.create_clusters(
         pts=pts,
         columns=columns,
@@ -687,7 +775,4 @@ def detect_cluster_cells(
         )
     
     return grid
-
-# next thing would be to label cells as clustered or not
-# then to create orthogonal convex hull around clusters
-# then to maybe wrap everything in one final function  
+#
