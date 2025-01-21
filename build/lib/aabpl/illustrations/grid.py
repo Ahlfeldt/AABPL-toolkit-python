@@ -46,22 +46,23 @@ class GridPlots(object):
             'ymax':self.grid.y_steps.max(),
         }    
         extent=[imshow_kwargs['xmin'],imshow_kwargs['xmax'],imshow_kwargs['ymax'],imshow_kwargs['ymin']]
-        cmap = _plt_get_cmap('Reds')
-        cmap.set_under('#ccc')
+        # cmap = _plt_get_cmap('Reds')
+        # cmap.set_under('#ccc')
         for i,column in enumerate(self.grid.search.target.columns):
             ax = axs if len(self.grid.search.target.columns)==1 else axs.flat[i]
-            max_sum = max(list(id_to_sums.values()))
+            max_sum = max([vals[i] for vals in id_to_sums.values()])
             X = _np_array([[id_to_sums[(row,col)][i] if ((row,col)) in id_to_sums else 0 for col in  self.grid.col_ids] for row in self.grid.row_ids])
             ux = _np_unique(X)
             minX = min(ux[ux!=0])
-            norm = (_plt_LogNorm(vmin=minX,vmax=X.max(),clip=True) if minX>=0 else 'linear')
+            norm = (_plt_LogNorm(vmin=minX,vmax=X.max(),clip=False) if minX>=0 else 'linear')
             # norm = (_plt_LogNorm(vmin=_np_spacing(0.0),vmax=X.max()) if X.min()>=0 else 'linear')
-            cmap = truncate_colormap(cmap, 0.3, 1)
+            cmap = truncate_colormap(_plt_get_cmap('Reds'), 0.3, 1)
             cmap.set_under('#fff0')
+            cmap.set_under('#cfcd')
             p = ax.imshow(X=X, interpolation='none', cmap=cmap, norm=norm, extent=extent)
             # p = ax.imshow(X=X, interpolation='none', cmap=cmap, vmin=1e-5,vmax=max_sum, extent=extent)
             # p = ax.pcolormesh(X, cmap=cmap, vmin=minX/2,vmax=max_sum)
-            cb = _plt_colorbar(p)
+            cb = _plt_colorbar(p, ax=ax)
             ax.set_xlabel('x/lon') 
             ax.set_ylabel('y/lat') 
             ax.title.set_text('Aggregated value per cell for '+str(column))
@@ -101,7 +102,7 @@ class GridPlots(object):
             X_flat = X.flat
             cmap = _plt_get_cmap('binary')
             vmin, vmax = (X.flat[X_flat != 0]).min(), X.max()
-            norm = (_plt_LogNorm(vmin=vmin,vmax=vmax,clip=True) if X.min()>=0 else 'linear')
+            norm = (_plt_LogNorm(vmin=vmin,vmax=vmax,clip=False) if X.min()>=0 else 'linear')
             # norm = (_plt_LogNorm(vmin=_np_spacing(0.0),vmax=X.max()) if X.min()>=0 else 'linear')
             cmap = truncate_colormap(cmap, 0.1, 1)
             cmap.set_under('#fff0')
@@ -109,7 +110,7 @@ class GridPlots(object):
             p = ax.imshow(X=X, interpolation='none', cmap=cmap, norm=norm, extent=extent)
             # p = ax.imshow(X=X, interpolation='none', cmap=new_cmap, vmin=(X.flat[X_flat != 0]).min(),vmax=X.max(), norm=norm, extent=extent)
             # p = ax.imshow(X=X, interpolation='none', cmap=cmap, vmin=X.min()-X.max(),vmax=X.max(), extent=extent)
-            cb = _plt_colorbar(p)
+            cb = _plt_colorbar(p, ax=ax)
                 
             # cmap = _plt_get_cmap('viridis')
             # cmap.set_under(alpha=0)
@@ -120,7 +121,9 @@ class GridPlots(object):
             # p = ax.pcolormesh(X, cmap=cmap, edgecolor="black", linewidth=1/max([len(self.grid.col_ids), len(self.grid.row_ids)])/1.35)
             # TODO zoom in
             for cluster in clusters:
-                ax.add_patch(_plt_Polygon(xy=cluster.geometry.exterior.coords, hatch='////', facecolor='#f000', edgecolor='#f00'))
+                geoms = [cluster.geometry] if hasattr(cluster.geometry, 'exterior') else cluster.geometry.geoms
+                for geom in geoms:
+                    ax.add_patch(_plt_Polygon(xy=geom.exterior.coords, hatch='////', facecolor='#f000', edgecolor='#f00'))
                 ax.annotate(cluster.id, xy=cluster.centroid, fontsize=15, weight='bold', color='red')
         if filename:
             fig.savefig(filename, dpi=300, bbox_inches="tight")
