@@ -153,7 +153,6 @@ def get_pt_to_cell_centroid_triangle_offset(
         # bins=y_steps, labels=[(y_low+y_up)/2 for y_low,y_up in zip(y_steps[1:], y_steps[:-1])],
         include_lowest=True).astype(float)
     
-    # id_y_mult = grid.id_y_mult
     # cell_centroid = _np_array([grid.row_col_to_centroid[row*id_y_mult+col] for row,col in pts[[row_name, col_name]]])
 
     # offset_x = cell_centroid[:,0] - pts[x]
@@ -216,7 +215,6 @@ def get_pt_to_cell_centroid_cell_offset(
         # bins=y_steps[::-1], labels=[(y_low+y_up)/2 for y_low,y_up in zip(y_steps[1:], y_steps[:-1])][::-1],
         include_lowest=True).astype(float)
     
-    # id_y_mult = grid.id_y_mult
     # cell_centroid = _np_array([grid.row_col_to_centroid[row*id_y_mult+col] for row,col in pts[[row_name, col_name]]])
     offset_xy_unscaled = _np_column_stack([offset_x, offset_y]) / grid.spacing
     # offset_x = cell_centroid[:,0] - pts[x]

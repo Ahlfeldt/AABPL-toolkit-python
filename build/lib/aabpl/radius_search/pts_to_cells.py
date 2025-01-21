@@ -44,7 +44,6 @@ def assign_points_to_cells(
     x_steps = grid.x_steps
     y_steps = grid.y_steps
     # store len and digits for index
-    id_y_mult = grid.id_y_mult
     n_pts = len(pts)
     
     if not silent:

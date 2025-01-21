@@ -39,38 +39,6 @@ class Bounds(object):
     #
 #
 
-# TODO potentially add nestes GridCell classtype the 
-class GridCell(object):
-    # __slots__ = ('id', 'row_col_nr', ...) # use this syntax to save some memory. also only create vars that are really neccessary
-    def __init__(self, row_nr, col_nr, y_steps, x_steps):
-        self.id = (row_nr,col_nr)
-        self.centroid = (y_steps[row_nr:row_nr+2].sum()/2,x_steps[col_nr:col_nr+2].sum()/2)
-        self.bounds = Bounds(xmin=x_steps[col_nr], ymin=y_steps[row_nr], xmax=x_steps[col_nr+1], ymax=y_steps[row_nr+1])
-        self.pt_ids = []
-        self.excluded = None
-
-    def add_pt_id(self, pt_id):
-        self.pt_ids = [*self.pt_ids, pt_id]
-        
-    def add_pt_ids(self, pt_ids):
-        self.pt_ids = [*self.pt_ids, *pt_ids]
-    
-    def set_excluded_area(self,excluded_area):
-        pass
-
-    def make_sparse(self):
-        # self.pt_ids # make _np_array or tuple
-        # tighten bounds
-        pass            
-    def tighten_bounds(self, pt_ids):
-        self.pt_ids = [*self.pt_ids, *pt_ids]
-    
-    def plot(self, facecolor, edgecolor, ):
-        pass
-#
-
-    
-
 class Grid(object):
     """
     A grid used to facilitate radius search and to delineate point clusters
@@ -80,15 +48,42 @@ class Grid(object):
 
     Attributes
     ----------
-    spacing : float
-        the length and width of each grid cell (in meters if no custom projection is used)
-    name : str
-        the name of the animal
+    clustering (str): 
+        custom class exhibiting methods to map clustered points to cells, merge cluster cells and making clusters convex and adding attributes. For more info help(Clustering)
     plot (aabpl.GridPlots):
-        custom class exhibiting methods to create plots
+        custom class exhibiting methods to create plots. For more info help(aabpl.GridPlots)
+    initial_crs (str):
+        initial crs of points DataFrame supplied to radius_search, detect_cluster_pts or detect_cluster_cells
+    local_crs (str):
+        crs automatically choosen by algorithm based on center coordinate of bounding box covering input point data coordinates
+    total_bounds (aabpl.Bounds):
+        object contaning xmin, xmax, ymin, ymax of full grid  
+    spacing (float): 
+        the length and width of each grid cell (in meters if no custom projection is used)
+    x_steps (numpy.ndarray):
+        all x values of grid from xmin to xmax with step size of spacing. Its length is one more than the number of columns of grid.
+    y_steps (numpy.ndarray):
+        all y values of grid from ymin to ymax with step size of spacing. Its length is one more than the number of rows of grid.
+    row_ids (numpy.ndarray):
+        ids for grid starting at 0
+    col_ids (numpy.ndarray):
+        ids for grid starting at 0
+    ids (tuple):
+        tuple containing all tuple of each cell (row_id, col_id). Sorted row-wise going starting row 0, column 0->n_cols, row 1, column 0->n_cols, ..., row n_rows, column 0->n_cols
+    n_cells (int):
+        number of cells in grid (=n_rows*n_cols) 
+    centroids (numpy.ndarray):
+        2D array containing cell centroids. (sorted row-wise)
+    row_col_to_centroid (dict):
+        dictionary to look up the cells centroid by their row/col index tuple(row_id,col_id)
+    row_col_to_bounds (dict):
+        dictionary to look up the cells bounds (tuple(tuple(xmin,ymin),tuple(xmax,ymax))) by their row/col index tuple(row_id,col_id)
     
     Methods
     -------
+    create_full_grid_df
+    create_sparse_grid_df
+    create_clusters_df_for_column
     save_full_grid(filename:str="full_grid", file_format:str=['shp','csv'][0])
         save each grid cell with attributes on their Polygon, centroid, sum of indicator(s), and cluster id
     save_sparse_grid(filename:str="sparse_grid",file_format:str=['shp','csv'][0])
@@ -124,6 +119,8 @@ class Grid(object):
             spacing = 1.
         self.spacing = spacing
 
+        self.clustering = Clustering(self)
+        self.plot = GridPlots(self)
         # TODO total_bounds should also contain excluded area if not contained 
         # min(points.total_bounds+r, max(points.total_bounds, excluded_area_total_bound))  
         self.initial_crs = initial_crs
@@ -131,97 +128,43 @@ class Grid(object):
         x_padding = ((xmin-xmax) % spacing)/2
         y_padding = ((ymin-ymax) % spacing)/2
         self.total_bounds = total_bounds = Bounds(xmin=xmin-x_padding,xmax=xmax+x_padding,ymin=ymin-y_padding,ymax=ymax+y_padding)
-        self.n_x_steps = n_x_steps = -int((self.total_bounds.xmin-self.total_bounds.xmax)/spacing)+1 # round up
-        self.n_y_steps = n_y_steps = -int((self.total_bounds.ymin-self.total_bounds.ymax)/spacing)+1 # round up 
-        self.x_steps = x_steps = _np_linspace(total_bounds.xmin, total_bounds.xmax, n_x_steps)
-        self.y_steps = y_steps = _np_linspace(total_bounds.ymin, total_bounds.ymax, n_y_steps)
-        self.id_y_mult = id_y_mult = 10**(int(_math_log10(n_x_steps))+1)
-        self.row_ids = row_ids = _np_arange(n_y_steps-1)
-        self.col_ids = col_ids =  _np_arange(n_x_steps-1)
+        n_xsteps = -int((total_bounds.xmin-total_bounds.xmax)/spacing)+1 # round up
+        n_ysteps = -int((total_bounds.ymin-total_bounds.ymax)/spacing)+1 # round up 
+        self.x_steps = x_steps = _np_linspace(total_bounds.xmin, total_bounds.xmax, n_xsteps)
+        self.y_steps = y_steps = _np_linspace(total_bounds.ymin, total_bounds.ymax, n_ysteps)
+        self.row_ids = row_ids = _np_arange(n_ysteps-1)
+        self.col_ids = col_ids =  _np_arange(n_xsteps-1)
         self.ids = tuple(flatten_list([[(row_id, col_id) for col_id in col_ids] for row_id in row_ids]))
         self.n_cells = len(self.ids)
-        class CellDict(dict):
-            def __init__(self, x_steps, y_steps, id_y_mult):
-                self.x_steps = x_steps
-                self.y_steps = y_steps
-                self.id_y_mult = id_y_mult
-
-            def id_to_row_col(self,id:int): 
-                return (id // self.id_y_mult, id % self.id_y_mult)
-            
-            def row_col_to_id(self,row_nr:int,col_nr:int): 
-                return row_nr * self.id_y_mult + col_nr
-            
-            def add_new(self,row,col):
-                setattr(self, str(self.row_col_to_id(row,col)), GridCell(
-                    row, col, self.x_steps, self.y_steps
-                ))
-            
-            def get_by_row_col(self,row,col):
-                return getattr(self, str(self.row_col_to_id(row,col)))
-            
-            def get_by_id(self,id):
-                return getattr(self, str(id))
-            
-            def get_or_create(self,row,col):
-                id = str(self.row_col_to_id(row,col))
-                if not hasattr(self, id):
-                    self.add_new(row,col)
-                return self.get_by_id(id)
-            
-            def add_pts(self, pts, row, col):
-                cell = self.get_or_create(row,col)
-                cell.add_pts(pts)
-            
-            def add_pt(self, pt, row, col):
-                cell = self.get_or_create(row,col)
-                cell.add_pt(pt)
-            
-        self.cells = CellDict(x_steps=x_steps, y_steps=y_steps, id_y_mult=id_y_mult,)
-
-        self.cells = _np_array([[
-            GridCell(row_id, col_id, y_steps=y_steps, x_steps=x_steps) for col_id in col_ids
-            ] for row_id in row_ids]).flatten()
-
-        self.row_col_to_centroid = {g_row_col:centroid for (g_row_col,centroid) in flatten_list([
-                [((row_id,col_id),(x_steps[col_id:col_id+2].mean(), y_steps[row_id:row_id+2].mean())) for col_id in col_ids] 
-                for row_id in row_ids]
-                )}
+        # TODO replace row_col_to_centroid with function fetching it from 1d arrays to no clog up memory for fine grids
         self.centroids = _np_array([centroid for centroid in flatten_list([
                 [(x_steps[col_id:col_id+2].mean(), y_steps[row_id:row_id+2].mean()) for col_id in col_ids] 
                 for row_id in row_ids]
                 )])
+        # self.bounds = flatten_list([
+        #         [((x_steps[col_id], y_steps[row_id]), (x_steps[col_id+1], y_steps[row_id+1])) for col_id in col_ids] 
+        #         for row_id in row_ids])
+        # TODO replace row_col_to_centroid with function fetching it from 1d arrays to no clog up memory for fine grids
+        self.row_col_to_centroid = {g_row_col:centroid for (g_row_col,centroid) in flatten_list([
+                [((row_id,col_id),(x_steps[col_id:col_id+2].mean(), y_steps[row_id:row_id+2].mean())) for col_id in col_ids] 
+                for row_id in row_ids]
+                )}
+        
+        # TODO replace row_col_to_centroid with function fetching it from 1d arrays to no clog up memory for fine grids
         self.row_col_to_bounds = {(row_id,col_id): bounds for ((row_id,col_id),bounds) in flatten_list([
                 [((row_id,col_id),((x_steps[col_id], y_steps[row_id]), (x_steps[col_id+1], y_steps[row_id+1]))) for col_id in col_ids] 
                 for row_id in row_ids]
                 )}
-        self.bounds = flatten_list([
-                [((x_steps[col_id], y_steps[row_id]), (x_steps[col_id+1], y_steps[row_id+1])) for col_id in col_ids] 
-                for row_id in row_ids])
-        self.cell_dict = dict()
-        self.clustering = Clustering(self)
-        self.plot = GridPlots(self)
         if not silent:
-            print('Create grid with '+str(n_y_steps-1)+'x'+str(n_x_steps-1)+'='+str((n_y_steps-1)*(n_x_steps-1)))
+            print('Create grid with '+str(n_ysteps-1)+'x'+str(n_xsteps-1)+'='+str((n_ysteps-1)*(n_xsteps-1)))
         #
     #
-
-        
     # add functions
     aggregate_point_data_to_cells = aggregate_point_data_to_cells
     assign_points_to_cell_regions = assign_points_to_cell_regions
     aggreagate_point_data_to_disks_vectorized = aggreagate_point_data_to_disks_vectorized
     disk_cell_intersection_area = disk_cell_intersection_area
-    
     # append plots
-    # plt = {
-    #     cell_sums = plot_cell_sums
-    #     grid_ids = plot_grid_ids
-    #     clusters = plot_clusters
-    #     cluster_vars = plot_cluster_vars
-    #     vars = create_plots_for_vars
-    # }
-    
     # # append cluster functions
     # create_clusters = create_clusters
     # add_geom_to_cluster = add_geom_to_cluster
@@ -230,27 +173,37 @@ class Grid(object):
     # make_cluster_convex = make_cluster_convex
     # merge_clusters = merge_clusters
     # add_cluster_tags_to_cells = add_cluster_tags_to_cells
-    
     # # # save options
     # save_full_grid = Clustering.save_full_grid
     # save_sparse_grid = Clustering.save_sparse_grid
     # save_cell_clusters = Clustering.save_cell_clusters
 
-    def create_full_grid_df(self, keep_initial_crs:bool=True, max_column_name_length:int=20):
-        """create df with row for each grid cell with attributes on their Polygon, centroid, sum of indicator(s), and cluster id
+    def create_full_grid_df(self, target_crs:str=['initial','local','EPSG:4326'][0], max_column_name_length:int=10):
+        """returns geopandas.GeoDataFrame with entry for each grid cell with attributes on its Polygon, centroid, sum of indicator(s), and cluster id
+        
+        Args:
+        target_crs (str):
+            crs in which data shall be projected. If 'initial' then it will be projected in same crs as input data. If 'local' a local projection will be used. Otherwise specify the target crs directly like 'EPSG:4326' (default='initial') 
+        max_column_name_length (int):
+            maximum length of automatically chosen target name (shapefiles allow a maximum column name length of 10)
+        
+        Returns:
+        df (geopandas.GeoDataFrame):
+            with entry for each grid cell
         """
         c_ids = _np_zeros((self.n_cells, len(self.clustering.by_column)),int)#-1
         sums = _np_zeros((self.n_cells, len(self.clustering.by_column)),int)
         polys = []
         id_to_sums = self.id_to_sums
         centroids = _np_array(list(self.row_col_to_centroid.values()))
-        if keep_initial_crs:
+        target_crs = self.initial_crs if target_crs=='initial' else self.local_crs if target_crs=='local' else target_crs
+        if target_crs != self.local_crs:
             transformer = Transformer.from_crs(crs_from=self.local_crs, crs_to=self.initial_crs, always_xy=True)
             centroids_x, centroids_y = transformer.transform(centroids[:,0], centroids[:,1])
         else:
             centroids_x, centroids_y = centroids[:,0], centroids[:,1]
         clusters_for_columns = list(self.clustering.by_column.values())
-        for (i, row_col), ((xmin,ymin),(xmax,ymax)) in zip(enumerate(self.ids), self.bounds):
+        for (i, row_col), ((xmin,ymin),(xmax,ymax)) in zip(enumerate(self.ids), list(self.row_col_to_bounds.values())):
             for clusters_for_column in clusters_for_columns:
                 if row_col in clusters_for_column.cell_to_cluster_id: 
                     c_ids[i] = clusters_for_column.cell_to_cluster_id[row_col]
@@ -258,6 +211,8 @@ class Grid(object):
                 sums[i] = id_to_sums[row_col]
             polys.append(Polygon(((xmin,ymin),(xmax,ymin),(xmax,ymax),(xmin,ymax))))
         df = _gpd_GeoDataFrame({
+            self.search.source.row_name: [row for row,col in self.ids],
+            self.search.source.col_name: [col for row,col in self.ids],
             'centroid_x': centroids_x,
             'centroid_y': centroids_y,
             }, geometry=polys,
@@ -272,37 +227,51 @@ class Grid(object):
                 agg_colname = find_column_name("sum_radius", column, df.columns, max_column_name_length)
                 df[c_id_colname] = c_ids[:,j]
                 df[agg_colname] = sums[:,j]
-        if keep_initial_crs:
+        if target_crs != self.local_crs:
             df.to_crs(self.initial_crs, inplace=True)
 
         return df
     #
 
     def create_sparse_grid_df(
-            self, keep_initial_crs:bool=True, max_column_name_length:int=20
+            self, target_crs:str=['initial','local','EPSG:4326'][0], max_column_name_length:int=10
         ):
         """
-        save each grid cell with attributes on their Polygon, centroid, sum of indicator(s), and cluster id
+        returns geopandas.GeoDataFrame with entry for grid cells that either has points inside or is part of a cluster with attributes on their Polygon, centroid, sum of indicator(s), and cluster id
         
+        Args:
+        target_crs (str):
+            crs in which data shall be projected. If 'initial' then it will be projected in same crs as input data. If 'local' a local projection will be used. Otherwise specify the target crs directly like 'EPSG:4326' (default='initial') 
+        max_column_name_length (int):
+            maximum length of automatically chosen target name (shapefiles allow a maximum column name length of 10)
+        
+        Returns:
+        df (geopandas.GeoDataFrame):
+            with entry for each grid cell
         """
+        
         id_to_sums = self.id_to_sums
         x_steps = self.x_steps
         y_steps = self.y_steps
         col_ids = self.col_ids
         polys = []
-        if keep_initial_crs:
-            transformer = Transformer.from_crs(crs_from=self.local_crs, crs_to=self.initial_crs, always_xy=True)
+        target_crs = self.initial_crs if target_crs=='initial' else self.local_crs if target_crs=='local' else target_crs
+        if target_crs != self.local_crs:
+            transformer = Transformer.from_crs(crs_from=self.local_crs, crs_to=target_crs, always_xy=True)
             centroids_x_full, centroids_y_full = transformer.transform(self.centroids[:,0], self.centroids[:,1])
         else:
             centroids_x_full, centroids_y_full = self.centroids[:,0], self.centroids[:,1]
         centroids_x = _np_zeros(self.n_cells,float)
         centroids_y = _np_zeros(self.n_cells,float)
+        sparse_row_ids = _np_zeros(self.n_cells,int)
+        sparse_col_ids = _np_zeros(self.n_cells,int)
         sums = _np_zeros((self.n_cells, len(self.clustering.by_column)),float)
         c_ids = _np_zeros((self.n_cells, len(self.clustering.by_column)),int)
         i = 0
         js_clusters_for_columns = [x for x in enumerate(self.clustering.by_column.values())]
         for row in self.row_ids:
             (ymin,ymax) = (y_steps[row], y_steps[row+1])
+            sparse_row_ids[i:] = row
             for col in col_ids:
                 cell_in_a_cluster = False
                 for j, clusters_for_column in js_clusters_for_columns:
@@ -314,6 +283,7 @@ class Grid(object):
                     sums[i] = id_to_sums[(row,col)]
                 elif not cell_in_a_cluster:
                     continue
+                sparse_col_ids[i] = col
                 (xmin, xmax) = (x_steps[col], x_steps[col+1])
                 centroids_x[i] = centroids_x_full[row*col+col] 
                 centroids_y[i] = centroids_y_full[row*col+col]
@@ -322,6 +292,8 @@ class Grid(object):
             #
         #
         df = _gpd_GeoDataFrame({
+            self.search.source.row_name: sparse_row_ids[i],
+            self.search.source.col_name: sparse_col_ids[i],
             'centroid_x': centroids_x[:i],
             'centroid_y': centroids_y[:i],
             }, geometry=polys,
@@ -337,13 +309,26 @@ class Grid(object):
                 df[c_id_colname] = c_ids[:i,j]
                 df[agg_colname] = sums[:i,j]
         
-        if keep_initial_crs:
-            df.to_crs(self.initial_crs, inplace=True)
+        if target_crs != self.local_crs:
+            df.to_crs(target_crs, inplace=True)
         
         return df
     #
 
-    def create_clusters_df_for_column(self, cluster_column, keep_initial_crs:bool=True):
+    def create_clusters_df_for_column(self, cluster_column, target_crs:str=['initial','local','EPSG:4326'][0]):
+        """
+        returns geopandas.GeoDataFrame with entry for grid cells that either has points inside or is part of a cluster with attributes on their Polygon, centroid, sum of indicator(s), and cluster id
+        
+        Args:
+        cluster_column (str):
+            column containing the variable by which the clustering shall be performed
+        target_crs (str):
+            crs in which data shall be projected. If 'initial' then it will be projected in same crs as input data. If 'local' a local projection will be used. Otherwise specify the target crs directly like 'EPSG:4326' (default='initial') 
+        
+        Returns:
+        df (geopandas.GeoDataFrame):
+            with entry for each grid cell attributes: centroid_x, centroid_y, cluster_id, sum, n_cells, area
+        """
         clusters_for_column = self.clustering.by_column[cluster_column]
         df = _gpd_GeoDataFrame({
             'centroid_x': [cluster.centroid[0] for cluster in clusters_for_column.clusters],
@@ -356,10 +341,11 @@ class Grid(object):
             geometry = [cluster.geometry for cluster in clusters_for_column.clusters],
             crs=self.local_crs)
         
-        if keep_initial_crs:
-            transformer = Transformer.from_crs(crs_from=self.local_crs, crs_to=self.initial_crs, always_xy=True)
+        target_crs = self.initial_crs if target_crs=='initial' else self.local_crs if target_crs=='local' else target_crs
+        if target_crs != self.local_crs:
+            transformer = Transformer.from_crs(crs_from=self.local_crs, crs_to=target_crs, always_xy=True)
             df['centroid_x'], df['centroid_y'] = transformer.transform(df['centroid_x'], df['centroid_y'])
-            df.to_crs(self.initial_crs, inplace=True)
+            df.to_crs(target_crs, inplace=True)
         
         return df
     #
@@ -368,18 +354,23 @@ class Grid(object):
             self,
             filename:str="full_grid",
             file_format:str=['shp','csv'][0],
-            keep_initial_crs:bool=True,
+            target_crs:str=['initial','local','EPSG:4326'][0],
     ):
-        """save each grid cell with attributes on their Polygon, centroid, sum of indicator(s), and cluster id
+        """save geopandas.DataFrame with entry for each grid cell with attributes on their Polygon, centroid, sum of indicator(s), and cluster id
         
-        Args:
         filename (str):
-            name of the output file excluding file format extension. It can contain full path like 'output_folder/fname'
+            name of the output file excluding file format extension. It can contain full path like 'output_folder/fname' (default='full_grid')
         file_format (str):
-            format in which the file shall be saved. Currently available options are 'shp' and 'csv'. Extension will be appended to filename.
+            format in which the file shall be saved. Currently available options are 'shp' and 'csv'. Extension will be appended to filename. (default='shp')
+        target_crs (str):
+            crs in which data shall be projected. If 'initial' then it will be projected in same crs as input data. If 'local' a local projection will be used. Otherwise specify the target crs directly like 'EPSG:4326' (default='initial') 
+        
+        Returns:
+        df (geopandas.GeoDataFrame):
+            with entry for each grid cell
         """
         
-        df = self.create_full_grid_df(keep_initial_crs=keep_initial_crs, max_column_name_length=10 if file_format=='shp' else 20)
+        df = self.create_full_grid_df(target_crs=target_crs, max_column_name_length=10 if file_format=='shp' else 20)
         # save
         filename = filename +'.'+file_format
         if file_format == 'shp':
@@ -395,21 +386,25 @@ class Grid(object):
             self,
             filename:str="sparse_grid",
             file_format:str=['shp','csv'][0],
-            keep_initial_crs:bool=True,
+            target_crs:str=['initial','local','EPSG:4326'][0],
         ):
-        """
-        save each grid cell with attributes on their Polygon, centroid, sum of indicator(s), and cluster id
+        """save geopandas.GeoDataFrame with entry for grid cells that either has points inside or is part of a cluster with attributes on their Polygon, centroid, sum of indicator(s), and cluster id
         
         Args:
         filename (str):
-            name of the output file excluding file format extension. It can contain full path like 'output_folder/fname'
+            name of the output file excluding file format extension. It can contain full path like 'output_folder/fname' (default='sparse_grid')
         file_format (str):
-            format in which the file shall be saved. Currently available options are 'shp' and 'csv'. Extension will be appended to filename.
+            format in which the file shall be saved. Currently available options are 'shp' and 'csv'. Extension will be appended to filename. (default='shp')
+        target_crs (str):
+            crs in which data shall be projected. If 'initial' then it will be projected in same crs as input data. If 'local' a local projection will be used. Otherwise specify the target crs directly like 'EPSG:4326' (default='initial') 
         
+        Returns:
+        df (geopandas.GeoDataFrame):
+            with entry for each grid cell that is non empty or part of cluster
         """
         
         df = self.create_sparse_grid_df(
-            keep_initial_crs=keep_initial_crs, max_column_name_length=10 if file_format=='shp' else 20
+            target_crs=target_crs, max_column_name_length=10 if file_format=='shp' else 20
         )
         # save
         filename = filename +'.'+file_format
@@ -427,9 +422,22 @@ class Grid(object):
             cluster_column:str,
             filename:str="grid_clusters",
             file_format:str=['shp','csv'][0],
-            keep_initial_crs:bool=True,
+            target_crs:str=['initial','local','EPSG:4326'][0],
     ):
-        df = self.create_clusters_df_for_column(cluster_column=cluster_column, keep_initial_crs=keep_initial_crs)
+        """Save geopandas.GeoDataFrame that has one entry for each clusters including attributes on its polygon geometry, column aggregates, n_cells, id  
+
+        filename (str):
+            name of the output file excluding file format extension. It can contain full path like 'output_folder/fname' (default='grid_clusters')
+        file_format (str):
+            format in which the file shall be saved. Currently available options are 'shp' and 'csv'. Extension will be appended to filename. (default='shp')
+        target_crs (str):
+            crs in which data shall be projected. If 'initial' then it will be projected in same crs as input data. If 'local' a local projection will be used. Otherwise specify the target crs directly like 'EPSG:4326' (default='initial') 
+        
+        Returns:
+        df (geopandas.GeoDataFrame)
+            with one entry for each cluster
+        """
+        df = self.create_clusters_df_for_column(cluster_column=cluster_column, target_crs=target_crs)
         filename = filename+'.'+file_format
         if file_format == 'shp':
             df.to_file(filename, driver="ESRI Shapefile", index=False)
@@ -444,14 +452,25 @@ class Grid(object):
             self,
             filename:str="grid_clusters",
             file_format:str=['shp','csv'][0],
+            target_crs:str=['initial','local','EPSG:4326'][0],
         ):
-        """
-        Saves all cell clusters
+        """For each cluster column saves a geopandas.GeoDataFrame that has one entry for each clusters including attributes on its polygon geometry, column aggregates, n_cells, id  
+
+        filename (str or list):
+            name of the output file excluding file format extension. If there are more than 1 cluster column it will append the column name to the file. You can also provide a list of filenames to contain the filename indvidually. It can contain full path like 'output_folder/fname' (default='grid_clusters')
+        file_format (str):
+            format in which the file shall be saved. Currently available options are 'shp' and 'csv'. Extension will be appended to filename. (default='shp')
+        target_crs (str):
+            crs in which data shall be projected. If 'initial' then it will be projected in same crs as input data. If 'local' a local projection will be used. Otherwise specify the target crs directly like 'EPSG:4326' (default='initial') 
+        
+        Returns:
+        dfs (list)
+            list that for each cluster column contains a geopandas.GeoDataFrame with one entry for each cluster 
         """
         dfs = []
-        for (cluster_column, clusters) in self.clustering.by_column.items():
-            filename = filename + (("_"+cluster_column) if len(self.clustering.by_column) > 1 else '')
-            df = self.save_cell_clusters_for_column(cluster_column=cluster_column, filename=filename, file_format=file_format)
+        filenames = filename if type(filename) == list else [filename + (("_"+cluster_column) if len(self.clustering.by_column) > 1 else '') for cluster_column in self.clustering.by_column]
+        for (cluster_column, clusters), filename in zip(self.clustering.by_column.items(), filenames):
+            df = self.save_cell_clusters_for_column(cluster_column=cluster_column, filename=filename, file_format=file_format, target_crs=target_crs)
             dfs.append(df)
         return dfs
     #

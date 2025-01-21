@@ -42,7 +42,6 @@ def aggreagate_point_data_to_disks_vectorized(
     region_id_to_overlapped_cells = grid.search.region_id_to_overlapped_cells
     cells_contained_in_all_disks = grid.search.cells_contained_in_all_disks
 
-    id_y_mult=grid.id_y_mult
     pt_id_to_xy_coords = grid.search.target.pt_id_to_xy_coords
     pt_id_to_vals = grid.search.target.pt_id_to_vals
     n_pts = len(pts_source)

@@ -89,7 +89,7 @@ class GridPlots(object):
             cmap.set_under('#ccc')
             X = _np_array([[cell_to_cluster[(row,col)] if (row,col) in cell_to_cluster else 0 for col in  self.grid.col_ids] for row in self.grid.row_ids])
             p = ax.imshow(X=X, interpolation='none', cmap=cmap, vmin=1e-5,vmax=max_cluster_id, extent=extent)
-            # p = ax.pcolormesh(X, cmap=cmap, edgecolor="black", linewidth=1/max([self.grid.n_x_steps, self.grid.n_y_steps])/1.35)
+            # p = ax.pcolormesh(X, cmap=cmap, edgecolor="black", linewidth=1/max([len(self.grid.col_ids), len(self.grid.row_ids)])/1.35)
             # cb = _plt_colorbar(p)
             # TODO zoom in
             for cluster in clusters:
@@ -128,7 +128,7 @@ class GridPlots(object):
         X = _np_array([[map_2D_to_rgb(x,y, **imshow_kwargs) for x in  self.grid.x_steps[:-1]] for y in self.grid.y_steps[:-1]])
         # ax.flat[0].imshow(X=X, interpolation='none', extent=extent)
         # ax.flat[0].pcolormesh([self.grid.x_steps, self.grid.y_steps], X)
-        ax.flat[0].pcolormesh(X, edgecolor="black", linewidth=1/max([self.grid.n_x_steps, self.grid.n_y_steps])/1.35)
+        ax.flat[0].pcolormesh(X, edgecolor="black", linewidth=1/max([len(self.grid.col_ids), len(self.grid.row_ids)])/1.35)
         # ax.flat[0].set_aspect(2)
         colorbar_kwargs = get_2D_rgb_colobar_kwargs(**imshow_kwargs)
         cb = _plt_colorbar(**colorbar_kwargs[2], ax=ax.flat[0])

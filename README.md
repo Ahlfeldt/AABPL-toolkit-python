@@ -51,10 +51,8 @@ import aabpl
 Or if you prefer alternatively import the function and testdata explicitly:
 ```python
 # imports 
-import numpy as np
 from pandas import read_csv
-import matplotlib.pyplot as plt 
-from aabpl.main import detect_clusters, radius_search, convert_coords_to_local_crs
+from aabpl.main import radius_search, detect_cluster_pts, detect_cluster_cells
 ```
 
 ### Program syntax
@@ -64,6 +62,7 @@ Explain the syntax with its arguments here
 ### Examples
 #### Example 1:
 ```python
+
 path_to_your_csv = '../../cbsa_sample_data/plants_10180.txt'
 crs_of_your_csv =  "EPSG:4326"
 pts = read_csv(path_to_your_csv, sep=",", header=None)
@@ -72,32 +71,38 @@ pts.columns = ["eid", "employment", "industry", "lat","lon","moved"]
 grid = detect_cluster_cells(
     pts=pts,
     crs=crs_of_your_csv,
-    radius=750,
-    include_boundary=False,
+    r=750,
+    columns=['employment'],
     exclude_pt_itself=True,
     distance_thresholds=2500,
     k_th_percentiles=[99.97],
     n_random_points=int(1e5),
     make_convex=True,
     random_seed=0,
-    sum_names=['employment'],
     silent = True,
 )
 
+## Save DataFrames with radius sums and clusters
+# Using all the save options below is most likely excessive. 
+# saving the shapefile for save_cell_clusters and save_sparse_grid is most
+# likely sufficient
+
 # save files as needed
-grid.save_cell_clusters(filename=output_gis_folder+'grid_clusters', file_format='shp', target_crs=crs_of_your_csv)
-# grid.save_cell_clusters(filename=output_data_folder+'grid_clusters', file_format='csv', target_crs=crs_of_your_csv)
-grid.save_sparse_grid(filename=output_gis_folder+'grid_clusters', file_format='shp', target_crs=crs_of_your_csv)
-# grid.save_sparse_grid(filename=output_data_folder+'grid_clusters', file_format='csv', target_crs=crs_of_your_csv)
-grid.save_full_grid(filename=output_gis_folder+'grid_clusters', file_format='shp', target_crs=crs_of_your_csv)
+# save only only clusters including their geometry, aggregate values, area and id
+grid.save_cell_clusters(filename=output_gis_folder+'grid_clusters', file_format='shp')
+# save sparse grid including cells only those cells that at least contain one point
+grid.save_sparse_grid(filename=output_gis_folder+'grid_clusters', file_format='shp')
+# save full grid including cells that have no points in them (through many empty cells this will occuppy unecessary disk space)
+# grid.save_full_grid(filename=output_gis_folder+'grid_clusters', file_format='shp')
+# grid.save_full_grid(filename=output_data_folder+'grid_clusters', file_format='csv')
 
 pts.to_csv(output_data_folder+'pts_df_w_clusters.csv')
 
 # CREATE PLOTS
-grid.plot_clusters(output_maps_folder+'clusters_employment_750m_9975th')
-grid.plot_vars(filename=output_maps_folder+'employment_vars')
-grid.plot_cluster_pts(filename=output_maps_folder+'employment_cluster_pts')
-grid.plot_rand_dist(filename=output_maps_folder+'rand_dist_employment')
+grid.plot.clusters(output_maps_folder+'clusters_employment_750m_9975th')
+grid.plot.vars(filename=output_maps_folder+'employment_vars')
+grid.plot.cluster_pts(filename=output_maps_folder+'employment_cluster_pts')
+grid.plot.rand_dist(filename=output_maps_folder+'rand_dist_employment')
 
 ```
 
