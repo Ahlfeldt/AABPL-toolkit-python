@@ -48,7 +48,7 @@ class Clustering(object):
         
             clusters_for_column.merge_clusters(distance_threshold=distance_threshold)
             if make_convex:
-                clusters_for_column.make_cluster_convex()
+                clusters_for_column.make_clusters_convex()
         
             clusters_for_column.match_cell_to_cluster_id()
             clusters_for_column.add_geom_to_clusters()
@@ -180,8 +180,9 @@ class Clustering(object):
                 cells_to_add:set,
                 row_col_to_centroid:dict,
                 id_to_sums:dict,
+                column_id:int,
         ):
-            self.aggregate += sum([id_to_sums[cell][self.column_id] for cell in cells_to_add if cell in id_to_sums])
+            self.aggregate += sum([id_to_sums[cell][column_id] for cell in cells_to_add if cell in id_to_sums])
             n_cells_to_add = len(cells_to_add)
             n_cells = self.n_cells + n_cells_to_add
             self.centroid = (
@@ -285,12 +286,11 @@ class Clustering(object):
             self.clusters = [cluster.change_id(i+1) for i, cluster in enumerate(clusters)]
         #
 
-        def make_cluster_convex(
+        def make_clusters_convex(
                 self
         ):  
             new_clusters_dict = {}
             set_clustered_cells = set(self.clustered_cells) 
-            new_prime_locs = []
             id_to_sums = self.grid.id_to_sums
             row_col_to_centroid = self.grid.row_col_to_centroid
             row_col_to_bounds = self.grid.row_col_to_bounds
@@ -315,9 +315,10 @@ class Clustering(object):
                 cluster.add_cells_to_cluster(cells_to_add, row_col_to_centroid=row_col_to_centroid, id_to_sums=id_to_sums)
             
             self.clusters.sort(key=lambda c: -c.aggregate)
-            self.clusters = [cluster.change_id(i+1) for i, cluster in enumerate(self.clusters)]
+            for i, cluster in enumerate(self.clusters):
+                cluster.change_id(i+1)
 
-            self.by_column = new_clusters_dict
+            # self.by_column = new_clusters_dict
             #
         
         def match_cell_to_cluster_id(self):
