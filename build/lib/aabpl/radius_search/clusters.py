@@ -312,7 +312,7 @@ class Clustering(object):
                             cells_in_convex_cluster.add((r,c))
                             set_clustered_cells.add((r,c))
                             cells_to_add.add((r,c))
-                cluster.add_cells_to_cluster(cells_to_add, row_col_to_centroid=row_col_to_centroid, id_to_sums=id_to_sums)
+                cluster.add_cells_to_cluster(cells_to_add, row_col_to_centroid=row_col_to_centroid, id_to_sums=id_to_sums, column_id=self.column_id)
             
             self.clusters.sort(key=lambda c: -c.aggregate)
             for i, cluster in enumerate(self.clusters):
