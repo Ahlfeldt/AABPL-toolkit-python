@@ -126,7 +126,7 @@ def check_kwargs(
         columns = [columns]
     else:
         if columns is None or len(columns)==0:
-            help_col = next(('helper_col'+str(i) for i in (['']+list(range(len(pts_target.columns)))) if not 'helper_col'+str(i) in pts_target.columns))
+            help_col = next(('count'+str(i) for i in (['']+list(range(len(pts_target.columns)))) if not 'helper_col'+str(i) in pts_target.columns))
             pts_target[help_col] = 1
             columns = [help_col]
         try:
@@ -212,7 +212,7 @@ def create_auto_grid_for_radius_search(
         Whether information on progress shall be printed to console (default=False)
     Returns:
     grid (aabl.Grid):
-        a grid covering all points (custom class containing  
+        a grid covering all points (custom class containing 
     """
 
     if pts_target is None:
@@ -329,6 +329,15 @@ def radius_search(
     Returns:
     grid (aabl.Grid):
         a grid covering all points (custom class containing  
+    
+          
+    Examples:
+    from aabpl.main import radius_search
+    from pandas import read_csv
+    pts = read_csv('C:/path/to/file.txt',sep=',',header=None)
+    pts.columns = ["eid", "employment", "industry", "lat","lon","moved"]
+    grid = radius_search(pts,crs="EPSG:4326",r=750,columns=['employment'])
+    grid.plot_vars(filename='employoment_750m')
     """
 
     (pts, local_crs, columns, x, y, pts_target, x_tgt, y_tgt, row_name_tgt, col_name_tgt, grid, help_col
@@ -361,6 +370,7 @@ def radius_search(
     # prepare source points data
     grid.search.set_source(
         pts=pts,
+        columns=columns,
         x=x,
         y=y,
         row_name=row_name,
@@ -479,7 +489,7 @@ def detect_cluster_pts(
     
     Returns:
     grid (aabl.Grid):
-        a grid covering all points (custom class) with cluster attributes stored to it  
+        a grid covering all points (custom class) with cluster attributes stored to it
     """
 
     (pts, local_crs, columns, x, y, pts_target, x_tgt, y_tgt, row_name_tgt, col_name_tgt, grid, help_col
@@ -488,7 +498,10 @@ def detect_cluster_pts(
             col_name=col_name, pts_target=pts_target, x_tgt=x_tgt, y_tgt=y_tgt,
             row_name_tgt=row_name_tgt, col_name_tgt=col_name_tgt, grid=grid, proj_crs=proj_crs, silent=silent,
     )
-
+    if type(k_th_percentiles) not in [list,_np_array, tuple]:
+        k_th_percentiles = [k_th_percentiles for column in columns]
+    elif len(k_th_percentiles) < len(columns):
+        k_th_percentiles = [k_th_percentiles[i%len(k_th_percentiles)] for i in range(len(columns))]
     # initialize disk_search
     grid.search = DiskSearch(
         grid,
@@ -529,6 +542,7 @@ def detect_cluster_pts(
     
     grid.search.set_source(
         pts=pts,
+        columns=columns,
         x=x,
         y=y,
         row_name=row_name,
@@ -589,7 +603,7 @@ def detect_cluster_pts(
             filename=filename,
             plot_kwargs=plot_kwargs
             )
-    grid.plot_rand_dist = plot_rand_dist
+    grid.plot.rand_dist = plot_rand_dist
     
     plot_colnames = list(columns) + [n+sum_suffix for n in columns] + [str(cname)+str(cluster_suffix) for cname in columns]
     def plot_cluster_pts(
@@ -604,7 +618,7 @@ def detect_cluster_pts(
             filename=filename,
             plot_kwargs=plot_kwargs,
         )
-    grid.plot_cluster_pts = plot_cluster_pts
+    grid.plot.cluster_pts = plot_cluster_pts
 
     if plot_cluster_points is not None:
         
@@ -763,7 +777,7 @@ def detect_cluster_cells(
         silent=silent,
     )
     
-    grid.create_clusters(
+    grid.clustering.create_clusters(
         pts=pts,
         columns=columns,
         distance_thresholds=distance_thresholds,

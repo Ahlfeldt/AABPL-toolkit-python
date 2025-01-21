@@ -175,6 +175,7 @@ def get_distribution_for_random_points(
 
     grid.search.set_source(
         pts=rndm_pts,
+        columns=columns,
         x=x,
         y=y,
         row_name=row_name,

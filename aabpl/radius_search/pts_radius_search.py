@@ -291,7 +291,7 @@ def aggreagate_point_data_to_disks_vectorized(
             plot_kwargs=plot_kwargs,
         )
 
-    grid.plot_vars = plot_vars
+    grid.plot.vars = plot_vars
     
     if plot_radius_sums is not None:
         print('create plot for radius sums')

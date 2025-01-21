@@ -6,12 +6,12 @@ def create_plots_for_vars(
         grid,
         colnames:_np_array,
         filename:str="",
+        save_kwargs:dict={},
         plot_kwargs:dict={},
 ):
     """
     TODO Descripiton
     """
-    print("colnames" , colnames)
     nrows = colnames.shape[0]
     ncols = 1 if len(colnames.shape)==1 else colnames.shape[1]
     # specify default plot kwargs and add defaults
@@ -25,6 +25,7 @@ def create_plots_for_vars(
         'additional_varnames':[],
         **plot_kwargs
     }
+    save_kwargs = {'dpi':300, 'bbox_inches':"tight", **save_kwargs}
     plot_kwargs.pop('color', None)
     figsize = plot_kwargs.pop('figsize')
     fig = plot_kwargs.pop('fig')
@@ -49,8 +50,10 @@ def create_plots_for_vars(
         ax.set_title(ax_title)
         
         # ADD DISTRIUBTION PLOT
-        c = grid.search.source.pts[colname]# vmin=c.min(), vmax=c.max(),
-        norm = _plt_LogNorm(vmin=c.min(),vmax=c.max()) if (c.min() > 0) else 'linear'
+        c = grid.search.source.pts[colname]
+        vmin=plot_kwargs['vmin'] if 'vmin' in plot_kwargs else c.min()
+        vmax=plot_kwargs['vmax'] if 'vmax' in plot_kwargs else c.max(),
+        norm = plot_kwargs['norm'] if 'norm' in plot_kwargs else _plt_LogNorm(vmin=c.min(),vmax=c.max()) if (c.min() > 0) else 'linear'
         scttr = ax.scatter(x=xs,y=ys,c=c, norm=norm, **plot_kwargs)
         fig.colorbar(scttr, ax=ax)
 
@@ -60,6 +63,6 @@ def create_plots_for_vars(
         ax.set_ylim([ymin-pad_y,ymax+pad_y])
     
     if filename:
-        fig.savefig(filename, dpi=300, bbox_inches="tight")
+        fig.savefig(filename, **save_kwargs)
     #
 #
