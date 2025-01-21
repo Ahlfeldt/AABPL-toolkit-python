@@ -33,7 +33,7 @@ grid = detect_cluster_cells(
     columns=['employment'],
     exclude_pt_itself=True,
     distance_thresholds=2500,
-    k_th_percentiles=[99.97],
+    k_th_percentiles=[99.5],
     n_random_points=int(1e5),
     make_convex=True,
     random_seed=0,
@@ -59,7 +59,7 @@ grid.save_sparse_grid(filename=output_gis_folder+'grid_clusters', file_format='s
 pts.to_csv(output_data_folder+'pts_df_w_clusters.csv')
 
 # CREATE PLOTS
-grid.plot.clusters(output_maps_folder+'clusters_employment_750m_9975th')
+grid.plot.clusters(output_maps_folder+'clusters_employment_750m_995th')
 grid.plot.vars(filename=output_maps_folder+'employment_vars')
 grid.plot.cluster_pts(filename=output_maps_folder+'employment_cluster_pts')
 grid.plot.rand_dist(filename=output_maps_folder+'rand_dist_employment')

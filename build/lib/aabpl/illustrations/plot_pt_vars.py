@@ -1,6 +1,8 @@
 from matplotlib.pyplot import (subplots as _plt_subplots)
 from matplotlib.colors import LogNorm as _plt_LogNorm
+from matplotlib.pyplot import get_cmap as _plt_get_cmap
 from numpy import array as _np_array
+from aabpl.illustrations.plot_utils import truncate_colormap
 
 def create_plots_for_vars(
         grid,
@@ -54,6 +56,7 @@ def create_plots_for_vars(
         vmin=plot_kwargs['vmin'] if 'vmin' in plot_kwargs else c.min()
         vmax=plot_kwargs['vmax'] if 'vmax' in plot_kwargs else c.max(),
         norm = plot_kwargs['norm'] if 'norm' in plot_kwargs else _plt_LogNorm(vmin=c.min(),vmax=c.max()) if (c.min() > 0) else 'linear'
+        plot_kwargs['cmap'] = truncate_colormap(_plt_get_cmap(plot_kwargs['cmap']),0.1,1)
         scttr = ax.scatter(x=xs,y=ys,c=c, norm=norm, **plot_kwargs)
         fig.colorbar(scttr, ax=ax)
 
