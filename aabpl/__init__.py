@@ -11,4 +11,4 @@ from . import main
 # from .radius_search.radius_search_class import *
 
 __version__ = version('aabpl')
-print("Please note that this package is under active development. Your currently using version "+str(__version__))
+print("Please note that the package 'aabpl' is under active development. Your currently using version "+str(__version__))

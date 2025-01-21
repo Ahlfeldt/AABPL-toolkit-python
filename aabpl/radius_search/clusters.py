@@ -181,7 +181,7 @@ class Clustering(object):
                 row_col_to_centroid:dict,
                 id_to_sums:dict,
         ):
-            self.aggregate += sum([id_to_sums[cell][self.column_id] for cell in cells_to_add])
+            self.aggregate += sum([id_to_sums[cell][self.column_id] for cell in cells_to_add if cell in id_to_sums])
             n_cells_to_add = len(cells_to_add)
             n_cells = self.n_cells + n_cells_to_add
             self.centroid = (
