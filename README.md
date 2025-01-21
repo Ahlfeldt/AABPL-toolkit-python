@@ -66,26 +66,39 @@ Explain the syntax with its arguments here
 ```python
 path_to_your_csv = '../../cbsa_sample_data/plants_10180.txt'
 crs_of_your_csv =  "EPSG:4326"
+pts = read_csv(path_to_your_csv, sep=",", header=None)
+pts.columns = ["eid", "employment", "industry", "lat","lon","moved"]
 
-pts_df = read_csv(path_to_your_csv, sep=",", header=None)#[200:20000]
-pts_df.columns = ["eid", "employment", "industry", "lat","lon","moved"]
-convert_coords_to_local_crs(pts_df)
-
-detect_clusters(
-    pts_df=pts_df,
+grid = detect_cluster_cells(
+    pts=pts,
+    crs=crs_of_your_csv,
     radius=750,
     include_boundary=False,
     exclude_pt_itself=True,
-
-    k_th_percentiles=[99.5],
-    n_random_points=int(1e6),
+    distance_thresholds=2500,
+    k_th_percentiles=[99.97],
+    n_random_points=int(1e5),
+    make_convex=True,
     random_seed=0,
-
     sum_names=['employment'],
-    plot_distribution={},
-    plot_cluster_points={},
     silent = True,
 )
+
+# save files as needed
+grid.save_cell_clusters(filename=output_gis_folder+'grid_clusters', file_format='shp', target_crs=crs_of_your_csv)
+# grid.save_cell_clusters(filename=output_data_folder+'grid_clusters', file_format='csv', target_crs=crs_of_your_csv)
+grid.save_sparse_grid(filename=output_gis_folder+'grid_clusters', file_format='shp', target_crs=crs_of_your_csv)
+# grid.save_sparse_grid(filename=output_data_folder+'grid_clusters', file_format='csv', target_crs=crs_of_your_csv)
+grid.save_full_grid(filename=output_gis_folder+'grid_clusters', file_format='shp', target_crs=crs_of_your_csv)
+
+pts.to_csv(output_data_folder+'pts_df_w_clusters.csv')
+
+# CREATE PLOTS
+grid.plot_clusters(output_maps_folder+'clusters_employment_750m_9975th')
+grid.plot_vars(filename=output_maps_folder+'employment_vars')
+grid.plot_cluster_pts(filename=output_maps_folder+'employment_cluster_pts')
+grid.plot_rand_dist(filename=output_maps_folder+'rand_dist_employment')
+
 ```
 
 
