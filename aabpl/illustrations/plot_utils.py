@@ -22,6 +22,13 @@ from math import (
 from aabpl.utils.general import flatten_list, angle
 from aabpl.utils.distances_to_cell import ( get_cells_relevant_for_disk_by_type, get_cell_farthest_vertex_to_point, get_cell_closest_point_to_points, )
 
+def truncate_colormap(cmap, minval=0.0, maxval=1.0, n=200):
+    new_cmap = _plt_LinearSegmentedColormap.from_list(
+        'trunc({n},{a:.2f},{b:.2f})'.format(n=cmap.name, a=minval, b=maxval),
+        cmap(_np_linspace(minval, maxval, n)))
+    return new_cmap
+#
+
 def map_2D_to_rgb (
     x=None,
     y=None,

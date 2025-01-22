@@ -192,6 +192,7 @@ def create_auto_grid_for_radius_search(
     - and is leverage for performance gains of radius search 
 
     Args:
+    -------
     pts_source (pandas.DataFrame):
         DataFrame of points for which a search for other points within the specified radius shall be performed
     crs (str):
@@ -210,7 +211,9 @@ def create_auto_grid_for_radius_search(
         column name of y-coordinate (=lattitude) in pts_target. If None its assumed to be same as y (default=None)
     silent (bool):
         Whether information on progress shall be printed to console (default=False)
+    
     Returns:
+    -------
     grid (aabl.Grid):
         a grid covering all points (custom class containing 
     """
@@ -275,6 +278,7 @@ def radius_search(
     The result will be appended to DataFrame.
 
     Args:
+    -------
     pts (pandas.DataFrame):
         DataFrame of points for which a search for other points within the specified radius shall be performed
     crs (str):
@@ -327,11 +331,13 @@ def radius_search(
         Whether information on progress shall be printed to console (default=False)
     
     Returns:
+    -------
     grid (aabl.Grid):
         a grid covering all points (custom class containing  
     
           
     Examples:
+    -------
     from aabpl.main import radius_search
     from pandas import read_csv
     pts = read_csv('C:/path/to/file.txt',sep=',',header=None)
@@ -430,6 +436,7 @@ def detect_cluster_pts(
     The results will be appended to DataFrame.
 
     Args:
+    -------
     pts (pandas.DataFrame):
         DataFrame of points for which a search for other points within the specified radius shall be performed
     crs (str):
@@ -488,6 +495,7 @@ def detect_cluster_pts(
         Whether information on progress shall be printed to console (default=False)
     
     Returns:
+    -------
     grid (aabl.Grid):
         a grid covering all points (custom class) with cluster attributes stored to it
     """
@@ -531,7 +539,6 @@ def detect_cluster_pts(
         sum_suffix=sum_suffix,
         n_random_points=n_random_points,
         k_th_percentiles=k_th_percentiles,
-        plot_distribution=plot_distribution,
         random_seed=random_seed,
         silent=silent,
     )
@@ -676,6 +683,7 @@ def detect_cluster_cells(
     The results will be appended to DataFrame.
 
     Args:
+    -------
     pts (pandas.DataFrame):
         DataFrame of points for which a search for other points within the specified radius shall be performed
     crs (str):
@@ -734,6 +742,7 @@ def detect_cluster_cells(
         Whether information on progress shall be printed to console (default=False)
     
     Returns:
+    -------
     grid (aabl.Grid):
         a grid covering all points (custom class) with cluster attributes stored to it  
     """

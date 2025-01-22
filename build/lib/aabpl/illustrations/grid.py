@@ -1,10 +1,14 @@
 from numpy import (
     array as _np_array, 
     unique as _np_unique,
+    spacing as _np_spacing,
+    linspace as _np_linspace,
 )
 from matplotlib.pyplot import subplots as _plt_subplots, colorbar as _plt_colorbar
 from matplotlib.pyplot import get_cmap as _plt_get_cmap
-from aabpl.illustrations.plot_utils import map_2D_to_rgb, get_2D_rgb_colobar_kwargs
+from matplotlib.patches import (Rectangle as _plt_Rectangle, Polygon as _plt_Polygon, Circle as _plt_Circle)
+from matplotlib.colors import LogNorm as _plt_LogNorm
+from aabpl.illustrations.plot_utils import truncate_colormap, map_2D_to_rgb, get_2D_rgb_colobar_kwargs
 from aabpl.illustrations.plot_pt_vars import create_plots_for_vars
 
 class GridPlots(object):
@@ -23,9 +27,9 @@ class GridPlots(object):
 
     def cell_aggregates(
         self,
+        filename:str='',
         fig=None,
         ax=None,
-        filename:str=''
     ):
         
         """
@@ -42,17 +46,23 @@ class GridPlots(object):
             'ymax':self.grid.y_steps.max(),
         }    
         extent=[imshow_kwargs['xmin'],imshow_kwargs['xmax'],imshow_kwargs['ymax'],imshow_kwargs['ymin']]
-        cmap = _plt_get_cmap('Reds')
-        cmap.set_under('#ccc')
+        # cmap = _plt_get_cmap('Reds')
+        # cmap.set_under('#ccc')
         for i,column in enumerate(self.grid.search.target.columns):
             ax = axs if len(self.grid.search.target.columns)==1 else axs.flat[i]
-            max_sum = max(list(id_to_sums.values()))
+            max_sum = max([vals[i] for vals in id_to_sums.values()])
             X = _np_array([[id_to_sums[(row,col)][i] if ((row,col)) in id_to_sums else 0 for col in  self.grid.col_ids] for row in self.grid.row_ids])
             ux = _np_unique(X)
             minX = min(ux[ux!=0])
+            norm = (_plt_LogNorm(vmin=minX,vmax=X.max(),clip=False) if minX>=0 else 'linear')
+            # norm = (_plt_LogNorm(vmin=_np_spacing(0.0),vmax=X.max()) if X.min()>=0 else 'linear')
+            cmap = truncate_colormap(_plt_get_cmap('Reds'), 0.3, 1)
+            cmap.set_under('#fff0')
+            cmap.set_under('#cfcd')
+            p = ax.imshow(X=X, interpolation='none', cmap=cmap, norm=norm, extent=extent)
             # p = ax.imshow(X=X, interpolation='none', cmap=cmap, vmin=1e-5,vmax=max_sum, extent=extent)
-            p = ax.pcolormesh(X, cmap=cmap, vmin=minX/2,vmax=max_sum)
-            cb = _plt_colorbar(p)
+            # p = ax.pcolormesh(X, cmap=cmap, vmin=minX/2,vmax=max_sum)
+            cb = _plt_colorbar(p, ax=ax)
             ax.set_xlabel('x/lon') 
             ax.set_ylabel('y/lat') 
             ax.title.set_text('Aggregated value per cell for '+str(column))
@@ -62,13 +72,15 @@ class GridPlots(object):
 
 
 
-    def clusters(self, fig=None, axs=None, filename:str=''):
+    def clusters(self, filename:str='', fig=None, axs=None):
         """
         Plot cell clusters (for each clusterindicator)
         """
         if axs is None:
             fig, axs = _plt_subplots(ncols=len(self.grid.search.target.columns), figsize=(10,10*len(self.grid.search.target.columns)))
-
+        
+        id_to_sums = self.grid.id_to_sums
+        
         for i, (cluster_column, clusters_for_column) in enumerate(self.grid.clustering.by_column.items()):
             ax = axs.flat[i] if len(self.grid.search.target.columns)>1 else axs
             ax.set_xlabel('x/lon '+str(self.grid.local_crs)) 
@@ -85,15 +97,34 @@ class GridPlots(object):
             }
             
             extent=[imshow_kwargs['xmin'],imshow_kwargs['xmax'],imshow_kwargs['ymax'],imshow_kwargs['ymin']]
-            cmap = _plt_get_cmap('Reds')
-            cmap.set_under('#ccc')
-            X = _np_array([[cell_to_cluster[(row,col)] if (row,col) in cell_to_cluster else 0 for col in  self.grid.col_ids] for row in self.grid.row_ids])
-            p = ax.imshow(X=X, interpolation='none', cmap=cmap, vmin=1e-5,vmax=max_cluster_id, extent=extent)
+
+            X = _np_array([[id_to_sums[(row,col)][i] if ((row,col)) in id_to_sums else 0 for col in  self.grid.col_ids] for row in self.grid.row_ids])
+            X_flat = X.flat
+            cmap = _plt_get_cmap('binary')
+            vmin, vmax = (X.flat[X_flat != 0]).min(), X.max()
+            norm = (_plt_LogNorm(vmin=vmin,vmax=vmax,clip=False) if X.min()>=0 else 'linear')
+            # norm = (_plt_LogNorm(vmin=_np_spacing(0.0),vmax=X.max()) if X.min()>=0 else 'linear')
+            cmap = truncate_colormap(cmap, 0.1, 1)
+            cmap.set_under('#fff0')
+            
+            p = ax.imshow(X=X, interpolation='none', cmap=cmap, norm=norm, extent=extent)
+            # p = ax.imshow(X=X, interpolation='none', cmap=new_cmap, vmin=(X.flat[X_flat != 0]).min(),vmax=X.max(), norm=norm, extent=extent)
+            # p = ax.imshow(X=X, interpolation='none', cmap=cmap, vmin=X.min()-X.max(),vmax=X.max(), extent=extent)
+            cb = _plt_colorbar(p, ax=ax)
+                
+            # cmap = _plt_get_cmap('viridis')
+            # cmap.set_under(alpha=0)
+            # X = _np_array([[cell_to_cluster[(row,col)] if (row,col) in cell_to_cluster else 0 for col in  self.grid.col_ids] for row in self.grid.row_ids])
+            # p = ax.imshow(X=X, interpolation='none', cmap=cmap, vmin=1e-5,vmax=max_cluster_id, extent=extent)
+            # X = _np_array([[(255,0,0,0.1) if (row,col) in cell_to_cluster else (0,0,0,0) for col in  self.grid.col_ids] for row in self.grid.row_ids])
+            # p = ax.imshow(X=X, interpolation='none', extent=extent)
             # p = ax.pcolormesh(X, cmap=cmap, edgecolor="black", linewidth=1/max([len(self.grid.col_ids), len(self.grid.row_ids)])/1.35)
-            # cb = _plt_colorbar(p)
             # TODO zoom in
             for cluster in clusters:
-                ax.annotate(cluster.id, xy=cluster.centroid, fontsize=10)
+                geoms = [cluster.geometry] if hasattr(cluster.geometry, 'exterior') else cluster.geometry.geoms
+                for geom in geoms:
+                    ax.add_patch(_plt_Polygon(xy=geom.exterior.coords, hatch='////', facecolor='#f000', edgecolor='#f00'))
+                ax.annotate(cluster.id, xy=cluster.centroid, fontsize=15, weight='bold', color='red')
         if filename:
             fig.savefig(filename, dpi=300, bbox_inches="tight")
 

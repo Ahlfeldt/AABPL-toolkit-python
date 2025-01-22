@@ -22,6 +22,7 @@ def draw_random_points_within_valid_area(
     into the excluded area the point is discarded and a new cell is drawn 
 
     Args:
+    -------
     partly_or_fully_included_cells (??):
         list cells with attributes (centroid coords, excluded_property)
     cell_width (float):
@@ -138,7 +139,6 @@ def get_distribution_for_random_points(
     row_name:str='id_y',
     col_name:str='id_x',
     sum_suffix:str='_750m',
-    plot_distribution:dict={},
     random_seed:int=None,
     silent:bool=False,
 ):

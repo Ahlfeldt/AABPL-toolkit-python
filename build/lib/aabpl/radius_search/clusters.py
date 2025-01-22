@@ -45,7 +45,6 @@ class Clustering(object):
                 column_id=i,
             )
             self.by_column[column] = clusters_for_column
-        
             clusters_for_column.merge_clusters(distance_threshold=distance_threshold)
             if make_convex:
                 clusters_for_column.make_clusters_convex()
@@ -146,21 +145,20 @@ class Clustering(object):
                 self,
                 id:int,
                 cell_in_cluster:list,
-                column_id:int,
-                row_col_to_centroid:dict,
-                id_to_sums:dict,
+                centroid:tuple,
+                aggregate:float,
         ):
             """
             bind Clusters object to grid 
             """
             self.id = id
             self.cells = [cell_in_cluster]
-            self.centroid = row_col_to_centroid[cell_in_cluster]
-            self.aggregate = id_to_sums[cell_in_cluster][column_id]
+            self.centroid = centroid#row_col_to_centroid[cell_in_cluster]
+            self.aggregate = aggregate#id_to_sums[cell_in_cluster][column_id]
             self.n_cells = 1
 
         
-        def annex_cluster(self,cluster_to_annex):
+        def annex_cluster(self, cluster_to_annex):
             n_current, n_neighbor = self.n_cells, cluster_to_annex.n_cells
             self.cells = self.cells + cluster_to_annex.cells
             self.aggregate += cluster_to_annex.aggregate
@@ -186,10 +184,11 @@ class Clustering(object):
             n_cells_to_add = len(cells_to_add)
             n_cells = self.n_cells + n_cells_to_add
             self.centroid = (
-                (self.centroid[0]*self.n_cells + sum([row_col_to_centroid[cell][0] for cell in cells_to_add])*n_cells_to_add)/n_cells,
-                (self.centroid[1]*self.n_cells + sum([row_col_to_centroid[cell][0] for cell in cells_to_add])*n_cells_to_add)/n_cells
+                (self.centroid[0]*self.n_cells + sum([row_col_to_centroid[cell][0] for cell in cells_to_add])) / n_cells,
+                (self.centroid[1]*self.n_cells + sum([row_col_to_centroid[cell][1] for cell in cells_to_add])) / n_cells
             )
             self.n_cells = n_cells
+            self.cells = self.cells + list(cells_to_add)
         
         def add_area(
                 self,
@@ -231,35 +230,33 @@ class Clustering(object):
             self.column = column
             self.column_id = column_id
             self.clustered_cells = sorted(set(arr_to_tpls(clustered_cells, int)))
-            
             id_to_sums = self.grid.id_to_sums    
             row_col_to_centroid = self.grid.row_col_to_centroid
 
             self.clusters = [Clustering.Cluster(
                 id=i,
                 cell_in_cluster=cell,
-                column_id=column_id,
-                row_col_to_centroid=row_col_to_centroid,
-                id_to_sums=id_to_sums,
+                centroid = row_col_to_centroid[cell],
+                aggregate=id_to_sums[cell][column_id],
                 ) for i, cell in enumerate(self.clustered_cells)]
             self.by_id = {cluster.id: cluster for cluster in self.clusters}
         #
-
+        
         def merge_clusters(
                 self,
                 distance_threshold:float
             ):
             
-            annexed_cluster_ids = set()
-            clusters_to_delete = set([-1])
-            def find_next_merge(clusters):
+            def find_next_merge(clusters, distance_threshold, annexed_cluster_ids):
                 for i, current_cluster in enumerate(clusters):
                     current_cluster_id = current_cluster.id
+                    if current_cluster_id in annexed_cluster_ids:
+                        continue
                     # Check if current cluster has any remaining cells
                     current_centroid = current_cluster.centroid
                     for neighbor_cluster in clusters[i+1:]:
                         neighbor_cluster_id = neighbor_cluster.id
-                        if neighbor_cluster_id == current_cluster_id or neighbor_cluster_id in clusters_to_delete:
+                        if neighbor_cluster_id == current_cluster_id or neighbor_cluster_id in annexed_cluster_ids:
                             continue  # Skip unclustered cells and self-comparison
                         
                         # Compute distance between centroids
@@ -271,10 +268,12 @@ class Clustering(object):
                             return neighbor_cluster_id
                         #
                     #
+
+            annexed_cluster_ids = set()
             while True:
-                clusters = [c for c in self.clusters if not c.id in annexed_cluster_ids]
-                clusters.sort(key=lambda c: (-c.n_cells, -c.aggregate))
-                neighbor_cluster_id = find_next_merge(clusters)
+                self.clusters = [c for c in self.clusters if not c.id in annexed_cluster_ids]
+                self.clusters.sort(key=lambda c: (-c.aggregate, -c.n_cells))
+                neighbor_cluster_id = find_next_merge(self.clusters, distance_threshold, annexed_cluster_ids)
                 if neighbor_cluster_id is None:
                     break
                 else:
@@ -283,13 +282,14 @@ class Clustering(object):
             # assign ids starting at 1 from biggest (according to sum value) to largest cluster 
             clusters = [v for k,v in self.by_id.items() if not k in annexed_cluster_ids]
             clusters.sort(key=lambda c: -c.aggregate)
-            self.clusters = [cluster.change_id(i+1) for i, cluster in enumerate(clusters)]
+            for i, cluster in enumerate(clusters):
+                cluster.change_id(i+1)
+            self.clusters = clusters
         #
 
         def make_clusters_convex(
                 self
         ):  
-            new_clusters_dict = {}
             set_clustered_cells = set(self.clustered_cells) 
             id_to_sums = self.grid.id_to_sums
             row_col_to_centroid = self.grid.row_col_to_centroid
@@ -312,13 +312,12 @@ class Clustering(object):
                             cells_in_convex_cluster.add((r,c))
                             set_clustered_cells.add((r,c))
                             cells_to_add.add((r,c))
-                cluster.add_cells_to_cluster(cells_to_add, row_col_to_centroid=row_col_to_centroid, id_to_sums=id_to_sums, column_id=self.column_id)
+                cluster.add_cells_to_cluster(cells_to_add=cells_to_add, row_col_to_centroid=row_col_to_centroid, id_to_sums=id_to_sums, column_id=self.column_id)
             
             self.clusters.sort(key=lambda c: -c.aggregate)
             for i, cluster in enumerate(self.clusters):
                 cluster.change_id(i+1)
 
-            # self.by_column = new_clusters_dict
             #
         
         def match_cell_to_cluster_id(self):

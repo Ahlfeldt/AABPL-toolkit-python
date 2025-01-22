@@ -46,7 +46,7 @@ class Grid(object):
 
     ...
 
-    Attributes
+    Attributes:
     ----------
     clustering (str): 
         custom class exhibiting methods to map clustered points to cells, merge cluster cells and making clusters convex and adding attributes. For more info help(Clustering)
@@ -79,19 +79,20 @@ class Grid(object):
     row_col_to_bounds (dict):
         dictionary to look up the cells bounds (tuple(tuple(xmin,ymin),tuple(xmax,ymax))) by their row/col index tuple(row_id,col_id)
     
-    Methods
+    Methods:
     -------
-    create_full_grid_df
-    create_sparse_grid_df
-    create_clusters_df_for_column
-    save_full_grid(filename:str="full_grid", file_format:str=['shp','csv'][0])
-        save each grid cell with attributes on their Polygon, centroid, sum of indicator(s), and cluster id
-    save_sparse_grid(filename:str="sparse_grid",file_format:str=['shp','csv'][0])
-        save each grid cell, that is non-empty or part of a cluster, with attributes on their Polygon, centroid, sum of indicator(s), and cluster id
-    save_cell_clusters(filename:str="grid_clusters", file_format:str=['shp','csv'][0])
+    create_full_grid_df(target_crs:str=['initial','local','EPSG:4326'][0], max_column_name_length:int=10)
+        returns geopandas.GeoDataFrame with entry for each grid cell. Attributes: row, col, geometry, centroid_xy, aggregate of indicator(s), and cluster_id
+    create_sparse_grid_df(target_crs:str=['initial','local','EPSG:4326'][0], max_column_name_length:int=10)
+        returns geopandas.GeoDataFrame with entry for grid cells that contain a point or is part of a cluster. Attributes: row, col, geometry, centroid_xy, aggregate of indicator(s), and cluster_id
+    create_clusters_df_for_column(cluster_column:str, target_crs:str=['initial','local','EPSG:4326'][0], max_column_name_length:int=10)
+        returns geopandas.GeoDataFrame with entry for grid cells that either has points inside or is part of a cluster with attributes on their Polygon, centroid, sum of indicator(s), and cluster id
+    save_full_grid(filename:str="full_grid", file_format:str=['shp','csv'][0], target_crs:str=['initial','local','EPSG:4326'][0])
+        returns and saves geopandas.GeoDataFrame with entry for each grid cell. Attributes: row, col, geometry, centroid_xy, aggregate of indicator(s), and cluster_id
+    save_sparse_grid(filename:str="sparse_grid",file_format:str=['shp','csv'][0], target_crs:str=['initial','local','EPSG:4326'][0])
+        returns and saves with entry for grid cells that contain a point or is part of a cluster. Attributes: row, col, geometry, centroid_xy, aggregate of indicator(s), and cluster_id
+    save_cell_clusters(filename:str="grid_clusters", file_format:str=['shp','csv'][0], target_crs:str=['initial','local','EPSG:4326'][0])
         save each cluster with the Polygon, centroid, sum of indicator(s), area, and cluster id
-    plot_clusters(fig=None, axs=None, filename:str='')
-        xxx
     """
     @time_func_perf
     def __init__(
@@ -109,7 +110,21 @@ class Grid(object):
         ):
 
         """
+        Returns an object of Grid class, that is used to enhance point search and bundle results and methods
+        
+        Args:
+        -------
 
+        xmin:float,
+        xmax:float,
+        ymin:float,
+        ymax:float,
+        initial_crs:str,
+        local_crs:str,
+        set_fixed_spacing:float=None,
+        r:float=750,
+        n_points:int=10000,
+        silent = False,
         """
         if set_fixed_spacing:
             spacing = set_fixed_spacing
@@ -182,12 +197,14 @@ class Grid(object):
         """returns geopandas.GeoDataFrame with entry for each grid cell with attributes on its Polygon, centroid, sum of indicator(s), and cluster id
         
         Args:
+        -------
         target_crs (str):
             crs in which data shall be projected. If 'initial' then it will be projected in same crs as input data. If 'local' a local projection will be used. Otherwise specify the target crs directly like 'EPSG:4326' (default='initial') 
         max_column_name_length (int):
             maximum length of automatically chosen target name (shapefiles allow a maximum column name length of 10)
         
         Returns:
+        -------
         df (geopandas.GeoDataFrame):
             with entry for each grid cell
         """
@@ -240,12 +257,14 @@ class Grid(object):
         returns geopandas.GeoDataFrame with entry for grid cells that either has points inside or is part of a cluster with attributes on their Polygon, centroid, sum of indicator(s), and cluster id
         
         Args:
+        -------
         target_crs (str):
             crs in which data shall be projected. If 'initial' then it will be projected in same crs as input data. If 'local' a local projection will be used. Otherwise specify the target crs directly like 'EPSG:4326' (default='initial') 
         max_column_name_length (int):
             maximum length of automatically chosen target name (shapefiles allow a maximum column name length of 10)
         
         Returns:
+        -------
         df (geopandas.GeoDataFrame):
             with entry for each grid cell
         """
@@ -276,7 +295,7 @@ class Grid(object):
                 cell_in_a_cluster = False
                 for j, clusters_for_column in js_clusters_for_columns:
                     if (row,col) in clusters_for_column.cell_to_cluster_id: 
-                        c_ids[i] = clusters_for_column.cell_to_cluster_id[(row,col)]
+                        c_ids[i,j] = clusters_for_column.cell_to_cluster_id[(row,col)]
                         cell_in_a_cluster = True
                 
                 if (row,col) in id_to_sums: 
@@ -315,7 +334,7 @@ class Grid(object):
         return df
     #
 
-    def create_clusters_df_for_column(self, cluster_column, target_crs:str=['initial','local','EPSG:4326'][0]):
+    def create_clusters_df_for_column(self, cluster_column:str, target_crs:str=['initial','local','EPSG:4326'][0]):
         """
         returns geopandas.GeoDataFrame with entry for grid cells that either has points inside or is part of a cluster with attributes on their Polygon, centroid, sum of indicator(s), and cluster id
         
