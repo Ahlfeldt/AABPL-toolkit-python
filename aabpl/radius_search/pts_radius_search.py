@@ -7,9 +7,9 @@ from aabpl.illustrations.plot_pt_vars import create_plots_for_vars
 from aabpl.testing.test_performance import time_func_perf
 
 
-################ aggreagate_point_data_to_disks_vectorized ######################################################################################
+################ aggregate_point_data_to_disks_vectorized ######################################################################################
 @time_func_perf
-def aggreagate_point_data_to_disks_vectorized(
+def aggregate_point_data_to_disks_vectorized(
     grid:dict,
     pts_source:_pd_DataFrame,
     pts_target:_pd_DataFrame=None,

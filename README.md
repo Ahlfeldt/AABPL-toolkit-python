@@ -100,7 +100,7 @@ grid.save_sparse_grid(filename=output_data_folder+'sparse_grid', file_format='cs
 # grid.save_full_grid(filename=output_gis_folder+'full_grid', file_format='shp')
 # grid.save_full_grid(filename=output_data_folder+'full_grid', file_format='csv')
 
-pts.to_csv(output_data_folder+'pts_df_w_clusters.csv')
+pts.to_csv(filename=output_data_folder+'pts_df_w_clusters.csv')
 
 # CREATE PLOTS
 grid.plot.clusters(filename=output_maps_folder+'clusters_employment_750m_995th')

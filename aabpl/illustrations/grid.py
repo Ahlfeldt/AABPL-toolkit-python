@@ -8,8 +8,8 @@ from matplotlib.pyplot import subplots as _plt_subplots, colorbar as _plt_colorb
 from matplotlib.pyplot import get_cmap as _plt_get_cmap
 from matplotlib.pyplot import close as _plt_close
 from matplotlib.patches import (Rectangle as _plt_Rectangle, Polygon as _plt_Polygon, Circle as _plt_Circle)
-from matplotlib.colors import LogNorm as _plt_LogNorm
-from aabpl.illustrations.plot_utils import truncate_colormap, map_2D_to_rgb, get_2D_rgb_colobar_kwargs
+from matplotlib.colors import LogNorm as _plt_LogNorm, Normalize as _plt_Normalize
+from aabpl.illustrations.plot_utils import truncate_colormap, map_2D_to_rgb, get_2D_rgb_colobar_kwargs, add_color_bar_ax, set_map_frame
 from aabpl.illustrations.plot_pt_vars import create_plots_for_vars
 
 class GridPlots(object):
@@ -30,7 +30,8 @@ class GridPlots(object):
         self,
         filename:str='',
         fig=None,
-        ax=None, close_plot:bool=False,
+        ax=None, close_plot:bool=False, 
+        save_kwargs={}, **plot_kwargs
     ):
         
         """
@@ -54,19 +55,18 @@ class GridPlots(object):
             max_sum = max([vals[i] for vals in id_to_sums.values()])
             X = _np_array([[id_to_sums[(row,col)][i] if ((row,col)) in id_to_sums else 0 for col in  self.grid.col_ids] for row in reversed(self.grid.row_ids)])
             ux = _np_unique(X)
-            minX = min(ux[ux!=0])
-            norm = (_plt_LogNorm(vmin=minX,vmax=X.max(),clip=False) if minX>=0 else 'linear')
-            # norm = (_plt_LogNorm(vmin=_np_spacing(0.0),vmax=X.max()) if X.min()>=0 else 'linear')
+            vmin = ux[ux!=0].min()
+            vmax = X.max()
+            norm = _plt_LogNorm(vmin=vmin,vmax=vmax,clip=False) if vmin>=0 else _plt_Normalize(vmin=vmin,vmax=vmax,clip=False)
             cmap = truncate_colormap(_plt_get_cmap('Reds'), 0.3, 1)
             cmap.set_under('#fff0')
             cmap.set_under('#cfcd')
             p = ax.imshow(X=X, interpolation='none', cmap=cmap, norm=norm, extent=extent)
-            # p = ax.imshow(X=X, interpolation='none', cmap=cmap, vmin=1e-5,vmax=max_sum, extent=extent)
-            # p = ax.pcolormesh(X, cmap=cmap, vmin=minX/2,vmax=max_sum)
-            cb = _plt_colorbar(p, ax=ax)
+            cb = _plt_colorbar(p, cax=add_color_bar_ax(fig,ax))
             ax.set_xlabel('x/lon') 
             ax.set_ylabel('y/lat') 
             ax.title.set_text('Aggregated value per cell for '+str(column))
+            set_map_frame(ax=ax,xmin=self.grid.x_steps.min(),xmax=self.grid.x_steps.max(),ymin=self.grid.y_steps.min(),ymax=self.grid.y_steps.max())
         if not fig is None:
             if filename:
                 fig.savefig(filename, dpi=300, bbox_inches="tight")
@@ -76,7 +76,7 @@ class GridPlots(object):
 
     #
 
-    def clusters(self, filename:str='', fig=None, axs=None, close_plot:bool=False):
+    def clusters(self, filename:str='', fig=None, axs=None, close_plot:bool=False, save_kwargs={}, **plot_kwargs):
         """
         Plot cell clusters (for each clusterindicator)
         """
@@ -91,9 +91,7 @@ class GridPlots(object):
             ax.set_xlabel('x/lon '+str(self.grid.local_crs)) 
             ax.set_ylabel('y/lat '+str(self.grid.local_crs)) 
             clusters = clusters_for_column.clusters
-            ax.title.set_text(str(len(clusters))+' clusters for '+str(cluster_column))
-            cell_to_cluster = clusters_for_column.cell_to_cluster_id
-            max_cluster_id = 1e10 if len(cell_to_cluster)==0 else max(list(cell_to_cluster.values()))
+            ax.title.set_text(str(len(clusters))+' cluster'+ ('s' if len(clusters)!=1 else '') +' for '+str(cluster_column))
             imshow_kwargs = {
                 'xmin':self.grid.x_steps.min(),
                 'ymin':self.grid.y_steps.min(),
@@ -103,34 +101,25 @@ class GridPlots(object):
             
             extent=[imshow_kwargs['xmin'],imshow_kwargs['xmax'],imshow_kwargs['ymax'],imshow_kwargs['ymin']]
 
-            X = _np_array([[id_to_sums[(row,col)][i] if ((row,col)) in id_to_sums else 0 for col in  self.grid.col_ids] for row in reversed(self.grid.row_ids)])
+            X = _np_array([[id_to_sums[(row,col)][i] if ((row,col)) in id_to_sums else 0 for col in  self.grid.col_ids] for row in (self.grid.row_ids)])
             X_flat = X.flat
             cmap = _plt_get_cmap('binary')
             vmin, vmax = (X.flat[X_flat != 0]).min(), X.max()
-            norm = (_plt_LogNorm(vmin=vmin,vmax=vmax,clip=False) if X.min()>=0 else 'linear')
-            # norm = (_plt_LogNorm(vmin=_np_spacing(0.0),vmax=X.max()) if X.min()>=0 else 'linear')
+            norm = _plt_LogNorm(vmin=vmin,vmax=vmax,clip=False) if vmin>=0 else _plt_Normalize(vmin=vmin,vmax=vmax,clip=False)
             cmap = truncate_colormap(cmap, 0.1, 1)
             cmap.set_under('#fff0')
             
             p = ax.imshow(X=X, interpolation='none', cmap=cmap, norm=norm, extent=extent)
-            # p = ax.pcolormesh(X, cmap=cmap)
-            # p = ax.imshow(X=X, interpolation='none', cmap=new_cmap, vmin=(X.flat[X_flat != 0]).min(),vmax=X.max(), norm=norm, extent=extent)
-            # p = ax.imshow(X=X, interpolation='none', cmap=cmap, vmin=X.min()-X.max(),vmax=X.max(), extent=extent)
-            cb = _plt_colorbar(p, ax=ax)
-                
-            # cmap = _plt_get_cmap('viridis')
-            # cmap.set_under(alpha=0)
-            # X = _np_array([[cell_to_cluster[(row,col)] if (row,col) in cell_to_cluster else 0 for col in  self.grid.col_ids] for row in self.grid.row_ids])
-            # p = ax.imshow(X=X, interpolation='none', cmap=cmap, vmin=1e-5,vmax=max_cluster_id, extent=extent)
-            # X = _np_array([[(255,0,0,0.1) if (row,col) in cell_to_cluster else (0,0,0,0) for col in  self.grid.col_ids] for row in self.grid.row_ids])
-            # p = ax.imshow(X=X, interpolation='none', extent=extent)
-            # p = ax.pcolormesh(X, cmap=cmap, edgecolor="black", linewidth=1/max([len(self.grid.col_ids), len(self.grid.row_ids)])/1.35)
-            # TODO zoom in
+            cb = _plt_colorbar(p, cax=add_color_bar_ax(fig,ax))
             for cluster in clusters:
                 geoms = [cluster.geometry] if hasattr(cluster.geometry, 'exterior') else cluster.geometry.geoms
                 for geom in geoms:
                     ax.add_patch(_plt_Polygon(xy=geom.exterior.coords, hatch='////', facecolor='#f000', edgecolor='#f00'))
                 ax.annotate(cluster.id, xy=cluster.centroid, fontsize=15, weight='bold', color='red')
+            
+            set_map_frame(ax=ax,xmin=self.grid.x_steps.min(),xmax=self.grid.x_steps.max(),ymin=self.grid.y_steps.min(),ymax=self.grid.y_steps.max())
+            
+            
         if not fig is None:
             if filename:
                 fig.savefig(filename, dpi=300, bbox_inches="tight")
@@ -154,7 +143,7 @@ class GridPlots(object):
         )
     #
 
-    def grid_ids(self, fig=None, ax=None, filename:str='', close_plot:bool=False,):
+    def grid_ids(self, fig=None, ax=None, filename:str='', close_plot:bool=False, save_kwargs={}, **plot_kwargs):
         """
         Illustrate row and column ids of self.grid cells.
         """
@@ -196,11 +185,14 @@ class GridPlots(object):
         ax.flat[1].imshow(X=X, interpolation='none', extent=extent)
         # ax.flat[1].set_aspect(2)
         colorbar_kwargs = get_2D_rgb_colobar_kwargs(**imshow_kwargs)
-        cb = _plt_colorbar(**colorbar_kwargs[2], ax=ax.flat[1])
+        # cb = _plt_colorbar(**colorbar_kwargs[2], ax=ax.flat[1])
+        cb = _plt_colorbar(**colorbar_kwargs[2], cax=add_color_bar_ax(fig,ax.flat[1]))
         cb.ax.set_xlabel("diagonal")
-        cb = _plt_colorbar(**colorbar_kwargs[0], ax=ax.flat[1])
+        # cb = _plt_colorbar(**colorbar_kwargs[0], ax=ax.flat[1])
+        cb = _plt_colorbar(**colorbar_kwargs[0], cax=add_color_bar_ax(fig,ax.flat[1]))
         cb.ax.set_xlabel("col nr")
         cb = _plt_colorbar(**colorbar_kwargs[1], ax=ax.flat[1])
+        cb = _plt_colorbar(**colorbar_kwargs[1], cax=add_color_bar_ax(fig,ax.flat[1]))
         cb.ax.set_xlabel("row nr") 
         ax.flat[1].set_xlabel('row nr') 
         ax.flat[1].set_ylabel('col nr') 
@@ -209,7 +201,7 @@ class GridPlots(object):
         X = _np_array([[len(self.grid.id_to_pt_ids[(row_id, col_id)]) if (row_id, col_id) in self.grid.id_to_pt_ids else 0 for col_id in self.grid.col_ids] for row_id in reversed(self.grid.row_ids)])
         # p = ax.flat[2].pcolormesh(X, cmap='Reds')
         p = ax.flat[2].imshow(X=X, interpolation='none', extent=extent, cmap='Reds')
-        _plt_colorbar(p)
+        _plt_colorbar(p, cax=add_color_bar_ax(fig,ax.flat[2]))
         ax.flat[2].set_xlabel('row nr') 
         ax.flat[2].set_ylabel('col nr') 
         if not fig is None:

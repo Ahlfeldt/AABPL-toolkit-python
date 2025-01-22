@@ -587,6 +587,7 @@ def detect_cluster_pts(
     #
 
     def plot_rand_dist(
+            filename:str="",
             pts=pts,
             x=x,
             y=y,
@@ -595,11 +596,12 @@ def detect_cluster_pts(
             cluster_threshold_values=cluster_threshold_values,
             k_th_percentile=k_th_percentile,
             r=r,
-            filename:str="",
             **plot_kwargs
             
     ):
         create_distribution_plot(
+            filename=filename,
+            plot_kwargs=plot_kwargs,
             pts=pts,
             x=x,
             y=y,
@@ -608,8 +610,6 @@ def detect_cluster_pts(
             cluster_threshold_values=cluster_threshold_values,
             k_th_percentile=k_th_percentile,
             r=r,
-            filename=filename,
-            plot_kwargs=plot_kwargs
             )
     grid.plot.rand_dist = plot_rand_dist
     

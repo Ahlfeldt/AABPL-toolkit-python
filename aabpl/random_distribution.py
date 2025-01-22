@@ -148,7 +148,7 @@ def get_distribution_for_random_points(
     k_th_percentile: in [0,100] k-th percentile 
 
     1. draw n_random_points with draw_random_points_within_valid_area
-    2. aggreagate_point_data_to_disks_vectorized
+    2. aggregate_point_data_to_disks_vectorized
     TODO Check if how cluster value 
     """
     if type(k_th_percentile) != list:

@@ -63,10 +63,10 @@ df_sparse_grid = grid.save_sparse_grid(filename=output_data_folder+'sparse_grid'
 pts.to_csv(output_data_folder+'pts_df_w_clusters.csv')
 
 # CREATE PLOTS
-p = grid.plot.clusters(output_maps_folder+'clusters_employment_750m_995th')
-p = grid.plot.vars(filename=output_maps_folder+'employment_vars')
-p = grid.plot.cluster_pts(filename=output_maps_folder+'employment_cluster_pts')
-p = grid.plot.rand_dist(filename=output_maps_folder+'rand_dist_employment')
+fig = grid.plot.clusters(output_maps_folder+'clusters_employment_750m_995th')
+fig = grid.plot.vars(filename=output_maps_folder+'employment_vars')
+fig = grid.plot.cluster_pts(filename=output_maps_folder+'employment_cluster_pts')
+fig = grid.plot.rand_dist(filename=output_maps_folder+'rand_dist_employment')
 
 print("Successfully executed Example.py")
 

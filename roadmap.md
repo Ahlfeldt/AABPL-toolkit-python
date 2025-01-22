@@ -56,7 +56,7 @@ BUG HUNTING
 - think if the pattern can applied on vector of points to repplace ppart of the loop and make filter out empty grid ells easier
 - maybe cell intersection function takes to much space 
 
-[ ] aggreagate_point_data_to_disks_vectorized removed vectorized from name
+[ ] aggregate_point_data_to_disks_vectorized removed vectorized from name
 [ ] shorten long functions
 [ ] add silent option to skip prints
 [ ] add set random seed

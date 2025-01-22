@@ -5,7 +5,7 @@ from aabpl.utils.distances_to_cell import get_cells_relevant_for_disk_by_type
 from .two_dimensional_weak_ordering_class import gen_weak_order_rel_to_convex_set
 from .pts_to_cells import assign_points_to_cells, aggregate_point_data_to_cells
 from .pts_to_offset_regions import assign_points_to_mirco_regions
-from .pts_radius_search import aggreagate_point_data_to_disks_vectorized
+from .pts_radius_search import aggregate_point_data_to_disks_vectorized
 from aabpl.testing.test_performance import time_func_perf
 
 
@@ -372,7 +372,7 @@ class DiskSearch(object):
             silent:bool=False,
     ):
         
-        return aggreagate_point_data_to_disks_vectorized(
+        return aggregate_point_data_to_disks_vectorized(
             grid=self.grid,
             pts_source=self.source.pts,
             pts_target=self.target.pts,
