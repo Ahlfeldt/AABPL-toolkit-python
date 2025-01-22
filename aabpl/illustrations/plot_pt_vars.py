@@ -1,6 +1,7 @@
 from matplotlib.pyplot import (subplots as _plt_subplots)
 from matplotlib.colors import LogNorm as _plt_LogNorm
 from matplotlib.pyplot import get_cmap as _plt_get_cmap
+from matplotlib.pyplot import close as _plt_close
 from numpy import array as _np_array
 from aabpl.illustrations.plot_utils import truncate_colormap
 
@@ -9,7 +10,8 @@ def create_plots_for_vars(
         colnames:_np_array,
         filename:str="",
         save_kwargs:dict={},
-        plot_kwargs:dict={},
+        plot_kwargs:dict={}, 
+        close_plot:bool=False,
 ):
     """
     TODO Descripiton
@@ -65,7 +67,11 @@ def create_plots_for_vars(
         ax.set_xlim([xmin-pad_x,xmax+pad_x])
         ax.set_ylim([ymin-pad_y,ymax+pad_y])
     
-    if filename:
-        fig.savefig(filename, **save_kwargs)
+    if not fig is None:
+        if filename:
+            fig.savefig(filename, **save_kwargs)
+        if close_plot:
+            _plt_close(fig)
+    return fig
     #
 #

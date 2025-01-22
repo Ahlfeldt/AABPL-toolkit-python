@@ -78,7 +78,7 @@ def assign_points_to_cells(
 def aggregate_point_data_to_cells(
     grid:dict,
     pts:_pd_DataFrame,
-    columns:list=['employment'],
+    c:list=['employment'],
     row_name:str='id_y',
     col_name:str='id_x',
     silent = False,
@@ -87,7 +87,7 @@ def aggregate_point_data_to_cells(
     TODO
     """
     # initialize dicts for later lookups )
-    sums_zero = _np_zeros(len(columns),dtype=int)
+    sums_zero = _np_zeros(len(c),dtype=int)
     cells_containing_pts = arr_to_tpls(_np_unique(pts[[row_name, col_name]],axis=0),int)
     grid.id_to_pt_ids = {pt_row_col:_np_array([],dtype=int) for pt_row_col in cells_containing_pts}
     grid.id_to_sums = {pt_row_col:sums_zero for pt_row_col in cells_containing_pts}
@@ -98,7 +98,7 @@ def aggregate_point_data_to_cells(
     for pt_id, pt_row_col,pt_vals in zip(
         pts.index, 
         arr_to_tpls(pts[[row_name, col_name]].values,int), 
-        pts[columns].values
+        pts[c].values
         ):
         grid.id_to_pt_ids[pt_row_col] = _np_append(grid.id_to_pt_ids[pt_row_col], pt_id)
         grid.id_to_sums[pt_row_col] = grid.id_to_sums[pt_row_col]+pt_vals
@@ -112,7 +112,7 @@ def aggregate_point_data_to_cells(
             str(len(pts.index) - _np_logical_or(pts[col_name]==-1, pts[row_name]==-1).sum())+
             '/'+str(len(pts.index))
         )
-        print('sum in grid:', _np_array([s for s in grid.id_to_sums.values()]).sum(axis=0), 'sum in pts', pts[columns].values.sum(axis=0))
+        print('sum in grid:', _np_array([s for s in grid.id_to_sums.values()]).sum(axis=0), 'sum in pts', pts[c].values.sum(axis=0))
     #
     return 
 #

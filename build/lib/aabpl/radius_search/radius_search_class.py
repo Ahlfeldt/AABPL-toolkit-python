@@ -34,7 +34,7 @@ class DiskSearchSource(DiskSearchObject):
         self,
         grid,
         pts:_pd_DataFrame,
-        columns:list=[],
+        c:list=[],
         y:str='lat',
         x:str='lon',
         row_name:str='id_y',
@@ -49,7 +49,7 @@ class DiskSearchSource(DiskSearchObject):
         self.col_name = col_name
         self.cell_region_name = next(('cell_reg'+str(i) for i in (['']+list(range(len(pts.columns)))) if not 'cell_reg'+str(i) in pts.columns)) 
         self.sum_suffix = sum_suffix
-        self.aggregate_columns = [str(column)+sum_suffix for column in columns]
+        self.aggregate_columns = [str(column)+sum_suffix for column in c]
 
     #next(('helper_col'+i for i in (['']+list(range(len(pts_target.columns))))))
 
@@ -88,7 +88,7 @@ class DiskSearchTarget(DiskSearchObject):
         self,
         grid,
         pts:_pd_DataFrame,
-        columns:list=[],
+        c:list=[],
         y:str='lat',
         x:str='lon',
         row_name:str='id_y',
@@ -96,7 +96,7 @@ class DiskSearchTarget(DiskSearchObject):
     ):
         self.grid = grid 
         self.pts = pts
-        self.columns = columns
+        self.c = c
         self.x = x
         self.y = y
         self.row_name = row_name
@@ -107,7 +107,7 @@ class DiskSearchTarget(DiskSearchObject):
             pt_id:xy for (pt_id,xy) in zip(pts.index, pts[[x,y]].values)
         }
         self.pt_id_to_vals = {
-            pt_id:pt_vals for (pt_id,pt_vals) in zip(pts.index, pts[columns].values)
+            pt_id:pt_vals for (pt_id,pt_vals) in zip(pts.index, pts[c].values)
         }
     #
     
@@ -118,7 +118,7 @@ class DiskSearchTarget(DiskSearchObject):
         return aggregate_point_data_to_cells(
             grid=self.grid,
             pts=self.pts,
-            columns=self.columns,
+            c=self.c,
             row_name=self.row_name,
             col_name=self.col_name,
             silent=silent,
@@ -263,7 +263,7 @@ class DiskSearch(object):
     def set_source(
         self,
         pts:_pd_DataFrame,
-        columns:list=[],
+        c:list=[],
         y:str='lat',
         x:str='lon',
         row_name:str='id_y',
@@ -287,7 +287,7 @@ class DiskSearch(object):
         self.source = DiskSearchSource(
             grid=self.grid,
             pts=pts,
-            columns=columns,
+            c=c,
             y=y,
             x=x,
             row_name=row_name,
@@ -324,7 +324,7 @@ class DiskSearch(object):
         self,
 
         pts:_pd_DataFrame,
-        columns:list=['employment'],
+        c:list=['employment'],
         y:str='lat',
         x:str='lon',
         row_name:str='id_y',
@@ -342,7 +342,7 @@ class DiskSearch(object):
         self.target = DiskSearchTarget(
             grid=self.grid,
             pts=pts,
-            columns=columns,
+            c=c,
             y=y,
             x=x,
             row_name=row_name,
@@ -377,7 +377,7 @@ class DiskSearch(object):
             pts_source=self.source.pts,
             pts_target=self.target.pts,
             r=self.r,
-            columns=self.target.columns,
+            c=self.target.c,
             y=self.source.y,
             x=self.source.x,
             row_name=self.source.row_name,

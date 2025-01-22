@@ -7,7 +7,64 @@ from pandas import DataFrame as _pd_DataFrame
 from shapely.geometry import Polygon, Point
 from shapely.ops import unary_union
 from aabpl.utils.general import find_column_name, arr_to_tpls
+from aabpl.utils.distances_to_cell import min_possible_dist_cells_to_cell
 from geopandas import GeoDataFrame as _gpd_GeoDataFrame
+
+def merge_condition_queen_contingency(max_steps:int=1)->bool:
+    def check_if_merge(cluster_a, cluster_b, max_steps=max_steps):
+        cluster_small, cluster_large = (cluster_a, cluster_b) if cluster_a.n_cells < cluster_b.n_cells else (cluster_b, cluster_a)
+        for row_a, col_a in cluster_small.cells:
+            for row_offset in range(-max_steps,max_steps):
+                for col_offset in range(-max_steps,max_steps):
+                    if (row_a+row_offset, col_a+col_offset) in cluster_large.cells:
+                        return True
+        return False
+    return check_if_merge
+
+def merge_condition_rook_contingency(max_steps:int=1)->bool:
+    def check_if_merge(cluster_a, cluster_b, max_steps=max_steps):
+        cluster_small, cluster_large = (cluster_a, cluster_b) if cluster_a.n_cells < cluster_b.n_cells else (cluster_b, cluster_a)
+        for row_a, col_a in cluster_small.cells:
+            for row_offset in range(-max_steps, max_steps):
+                if row_offset == 0: continue
+                for col_offset in range(-max_steps, max_steps):
+                    if col_offset == 0: continue
+                    if (row_a+row_offset, col_a+col_offset) in cluster_large.cells:
+                        return True
+        return False
+    return check_if_merge
+
+def merge_condition_centroid_distance(max_centroid_dist:float)->bool:
+    def check_if_merge(cluster_a, cluster_b, max_centroid_dist=max_centroid_dist):
+        if ((cluster_a.centroid[0]-cluster_b.centroid[0])**2+(cluster_a.centroid[1]-cluster_b.centroid[1])**2)**.5 <= max_centroid_dist:
+            return True
+        return False
+    return check_if_merge
+
+def merge_condition_border_distance(max_border_dist:float, spacing:float)->bool:
+    def check_if_merge(cluster_a, cluster_b, spacing=spacing):
+        # distance = geopy_distance(cluster_a.centroid, cluster_b.centroid).meters
+        cluster_small, cluster_large = (cluster_a, cluster_b) if cluster_a.n_cells < cluster_b.n_cells else (cluster_b, cluster_a)
+        cluster_small_cells = _np_array(cluster_small.cells)
+        cluster_large_cells = _np_array(cluster_large.cells)
+        for cell in cluster_small_cells:
+            if min(min_possible_dist_cells_to_cell(cluster_large_cells, cell)) * spacing <= max_border_dist:
+                return True
+        return False
+    return check_if_merge
+
+def merge_condition_distance_based(max_centroid_dist:float, max_border_dist:float, spacing:float)->bool:
+    def check_if_merge(cluster_a, cluster_b, max_centroid_dist=max_centroid_dist, max_border_dist=max_border_dist, spacing=spacing):
+        # distance = geopy_distance(cluster_a.centroid, cluster_b.centroid).meters
+        if ((cluster_a.centroid[0]-cluster_b.centroid[0])**2+(cluster_a.centroid[1]-cluster_b.centroid[1])**2)**.5 <= max_centroid_dist:
+            cluster_small, cluster_large = (cluster_a, cluster_b) if cluster_a.n_cells < cluster_b.n_cells else (cluster_b, cluster_a)
+            cluster_small_cells = _np_array(cluster_small.cells)
+            cluster_large_cells = _np_array(cluster_large.cells)
+            for cell in cluster_small_cells:
+                if min(min_possible_dist_cells_to_cell(cluster_large_cells, cell)) * spacing <= max_border_dist:
+                    return True
+        return False
+    return check_if_merge
 
 class Clustering(object):
     """ 
@@ -27,16 +84,49 @@ class Clustering(object):
     def create_clusters(
         self,
         pts:_pd_DataFrame,
-        columns:list=['employment'],
-        distance_thresholds=2500,
+        c:list=['employment'],
+        queen_contingency:int=1,
+        rook_contingency:int=0,
+        centroid_dist_threshold:float=None,
+        border_dist_threshold:float=None,
+        min_cluster_share_after_contingency:float=0.05,
+        min_cluster_share_after_centroid_dist:float=0.00,
+        min_cluster_share_after_convex:float=0.00,
         make_convex:bool=True,
         row_name:str='id_y',
         col_name:str='id_x',
         cluster_suffix:str='_750m',
         plot_cluster_cells:dict=None,
     ):
-        distance_thresholds = distance_thresholds if type(distance_thresholds) in [list, _np_array] else [distance_thresholds for n in columns]
-        for i, (column, distance_threshold) in enumerate(zip(columns, distance_thresholds)):
+        """
+        Args:
+        -------
+        pts (pandas.DataFrame):
+            DataFrame of points for which a search for other points within the specified radius shall be performed
+        c (str or list):
+            column(s) in DataFrame for which data within search radius shall be aggregated. If None provided it will simply count the points within the radius. 
+        queen_contingency (int):
+            if contigent (vertical, horizontal, diagonal) cells that are also classified as clustered shall be part of the same cluster. If set to a value>=2 then it also adds non-contingent cells that are that many steps away to the same cluster. (default=1) 
+        rook_contingency (int):
+            if contigent (vertical, horizontal, diagonal) cells that are also classified as clustered shall be part of the same cluster. Ignored if queen_contingency is set to a higher value. If set to a value>=2 then it also adds non-contingent cells that are that many steps away to the same cluster. (default=1) 
+        centroid_dist_threshold (float):
+            maximum distance between centroids of clusters to be merged into a single cluster
+        border_dist_threshold (float):
+            maximum distance between borders of clusters to be merged into a single cluster
+        min_cluster_share_after_contingency (float):
+            minimum share of cluster of total to not be dropped after cells are merged to clusters based on contingency
+        min_cluster_share_after_centroid_dist (float):
+            minimum share of cluster of total to not be dropped after clusters are merged based on centroid
+        min_cluster_share_after_convex (float):
+            minimum share of cluster of total to not be dropped after clusters are made convex by adding cells within its convex hull
+        make_convex (bool):
+            Whether all cells within the convex hull of a cluster shall be added to it (default=True)
+        """
+        # TODO raise error when not columns contains col for which no radius search has been performed
+        centroid_dist_threshold = centroid_dist_threshold if type(centroid_dist_threshold) in [list, _np_array] else [centroid_dist_threshold for n in c]
+        border_dist_threshold = border_dist_threshold if type(border_dist_threshold) in [list, _np_array] else [border_dist_threshold for n in c]
+        for i, (column, max_centroid_dist, max_border_dist) in enumerate(zip(c, centroid_dist_threshold, border_dist_threshold)):
+            
             cells_with_cluster = (pts[[row_name, col_name]][pts[column + cluster_suffix]]).values
             clusters_for_column = Clustering.ClustersForColumn(
                 self.grid,
@@ -45,10 +135,25 @@ class Clustering(object):
                 column_id=i,
             )
             self.by_column[column] = clusters_for_column
-            clusters_for_column.merge_clusters(distance_threshold=distance_threshold)
+            largest_cluster = max([0]+[cluster.aggregate for cluster in clusters_for_column.clusters])
+            if queen_contingency: 
+                clusters_for_column.merge_clusters(check_if_merge=merge_condition_queen_contingency(queen_contingency))
+            if rook_contingency > queen_contingency: 
+                clusters_for_column.merge_clusters(check_if_merge=merge_condition_rook_contingency(rook_contingency))
+            if min_cluster_share_after_contingency > 0:
+                clusters_for_column.drop_small_cluster(largest_cluster * min_cluster_share_after_contingency)
+            if not centroid_dist_threshold is None and not border_dist_threshold is None:
+                clusters_for_column.merge_clusters(check_if_merge=merge_condition_distance_based(max_centroid_dist, max_border_dist, self.grid.spacing))
+            elif not centroid_dist_threshold is None:
+                clusters_for_column.merge_clusters(check_if_merge=merge_condition_centroid_distance(centroid_dist_threshold))
+            elif not border_dist_threshold is None:
+                clusters_for_column.merge_clusters(check_if_merge=merge_condition_border_distance(max_border_dist, self.grid.spacing))
+            if min_cluster_share_after_centroid_dist > 0:
+                clusters_for_column.drop_small_cluster(largest_cluster * min_cluster_share_after_centroid_dist)
             if make_convex:
                 clusters_for_column.make_clusters_convex()
-        
+            if min_cluster_share_after_convex > 0:
+                clusters_for_column.drop_small_cluster(largest_cluster * min_cluster_share_after_convex)
             clusters_for_column.match_cell_to_cluster_id()
             clusters_for_column.add_geom_to_clusters()
             clusters_for_column.add_area_to_clusters()
@@ -59,83 +164,83 @@ class Clustering(object):
             self.plot_clusters()
 
     
-    # def make_cluster_orthogonally_convex(
-    #         self
-    #     ):
-    #     """
-    #     ensure all cells between (=orthogononally, not diagonally) two cluster cells are also part of the cluster
-    #     exception: a cell is part of another cluster already
-    #     """
-    #     id_to_sums = self.grid.id_to_sums
-    #     row_col_to_centroid = self.grid.row_col_to_centroid
-    #     for (cluster_column, clusters) in self.by_column.items():
-    #         all_clustered_cells = set()
-    #         for cluster in clusters['prime_locs']:
-    #             all_clustered_cells.update(cluster['cells'])
+    def make_cluster_orthogonally_convex(
+            self
+        ):
+        """
+        ensure all cells between (=orthogononally, not diagonally) two cluster cells are also part of the cluster
+        exception: a cell is part of another cluster already
+        """
+        id_to_sums = self.grid.id_to_sums
+        row_col_to_centroid = self.grid.row_col_to_centroid
+        for (cluster_column, clusters) in self.by_column.items():
+            all_clustered_cells = set()
+            for cluster in clusters['prime_locs']:
+                all_clustered_cells.update(cluster['cells'])
             
-    #         for cluster in clusters['prime_locs']:
-    #             cells_from_other_clusters = all_clustered_cells.difference(cluster['cells'])
-    #             n_last_it = -1
-    #             while len(cluster['cells']) != n_last_it:
-    #                 cells = cluster['cells']
-    #                 cells_in_convex_cluster = set(cells)
-    #                 row_ids = sorted(set([row for row,col in cells]))
-    #                 col_ids = sorted(set([col for row,col in cells]))
-    #                 row_range = range(min(row_ids), max(row_ids)+1)
-    #                 col_range = range(min(col_ids), max(col_ids)+1)
-    #                 for r in row_range:
-    #                     cells_to_left = [col for row, col in cells if row<r]
-    #                     cells_to_right = [col for row, col in cells if row>r]
-    #                     cells_same_col = [col for row, col in cells if row==r]
-    #                     max_left, min_left, max_right, min_right, max_same, min_same = None, None, None, None, None, None
-    #                     if len(cells_to_left) > 0:
-    #                         min_left = min(cells_to_left)
-    #                         max_left = max(cells_to_left)
-    #                     if len(cells_to_right) > 0:
-    #                         min_right = min(cells_to_right)
-    #                         max_right = max(cells_to_right)
-    #                     if len(cells_same_col) > 0:
-    #                         min_same = min(cells_same_col)
-    #                         max_same = max(cells_same_col)
-    #                     max_other = max_right if max_left is None else max_left if max_right is None else max([min_left, min_right]) 
-    #                     min_other = min_right if min_left is None else min_left if min_right is None else min([min_left, min_right])
-    #                     max_all = max_other if max_same is None else max_same if max_other is None else min([min_same, min_other])
-    #                     min_all = min_other if min_same is None else min_same if min_other is None else max([min_same, min_other])
-    #                     cells_in_convex_cluster.update([(r,c) for c in range(min_all, max_all+1)])
-    #                 #
+            for cluster in clusters['prime_locs']:
+                cells_from_other_clusters = all_clustered_cells.difference(cluster['cells'])
+                n_last_it = -1
+                while len(cluster['cells']) != n_last_it:
+                    cells = cluster['cells']
+                    cells_in_convex_cluster = set(cells)
+                    row_ids = sorted(set([row for row,col in cells]))
+                    col_ids = sorted(set([col for row,col in cells]))
+                    row_range = range(min(row_ids), max(row_ids)+1)
+                    col_range = range(min(col_ids), max(col_ids)+1)
+                    for r in row_range:
+                        cells_to_left = [col for row, col in cells if row<r]
+                        cells_to_right = [col for row, col in cells if row>r]
+                        cells_same_col = [col for row, col in cells if row==r]
+                        max_left, min_left, max_right, min_right, max_same, min_same = None, None, None, None, None, None
+                        if len(cells_to_left) > 0:
+                            min_left = min(cells_to_left)
+                            max_left = max(cells_to_left)
+                        if len(cells_to_right) > 0:
+                            min_right = min(cells_to_right)
+                            max_right = max(cells_to_right)
+                        if len(cells_same_col) > 0:
+                            min_same = min(cells_same_col)
+                            max_same = max(cells_same_col)
+                        max_other = max_right if max_left is None else max_left if max_right is None else max([min_left, min_right]) 
+                        min_other = min_right if min_left is None else min_left if min_right is None else min([min_left, min_right])
+                        max_all = max_other if max_same is None else max_same if max_other is None else min([min_same, min_other])
+                        min_all = min_other if min_same is None else min_same if min_other is None else max([min_same, min_other])
+                        cells_in_convex_cluster.update([(r,c) for c in range(min_all, max_all+1)])
+                    #
 
-    #                 for c in col_range:
-    #                     cells_to_left = [row for row, col in cells if col<c]
-    #                     cells_to_right = [row for row, col in cells if col>c]
-    #                     cells_same_col = [row for row, col in cells if col==c]
-    #                     max_left, min_left, max_right, min_right, max_same, min_same = None, None, None, None, None, None
-    #                     if len(cells_to_left) > 0:
-    #                         min_left = min(cells_to_left)
-    #                         max_left = max(cells_to_left)
-    #                     if len(cells_to_right) > 0:
-    #                         min_right = min(cells_to_right)
-    #                         max_right = max(cells_to_right)
-    #                     if len(cells_same_col) > 0:
-    #                         min_same = min(cells_same_col)
-    #                         max_same = max(cells_same_col)
-    #                     # max_other = max_right if max_left is None else max_left if max_right is None or max_left < max_right else max_right 
-    #                     # min_other = min_right if min_left is None else min_left if min_right is None or min_left > min_right else min_right
-    #                     min_other = None if max_left is None or max_right is None else max([min_left, min_right])
-    #                     max_other = None if max_left is None or max_right is None else min([min_left, min_right])
-    #                     min_all = min_other if min_same is None else min_same if min_other is None else min([min_same, min_other])
-    #                     max_all = max_other if max_same is None else max_same if max_other is None else max([min_same, min_other])
-    #                     cells_in_convex_cluster.update([(r,c) for r in range(min_all, max_all+1)])
-    #                 #
+                    for c in col_range:
+                        cells_to_left = [row for row, col in cells if col<c]
+                        cells_to_right = [row for row, col in cells if col>c]
+                        cells_same_col = [row for row, col in cells if col==c]
+                        max_left, min_left, max_right, min_right, max_same, min_same = None, None, None, None, None, None
+                        if len(cells_to_left) > 0:
+                            min_left = min(cells_to_left)
+                            max_left = max(cells_to_left)
+                        if len(cells_to_right) > 0:
+                            min_right = min(cells_to_right)
+                            max_right = max(cells_to_right)
+                        if len(cells_same_col) > 0:
+                            min_same = min(cells_same_col)
+                            max_same = max(cells_same_col)
+                        # max_other = max_right if max_left is None else max_left if max_right is None or max_left < max_right else max_right 
+                        # min_other = min_right if min_left is None else min_left if min_right is None or min_left > min_right else min_right
+                        min_other = None if max_left is None or max_right is None else max([min_left, min_right])
+                        max_other = None if max_left is None or max_right is None else min([min_left, min_right])
+                        min_all = min_other if min_same is None else min_same if min_other is None else min([min_same, min_other])
+                        max_all = max_other if max_same is None else max_same if max_other is None else max([min_same, min_other])
+                        cells_in_convex_cluster.update([(r,c) for r in range(min_all, max_all+1)])
+                    #
 
-    #                 cells_in_convex_cluster.difference_update(cells_from_other_clusters)
-    #                 cluster['cells'] = sorted(cells_in_convex_cluster)
-    #                 n_last_it = len(cluster['cells'])
+                    cells_in_convex_cluster.difference_update(cells_from_other_clusters)
+                    cluster['cells'] = sorted(cells_in_convex_cluster)
+                    n_last_it = len(cluster['cells'])
                 
-    #             cluster['aggregate_vals'] = sum([id_to_sums[cell] for cell in cells_in_convex_cluster if cell in id_to_sums])
-    #             cluster['centroid'] = _np_array([row_col_to_centroid[cell] for cell in cells_in_convex_cluster]).sum(axis=0)/len(cells_in_convex_cluster)
-    #         #
-    #     #
-    # #
+                cluster['aggregate_vals'] = sum([id_to_sums[cell] for cell in cells_in_convex_cluster if cell in id_to_sums])
+                cluster['centroid'] = _np_array([row_col_to_centroid[cell] for cell in cells_in_convex_cluster]).sum(axis=0)/len(cells_in_convex_cluster)
+            #
+        #
+    #
     class Cluster(object):
         """ 
         Methods:
@@ -229,7 +334,7 @@ class Clustering(object):
             self.grid = grid
             self.column = column
             self.column_id = column_id
-            self.clustered_cells = sorted(set(arr_to_tpls(clustered_cells, int)))
+            self.clustered_cells = set(arr_to_tpls(clustered_cells, int))
             id_to_sums = self.grid.id_to_sums    
             row_col_to_centroid = self.grid.row_col_to_centroid
 
@@ -242,28 +347,26 @@ class Clustering(object):
             self.by_id = {cluster.id: cluster for cluster in self.clusters}
         #
         
+        
+        
         def merge_clusters(
                 self,
-                distance_threshold:float
+                check_if_merge,
+                # distance_threshold:float
             ):
             
-            def find_next_merge(clusters, distance_threshold, annexed_cluster_ids):
+            def find_next_merge(clusters, check_if_merge, annexed_cluster_ids:set):
                 for i, current_cluster in enumerate(clusters):
                     current_cluster_id = current_cluster.id
                     if current_cluster_id in annexed_cluster_ids:
                         continue
-                    # Check if current cluster has any remaining cells
-                    current_centroid = current_cluster.centroid
                     for neighbor_cluster in clusters[i+1:]:
                         neighbor_cluster_id = neighbor_cluster.id
                         if neighbor_cluster_id == current_cluster_id or neighbor_cluster_id in annexed_cluster_ids:
                             continue  # Skip unclustered cells and self-comparison
-                        
-                        # Compute distance between centroids
-                        # distance = geopy_distance(current_centroid, neighbor_cluster.centroid).meters
-                        distance = ((current_centroid[0]-neighbor_cluster.centroid[0])**2+(current_centroid[1]-neighbor_cluster.centroid[1])**2)**.5
-
-                        if distance < distance_threshold:
+                        # distance = ((current_centroid[0]-neighbor_cluster.centroid[0])**2+(current_centroid[1]-neighbor_cluster.centroid[1])**2)**.5
+                        # if distance < distance_threshold:
+                        if check_if_merge(current_cluster, neighbor_cluster):
                             current_cluster.annex_cluster(neighbor_cluster)
                             return neighbor_cluster_id
                         #
@@ -273,18 +376,24 @@ class Clustering(object):
             while True:
                 self.clusters = [c for c in self.clusters if not c.id in annexed_cluster_ids]
                 self.clusters.sort(key=lambda c: (-c.aggregate, -c.n_cells))
-                neighbor_cluster_id = find_next_merge(self.clusters, distance_threshold, annexed_cluster_ids)
+                neighbor_cluster_id = find_next_merge(self.clusters, check_if_merge, annexed_cluster_ids)
                 if neighbor_cluster_id is None:
                     break
                 else:
                     annexed_cluster_ids.add(neighbor_cluster_id)
                 #
             # assign ids starting at 1 from biggest (according to sum value) to largest cluster 
-            clusters = [v for k,v in self.by_id.items() if not k in annexed_cluster_ids]
-            clusters.sort(key=lambda c: -c.aggregate)
-            for i, cluster in enumerate(clusters):
+            self.clusters.sort(key=lambda c: -c.aggregate)
+            for i, cluster in enumerate(self.clusters):
                 cluster.change_id(i+1)
-            self.clusters = clusters
+        #
+        
+        def drop_small_cluster(self, min_value):
+            self.clusters = [cluster for cluster in self.clusters if cluster.aggregate >= min_value]
+            clustered_cells = set()
+            for cluster in self.clusters:
+                clustered_cells.update(cluster.cells)
+            self.clustered_cells = clustered_cells
         #
 
         def make_clusters_convex(

@@ -147,7 +147,7 @@ class Grid(object):
         n_ysteps = -int((total_bounds.ymin-total_bounds.ymax)/spacing)+1 # round up 
         self.x_steps = x_steps = _np_linspace(total_bounds.xmin, total_bounds.xmax, n_xsteps)
         self.y_steps = y_steps = _np_linspace(total_bounds.ymin, total_bounds.ymax, n_ysteps)
-        self.row_ids = row_ids = _np_arange(n_ysteps-1)
+        self.row_ids = row_ids = _np_arange(n_ysteps-1)[::-1]
         self.col_ids = col_ids =  _np_arange(n_xsteps-1)
         self.ids = tuple(flatten_list([[(row_id, col_id) for col_id in col_ids] for row_id in row_ids]))
         self.n_cells = len(self.ids)

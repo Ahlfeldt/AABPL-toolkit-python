@@ -30,14 +30,16 @@ grid = detect_cluster_cells(
     pts=pts,
     crs=crs_of_your_csv,
     r=750,
-    columns=['employment'],
+    c='employment',
     exclude_pt_itself=True,
-    distance_thresholds=2500,
-    k_th_percentiles=[99.5],
-    n_random_points=int(1e5),
+    queen_contingency=1,
+    centroid_dist_threshold=2500,
+    border_dist_threshold=1000,
+    min_cluster_share_after_contingency=0.05,
+    k_th_percentile=99.5,
+    n_random_points=100000,
     make_convex=True,
     random_seed=0,
-    silent = True,
 )
 
 ## Save DataFrames with radius sums and clusters
@@ -47,24 +49,24 @@ grid = detect_cluster_cells(
 
 # save files as needed
 # save only only clusters including their geometry, aggregate values, area and id
-grid.save_cell_clusters(filename=output_gis_folder+'clusters', file_format='shp')
-grid.save_cell_clusters(filename=output_data_folder+'clusters', file_format='csv')
+df_clusters = grid.save_cell_clusters(filename=output_gis_folder+'clusters', file_format='shp')
+df_clusters = grid.save_cell_clusters(filename=output_data_folder+'clusters', file_format='csv')
 
 # save sparse grid including cells only those cells that at least contain one point
-grid.save_sparse_grid(filename=output_gis_folder+'grid_clusters', file_format='shp')
-grid.save_sparse_grid(filename=output_data_folder+'grid_clusters', file_format='csv')
+df_sparse_grid = grid.save_sparse_grid(filename=output_gis_folder+'sparse_grid', file_format='shp')
+df_sparse_grid = grid.save_sparse_grid(filename=output_data_folder+'sparse_grid', file_format='csv')
 
 # save full grid including cells that have no points in them (through many empty cells this will occuppy unecessary disk space)
-# grid.save_full_grid(filename=output_gis_folder+'grid_clusters', file_format='shp')
-# grid.save_full_grid(filename=output_data_folder+'grid_clusters', file_format='csv')
+# df_full_grid = grid.save_full_grid(filename=output_gis_folder+'full_grid', file_format='shp')
+# df_full_grid = grid.save_full_grid(filename=output_data_folder+'full_grid', file_format='csv')
 
 pts.to_csv(output_data_folder+'pts_df_w_clusters.csv')
 
 # CREATE PLOTS
-grid.plot.clusters(output_maps_folder+'clusters_employment_750m_995th')
-grid.plot.vars(filename=output_maps_folder+'employment_vars')
-grid.plot.cluster_pts(filename=output_maps_folder+'employment_cluster_pts')
-grid.plot.rand_dist(filename=output_maps_folder+'rand_dist_employment')
+p = grid.plot.clusters(output_maps_folder+'clusters_employment_750m_995th')
+p = grid.plot.vars(filename=output_maps_folder+'employment_vars')
+p = grid.plot.cluster_pts(filename=output_maps_folder+'employment_cluster_pts')
+p = grid.plot.rand_dist(filename=output_maps_folder+'rand_dist_employment')
 
 print("Successfully executed Example.py")
 
