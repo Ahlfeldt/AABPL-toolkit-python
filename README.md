@@ -16,7 +16,7 @@ When using the algorithm in your work, **please cite Ahlfeldt, Albers, Behrens (
 ## Installation
 To install the Python package of the AABPL-toolkit, run the following command in your python environment in your terminal. 
 
-'pip install aabpl'
+pip install aabpl
 
 If you are **new to Python**, you can download the Anaconda distrbution from [this website](https://www.anaconda.com/download). Then enter the command into the Anaconda Promt.
 
