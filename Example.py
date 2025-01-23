@@ -21,7 +21,7 @@ os.makedirs(temp_folder, exist_ok=True)
 from pandas import read_csv
 from aabpl.main import radius_search, detect_cluster_pts, detect_cluster_cells
 
-path_to_your_csv = 'input_data/prime_points_weighted_79.txt'
+path_to_your_csv = 'input_data/plants.txt'
 crs_of_your_csv =  "EPSG:4326"
 pts = read_csv(path_to_your_csv, sep=",", header=None)
 pts.columns = ["eid", "employment", "industry", "lat","lon","moved"]
@@ -62,7 +62,7 @@ pts.to_csv(output_data_folder+'pts_df_w_clusters.csv')
 
 # CREATE PLOTS
 grid.plot.clusters(output_maps_folder+'clusters_employment_750m_995th')
-grid.plot.vars(filename=output_maps_folder+'employment_vars')
+# grid.plot.vars(filename=output_maps_folder+'employment_vars')
 grid.plot.cluster_pts(filename=output_maps_folder+'employment_cluster_pts')
 grid.plot.rand_dist(filename=output_maps_folder+'rand_dist_employment')
 
