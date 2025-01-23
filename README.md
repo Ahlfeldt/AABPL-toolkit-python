@@ -11,9 +11,7 @@ Note that while this implementation of the algorithm follows the same basic step
 
 We recommend that users find their own preferred values depending on the context and purpose of the clustering. We aim to allow for a user-specified sampling area so that users can, akin to Ahlfeldt, Albers, and Behrens (2024), exclude arbitrary areas when generating counterfactual establishment distributions. For replication of the results reported in Ahlfeldt, Albers, and Behrens (2024), we refer to the official replication directory.
  
-When using the algorithm in your work, **please cite**: 
-
-Ahlfeldt, Albers, Behrens (2024): Prime locations. American Economic Review: Insights, forthcoming.
+When using the algorithm in your work, **please cite Ahlfeldt, Albers, Behrens (2024): Prime locations. American Economic Review: Insights, forthcoming.**
 
 ## Installation
 To install the Python package of the ABRSQOL-toolkit, run the following command in your python environment in your terminal. 
