@@ -1,5 +1,5 @@
 # install package into your environment through your console via
-# pip install ABRSQOL
+# pip install aabpl
 # or install it from this script:
 import subprocess, sys
 subprocess.check_call([sys.executable, "-m", "pip", "install", 'aabpl', "--upgrade"])
@@ -21,7 +21,7 @@ os.makedirs(temp_folder, exist_ok=True)
 from pandas import read_csv
 from aabpl.main import radius_search, detect_cluster_pts, detect_cluster_cells
 
-path_to_your_csv = 'input_data/prime_points_weighted_79.txt'
+path_to_your_csv = 'input_data/plants.txt'
 crs_of_your_csv =  "EPSG:4326"
 pts = read_csv(path_to_your_csv, sep=",", header=None)
 pts.columns = ["eid", "employment", "industry", "lat","lon","moved"]
