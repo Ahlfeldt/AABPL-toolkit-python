@@ -14,9 +14,11 @@ We recommend that users find their own preferred values depending on the context
 When using the algorithm in your work, **please cite Ahlfeldt, Albers, Behrens (2024): Prime locations. American Economic Review: Insights, forthcoming.**
 
 ## Installation
-To install the Python package of the ABRSQOL-toolkit, run the following command in your python environment in your terminal. 
+To install the Python package of the AABPL-toolkit, run the following command in your python environment in your terminal. 
 
-pip install aabpl
+'pip install aabpl'
+
+If you are **new to Python**, you can download the Anaconda distrbution from [this website](https://www.anaconda.com/download). Then enter the command into the Anaconda Promt.
 
 Alternatively you can also install it from within your python script:
 ```python
