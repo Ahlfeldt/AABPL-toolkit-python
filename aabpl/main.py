@@ -72,7 +72,7 @@ def check_kwargs(
         pts:_pd_DataFrame,
         crs:str,
         r:float,
-        columns:list=[],
+        c:list=[],
         x:str='lon',
         y:str='lat',
         row_name:str='id_y',
@@ -89,6 +89,7 @@ def check_kwargs(
     """
     check shared keyword arguments and apply defaults
     """
+    # locals() TODO use locals to make this take in only locals
     if type(row_name) != str:
         raise TypeError('`row_name` must be of type str. Instead provided of type',type(row_name),row_name)
     if type(col_name) != str:
@@ -122,20 +123,20 @@ def check_kwargs(
         if type(pts_target) != _pd_DataFrame:
             raise TypeError('`pts_target` must be a pandas.DataFrame or None. Instead provided of type',type(pts_target))
     help_col = None
-    if type(columns) == str:
-        columns = [columns]
+    if type(c) == str:
+        c = [c]
     else:
-        if columns is None or len(columns)==0:
+        if c is None or len(c)==0:
             help_col = next(('count'+str(i) for i in (['']+list(range(len(pts_target.columns)))) if not 'helper_col'+str(i) in pts_target.columns))
             pts_target[help_col] = 1
-            columns = [help_col]
+            c = [help_col]
         try:
-            if any([type(column)!=str for column in columns]):
+            if any([type(column)!=str for column in c]):
                 raise TypeError
         except:
-            raise TypeError('`columns` must be either a string of single column name or a list of column name strings')
-    if any([not column in pts_target.columns for column in columns]):
-        raise ValueError('not all columns(',columns,') are in columns of search target pts_target(',pts.columns,')')
+            raise TypeError('`c` must be either a string of single column name or a list of column name strings')
+    if any([not column in pts_target.columns for column in c]):
+        raise ValueError('not all columns(',c,') are in columns of search target pts_target(',pts.columns,')')
     if not x_tgt in pts_target.columns:
         raise ValueError('`x_tgt` (x-coord column name) must be in columns of pts_target')
     if not y_tgt in pts_target.columns:
@@ -169,7 +170,7 @@ def check_kwargs(
             silent=silent,
         )
 
-    return (pts, local_crs, columns, x, y, pts_target, x_tgt, y_tgt, row_name_tgt, col_name_tgt, grid, help_col)
+    return (pts, local_crs, c, x, y, pts_target, x_tgt, y_tgt, row_name_tgt, col_name_tgt, grid, help_col)
 
 
 # TODO remove cell_region from kwargs
@@ -250,7 +251,7 @@ def radius_search(
     pts:_pd_DataFrame,
     crs:str,
     r:float,
-    columns:list=[],
+    c:list=[],
     exclude_pt_itself:bool=True,
     x:str='lon',
     y:str='lat',
@@ -285,8 +286,8 @@ def radius_search(
         crs of coordinates, e.g. 'EPSG:4326'
     r (float):
         radius within which other points shall be found in meters 
-    columns (list or str):
-        column(s) in DataFrame for which data within search radius shall be aggregated. If None provided it will simply count the points within the radius. 
+    c (str or list):
+        column name or list of column name(s) in DataFrame for which data within search radius shall be aggregated. If None provided it will simply count the points within the radius. Column name must be in pts(DataFrame) unless a different search target is specified - then columns must exist in pts_target.
     exclude_pt_itself (bool):
         whether the sums within search radius point shall exlclude the point data itself (default=True)
     x (str):
@@ -346,9 +347,9 @@ def radius_search(
     grid.plot_vars(filename='employoment_750m')
     """
 
-    (pts, local_crs, columns, x, y, pts_target, x_tgt, y_tgt, row_name_tgt, col_name_tgt, grid, help_col
+    (pts, local_crs, c, x, y, pts_target, x_tgt, y_tgt, row_name_tgt, col_name_tgt, grid, help_col
      ) = check_kwargs(
-            pts=pts, crs=crs, r=r, columns=columns, x=x, y=y, row_name=row_name,
+            pts=pts, crs=crs, r=r, c=c, x=x, y=y, row_name=row_name,
             col_name=col_name, pts_target=pts_target, x_tgt=x_tgt, y_tgt=y_tgt,
             row_name_tgt=row_name_tgt, col_name_tgt=col_name_tgt, grid=grid, proj_crs=proj_crs, silent=silent,
     )
@@ -365,7 +366,7 @@ def radius_search(
     # prepare target points data
     grid.search.set_target(
         pts=pts_target,
-        columns=columns,
+        c=c,
         x=x_tgt,
         y=y_tgt,
         row_name=row_name_tgt,
@@ -376,7 +377,7 @@ def radius_search(
     # prepare source points data
     grid.search.set_source(
         pts=pts,
-        columns=columns,
+        c=c,
         x=x,
         y=y,
         row_name=row_name,
@@ -400,9 +401,9 @@ def detect_cluster_pts(
     pts:_pd_DataFrame,
     crs:str,
     r:float=0.0075,
-    columns:list=[],
+    c:list=[],
     exclude_pt_itself:bool=True,
-    k_th_percentiles:float=99.5,
+    k_th_percentile:float=99.5,
     n_random_points:int=int(1e5),
     random_seed:int=None,
     x:str='lon',
@@ -443,11 +444,11 @@ def detect_cluster_pts(
         crs of coordinates, e.g. 'EPSG:4326'
     r (float):
         radius within which other points shall be found in meters 
-    columns (list or str):
-        column(s) in DataFrame for which data within search radius shall be aggregated. If None provided it will simply count the points within the radius. 
+    c (str or list):
+        column name or list of column name(s) in DataFrame for which data within search radius shall be aggregated. If None provided it will simply count the points within the radius. Column name must be in pts(DataFrame) unless a different search target is specified - then columns must exist in pts_target.
     exclude_pt_itself (bool):
         whether the sums within search radius point shall exlclude the point data itself (default=True)
-    k_th_percentiles (float):
+    k_th_percentile (float):
         percentile of random distribution that a point needs to exceed to be classified as clustered.
     n_random_points (int):
         number of random points to be drawn to create random distribution (default=100000)
@@ -500,16 +501,16 @@ def detect_cluster_pts(
         a grid covering all points (custom class) with cluster attributes stored to it
     """
 
-    (pts, local_crs, columns, x, y, pts_target, x_tgt, y_tgt, row_name_tgt, col_name_tgt, grid, help_col
+    (pts, local_crs, c, x, y, pts_target, x_tgt, y_tgt, row_name_tgt, col_name_tgt, grid, help_col
      ) = check_kwargs(
-            pts=pts, crs=crs, r=r, columns=columns, x=x, y=y, row_name=row_name,
+            pts=pts, crs=crs, r=r, c=c, x=x, y=y, row_name=row_name,
             col_name=col_name, pts_target=pts_target, x_tgt=x_tgt, y_tgt=y_tgt,
             row_name_tgt=row_name_tgt, col_name_tgt=col_name_tgt, grid=grid, proj_crs=proj_crs, silent=silent,
     )
-    if type(k_th_percentiles) not in [list,_np_array, tuple]:
-        k_th_percentiles = [k_th_percentiles for column in columns]
-    elif len(k_th_percentiles) < len(columns):
-        k_th_percentiles = [k_th_percentiles[i%len(k_th_percentiles)] for i in range(len(columns))]
+    if type(k_th_percentile) not in [list,_np_array, tuple]:
+        k_th_percentile = [k_th_percentile for column in c]
+    elif len(k_th_percentile) < len(c):
+        k_th_percentile = [k_th_percentile[i%len(k_th_percentile)] for i in range(len(c))]
     # initialize disk_search
     grid.search = DiskSearch(
         grid,
@@ -520,7 +521,7 @@ def detect_cluster_pts(
 
     grid.search.set_target(
         pts=pts_target,
-        columns=columns,
+        c=c,
         x=x_tgt,
         y=y_tgt,
         row_name=row_name_tgt,
@@ -531,25 +532,25 @@ def detect_cluster_pts(
     (cluster_threshold_values, rndm_pts) = get_distribution_for_random_points(
         grid=grid,
         pts=pts,
-        columns=columns,
+        c=c,
         x=x,
         y=y,
         row_name=row_name,
         col_name=col_name,
         sum_suffix=sum_suffix,
         n_random_points=n_random_points,
-        k_th_percentiles=k_th_percentiles,
+        k_th_percentile=k_th_percentile,
         random_seed=random_seed,
         silent=silent,
     )
 
     if not silent:
-        for (colname, threshold_value, k_th_percentile) in zip(columns, cluster_threshold_values,k_th_percentiles):
+        for (colname, threshold_value, k_th_percentile) in zip(c, cluster_threshold_values,k_th_percentile):
             print("Threshold value for "+str(k_th_percentile)+"th-percentile is "+str(threshold_value)+" for "+str(colname)+".")
     
     grid.search.set_source(
         pts=pts,
-        columns=columns,
+        c=c,
         x=x,
         y=y,
         row_name=row_name,
@@ -566,7 +567,7 @@ def detect_cluster_pts(
     disk_sums_for_pts = grid.search.perform_search(silent=silent,plot_radius_sums=plot_radius_sums,plot_pt_disk=plot_pt_disk)
     
     # save bool of whether pt is part of a cluster 
-    for j, cname in enumerate(columns):
+    for j, cname in enumerate(c):
         pts[str(cname)+str(cluster_suffix)] = disk_sums_for_pts.values[:,j]>cluster_threshold_values[j]
 
 
@@ -576,43 +577,43 @@ def detect_cluster_pts(
             pts=pts,
             x=x,
             y=y,
-            radius_sum_columns=[n+sum_suffix for n in columns],
+            radius_sum_columns=[n+sum_suffix for n in c],
             rndm_pts=rndm_pts,
             cluster_threshold_values=cluster_threshold_values,
-            k_th_percentiles=k_th_percentiles,
+            k_th_percentile=k_th_percentile,
             r=r,
             plot_kwargs=plot_distribution
             )
     #
 
     def plot_rand_dist(
+            filename:str="",
             pts=pts,
             x=x,
             y=y,
-            radius_sum_columns=[n+sum_suffix for n in columns],
+            radius_sum_columns=[n+sum_suffix for n in c],
             rndm_pts=rndm_pts,
             cluster_threshold_values=cluster_threshold_values,
-            k_th_percentiles=k_th_percentiles,
+            k_th_percentile=k_th_percentile,
             r=r,
-            filename:str="",
             **plot_kwargs
             
     ):
         create_distribution_plot(
+            filename=filename,
+            plot_kwargs=plot_kwargs,
             pts=pts,
             x=x,
             y=y,
             radius_sum_columns=radius_sum_columns,
             rndm_pts=rndm_pts,
             cluster_threshold_values=cluster_threshold_values,
-            k_th_percentiles=k_th_percentiles,
+            k_th_percentile=k_th_percentile,
             r=r,
-            filename=filename,
-            plot_kwargs=plot_kwargs
             )
     grid.plot.rand_dist = plot_rand_dist
     
-    plot_colnames = list(columns) + [n+sum_suffix for n in columns] + [str(cname)+str(cluster_suffix) for cname in columns]
+    plot_colnames = list(c) + [n+sum_suffix for n in c] + [str(cname)+str(cluster_suffix) for cname in c]
     def plot_cluster_pts(
             self=grid,
             colnames=_np_array(plot_colnames),
@@ -644,12 +645,18 @@ def detect_cluster_cells(
     pts:_pd_DataFrame,
     crs:str,
     r:float=750,
-    columns:list=[],
+    c:list=[],
     exclude_pt_itself:bool=True,
-    k_th_percentiles:float=99.5,
+    k_th_percentile:float=99.5,
     n_random_points:int=int(1e5),
     random_seed:int=None,
-    distance_thresholds:float=2500,
+    queen_contingency:int=1,
+    rook_contingency:int=0,
+    centroid_dist_threshold:float=2500,
+    border_dist_threshold:float=1000,
+    min_cluster_share_after_contingency:float=0.05,
+    min_cluster_share_after_centroid_dist:float=0.00,
+    min_cluster_share_after_convex:float=0.00,
     make_convex:bool=True,
     x:str='lon',
     y:str='lat',
@@ -690,16 +697,28 @@ def detect_cluster_cells(
         crs of coordinates, e.g. 'EPSG:4326'
     r (float):
         radius within which other points shall be found in meters 
-    columns (list or str):
-        column(s) in DataFrame for which data within search radius shall be aggregated. If None provided it will simply count the points within the radius. 
+    c (str or list):
+        column name or list of column name(s) in DataFrame for which data within search radius shall be aggregated. If None provided it will simply count the points within the radius. Column name must be in pts(DataFrame) unless a different search target is specified - then columns must exist in pts_target. 
     exclude_pt_itself (bool):
         whether the sums within search radius point shall exlclude the point data itself (default=True)
-    k_th_percentiles (float):
+    k_th_percentile (float):
         percentile of random distribution that a point needs to exceed to be classified as clustered.
     n_random_points (int):
         number of random points to be drawn to create random distribution (default=100000)
     random_seed (int):
         random seed to be applied when drawing random points to create random distribution. If None no seed will be set (default=None)
+    queen_contingency (int):
+        if contigent (vertical, horizontal, diagonal) cells that are also classified as clustered shall be part of the same cluster. If set to a value>=2 then it also adds non-contingent cells that are that many steps away to the same cluster. (default=1) 
+    rook_contingency (int):
+        if contigent (vertical, horizontal, diagonal) cells that are also classified as clustered shall be part of the same cluster. Ignored if queen_contingency is set to a higher value. If set to a value>=2 then it also adds non-contingent cells that are that many steps away to the same cluster. (default=1) 
+    min_cluster_share_after_contingency (float):
+        minimum share of cluster of total to not be dropped after cells are merged to clusters based on contingency
+    min_cluster_share_after_centroid_dist (float):
+        minimum share of cluster of total to not be dropped after clusters are merged based on centroid
+    min_cluster_share_after_convex (float):
+        minimum share of cluster of total to not be dropped after clusters are made convex by adding cells within its convex hull
+    make_convex (bool):
+        Whether all cells within the convex hull of a cluster shall be added to it (default=True)
     x (str):
         column name of x-coordinate (=longtitude) in pts (default='lon')
     y (str):
@@ -746,9 +765,9 @@ def detect_cluster_cells(
     grid (aabl.Grid):
         a grid covering all points (custom class) with cluster attributes stored to it  
     """
-    (pts, local_crs, columns, x, y, pts_target, x_tgt, y_tgt, row_name_tgt, col_name_tgt, grid, help_col
+    (pts, local_crs, c, x, y, pts_target, x_tgt, y_tgt, row_name_tgt, col_name_tgt, grid, help_col
      ) = check_kwargs(
-            pts=pts, crs=crs, r=r, columns=columns, x=x, y=y, row_name=row_name,
+            pts=pts, crs=crs, r=r, c=c, x=x, y=y, row_name=row_name,
             col_name=col_name, pts_target=pts_target, x_tgt=x_tgt, y_tgt=y_tgt,
             row_name_tgt=row_name_tgt, col_name_tgt=col_name_tgt, grid=grid, proj_crs=proj_crs, silent=silent,
     )
@@ -756,9 +775,9 @@ def detect_cluster_cells(
         pts=pts,
         crs=local_crs,
         r=r,
-        columns=columns,
+        c=c,
         exclude_pt_itself=exclude_pt_itself,
-        k_th_percentiles=k_th_percentiles,
+        k_th_percentile=k_th_percentile,
         n_random_points=n_random_points,
         random_seed=random_seed,
         grid=grid,
@@ -788,8 +807,14 @@ def detect_cluster_cells(
     
     grid.clustering.create_clusters(
         pts=pts,
-        columns=columns,
-        distance_thresholds=distance_thresholds,
+        c=c,
+        queen_contingency=queen_contingency,
+        rook_contingency=rook_contingency,
+        centroid_dist_threshold=centroid_dist_threshold,
+        border_dist_threshold=border_dist_threshold,
+        min_cluster_share_after_contingency=min_cluster_share_after_contingency,
+        min_cluster_share_after_centroid_dist=min_cluster_share_after_centroid_dist,
+        min_cluster_share_after_convex=min_cluster_share_after_convex,
         make_convex=make_convex,
         row_name=row_name,
         col_name=col_name,

@@ -1,12 +1,11 @@
 # replace imports with from imports
 from numpy import (
-    array as _np_array, arange as _np_arange, unique as _np_unique, linspace as _np_linspace, sign as _np_sign, nan as _np_nan, 
-    invert, flip, transpose, concatenate, zeros, min, max, equal, where, logical_or, logical_and, all as _np_all, newaxis
+    array as _np_array, arange as _np_arange, unique as _np_unique, linspace as _np_linspace, sign as _np_sign,
 )
 from numpy.linalg import norm as _np_linalg_norm
 # from numpy.random import randint, random
-from matplotlib import pyplot as plt
 # from matplotlib.animation import FuncAnimation, PillowWriter#
+from math import log10 as _math_log10
 from matplotlib.patches import (Rectangle as _plt_Rectangle, Polygon as _plt_Polygon, Circle as _plt_Circle)
 from matplotlib.colors import LinearSegmentedColormap as _plt_LinearSegmentedColormap
 from matplotlib.colors import Normalize as _plt_Normalize
@@ -21,6 +20,58 @@ from math import (
     pi as _math_pi)
 from aabpl.utils.general import flatten_list, angle
 from aabpl.utils.distances_to_cell import ( get_cells_relevant_for_disk_by_type, get_cell_farthest_vertex_to_point, get_cell_closest_point_to_points, )
+
+# x = np.linspace(-6,6, num=100)
+# y = np.linspace(-10,10, num=100)
+# X,Y = np.meshgrid(x,y)
+# Z = np.sin(X)/X+np.sin(Y)/Y
+
+# fig, ax = plt.subplots()
+# ax.contourf(X,Y,Z, alpha=.1)
+# ax.contour(X,Y,Z, alpha=.4)
+
+# class AnchoredHScaleBar(matplotlib.offsetbox.AnchoredOffsetbox):
+#     """ size: length of bar in data units
+#         extent : height of bar ends in axes units """
+#     def __init__(self, size=1, extent = 0.03, label="", loc=2, ax=None,
+#                  pad=0.4, borderpad=0.5, ppad = 0, sep=2, prop=None, 
+#                  frameon=True, linekw={}, **kwargs):
+#         if not ax:
+#             ax = plt.gca()
+#         trans = ax.get_xaxis_transform()
+#         size_bar = matplotlib.offsetbox.AuxTransformBox(trans)
+#         line = Line2D([0,size],[0,0], **linekw)
+#         size_bar.add_patch(_plt_Rectangle(xy=(0,0), width=1, height=1, color='black'))
+#         txt = matplotlib.offsetbox.TextArea(label, minimumdescent=False)
+#         self.vpac = matplotlib.offsetbox.VPacker(children=[size_bar,txt],  
+#                                  align="center", pad=ppad, sep=sep) 
+#         matplotlib.offsetbox.AnchoredOffsetbox.__init__(self, loc, pad=pad, 
+#                  borderpad=borderpad, child=self.vpac, prop=prop, frameon=frameon,
+#                  **kwargs)
+
+# ob = AnchoredHScaleBar(size=3, label="3 units", loc=4, frameon=True,
+#                        pad=0.6,sep=4, linekw=dict(color="crimson"),) 
+# ax.add_artist(ob)
+
+def set_map_frame(ax, xmin:float, xmax:float, ymin:float, ymax:float):
+    pad_x, pad_y = (xmax-xmin)/50, (ymax-ymin)/50
+    ax.set_xlim([xmin-pad_x,xmax+pad_x])
+    ax.set_ylim([ymin-pad_y,ymax+pad_y])
+    xticks = [xmin, (xmin+xmax)/2, xmax]
+    yticks = [ymin, (ymin+ymax)/2, ymax]
+    ndigits = int(max([0, _math_log10(100/(xticks[1]-xticks[0])), _math_log10(100/(yticks[1]-yticks[0]))]))
+    ax.set_xticks(xticks, labels=[int(round(t,ndigits)) if ndigits==0 else round(t,ndigits) for t in xticks])
+    ax.set_yticks(yticks, labels=[int(round(t,ndigits)) if ndigits==0 else round(t,ndigits) for t in yticks])
+    
+
+# def _plt_colorbar(sc, extend='min', cax=add_color_bar_ax(fig,ax))
+
+def add_color_bar_ax(fig,ax):
+    if fig is None:
+        cax = ax.inset_axes([ax.get_position().x1 + 0.01, ax.get_position().y0, 0.02 ,ax.get_position().height])
+        return cax
+    cax = fig.add_axes([ax.get_position().x1 + 0.01, ax.get_position().y0, 0.02 ,ax.get_position().height])
+    return cax
 
 def truncate_colormap(cmap, minval=0.0, maxval=1.0, n=200):
     new_cmap = _plt_LinearSegmentedColormap.from_list(

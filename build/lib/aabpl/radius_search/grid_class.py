@@ -15,7 +15,7 @@ from aabpl.illustrations.grid import GridPlots#plot_cell_sums, plot_grid_ids, pl
 from aabpl.illustrations.plot_pt_vars import create_plots_for_vars
 from .radius_search_class import (
     aggregate_point_data_to_cells,
-    aggreagate_point_data_to_disks_vectorized
+    aggregate_point_data_to_disks_vectorized
 )
 from .pts_to_offset_regions import assign_points_to_cell_regions
 from aabpl.valid_area import disk_cell_intersection_area
@@ -147,7 +147,7 @@ class Grid(object):
         n_ysteps = -int((total_bounds.ymin-total_bounds.ymax)/spacing)+1 # round up 
         self.x_steps = x_steps = _np_linspace(total_bounds.xmin, total_bounds.xmax, n_xsteps)
         self.y_steps = y_steps = _np_linspace(total_bounds.ymin, total_bounds.ymax, n_ysteps)
-        self.row_ids = row_ids = _np_arange(n_ysteps-1)
+        self.row_ids = row_ids = _np_arange(n_ysteps-1)#[::-1]
         self.col_ids = col_ids =  _np_arange(n_xsteps-1)
         self.ids = tuple(flatten_list([[(row_id, col_id) for col_id in col_ids] for row_id in row_ids]))
         self.n_cells = len(self.ids)
@@ -177,7 +177,7 @@ class Grid(object):
     # add functions
     aggregate_point_data_to_cells = aggregate_point_data_to_cells
     assign_points_to_cell_regions = assign_points_to_cell_regions
-    aggreagate_point_data_to_disks_vectorized = aggreagate_point_data_to_disks_vectorized
+    aggregate_point_data_to_disks_vectorized = aggregate_point_data_to_disks_vectorized
     disk_cell_intersection_area = disk_cell_intersection_area
     # append plots
     # # append cluster functions
@@ -353,7 +353,7 @@ class Grid(object):
             'centroid_x': [cluster.centroid[0] for cluster in clusters_for_column.clusters],
             'centroid_y': [cluster.centroid[1] for cluster in clusters_for_column.clusters],
             'cluster_id': [cluster.id for cluster in clusters_for_column.clusters],
-            'sum': [cluster.aggregate for cluster in clusters_for_column.clusters],
+            'sum': [cluster.total for cluster in clusters_for_column.clusters],
             "n_cells": [cluster.n_cells for cluster in clusters_for_column.clusters],
             'area': [cluster.area for cluster in clusters_for_column.clusters],
             },
@@ -443,7 +443,7 @@ class Grid(object):
             file_format:str=['shp','csv'][0],
             target_crs:str=['initial','local','EPSG:4326'][0],
     ):
-        """Save geopandas.GeoDataFrame that has one entry for each clusters including attributes on its polygon geometry, column aggregates, n_cells, id  
+        """Save geopandas.GeoDataFrame that has one entry for each clusters including attributes on its polygon geometry, column totals, n_cells, id  
 
         filename (str):
             name of the output file excluding file format extension. It can contain full path like 'output_folder/fname' (default='grid_clusters')
@@ -473,7 +473,7 @@ class Grid(object):
             file_format:str=['shp','csv'][0],
             target_crs:str=['initial','local','EPSG:4326'][0],
         ):
-        """For each cluster column saves a geopandas.GeoDataFrame that has one entry for each clusters including attributes on its polygon geometry, column aggregates, n_cells, id  
+        """For each cluster column saves a geopandas.GeoDataFrame that has one entry for each clusters including attributes on its polygon geometry, column totals, n_cells, id  
 
         filename (str or list):
             name of the output file excluding file format extension. If there are more than 1 cluster column it will append the column name to the file. You can also provide a list of filenames to contain the filename indvidually. It can contain full path like 'output_folder/fname' (default='grid_clusters')

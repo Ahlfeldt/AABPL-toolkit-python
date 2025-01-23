@@ -7,14 +7,14 @@ from aabpl.illustrations.plot_pt_vars import create_plots_for_vars
 from aabpl.testing.test_performance import time_func_perf
 
 
-################ aggreagate_point_data_to_disks_vectorized ######################################################################################
+################ aggregate_point_data_to_disks_vectorized ######################################################################################
 @time_func_perf
-def aggreagate_point_data_to_disks_vectorized(
+def aggregate_point_data_to_disks_vectorized(
     grid:dict,
     pts_source:_pd_DataFrame,
     pts_target:_pd_DataFrame=None,
     r:float=0.0075,
-    columns:list=['employment'],
+    c:list=['employment'],
     y:str='lat',
     x:str='lon',
     row_name:str='id_y',
@@ -47,17 +47,17 @@ def aggreagate_point_data_to_disks_vectorized(
     n_pts = len(pts_source)
 
     # initialize columns and/or reset to zero 
-    sum_radius_names = [(cname+sum_suffix) for cname in columns]
+    sum_radius_names = [(cname+sum_suffix) for cname in c]
     pts_source[sum_radius_names] = 0
     
   
-    sums_within_disks = _np_zeros((n_pts, len(columns)))
+    sums_within_disks = _np_zeros((n_pts, len(c)))
     
     if plot_pt_disk is not None:
         if not 'pt_id' in plot_pt_disk:
             plot_pt_disk['pt_id'] = pts_source.index[int(n_pts//2)]
         
-    zero_sums = _np_zeros(len(columns),dtype=int) if len(columns) > 1 else 0
+    zero_sums = _np_zeros(len(c),dtype=int) if len(c) > 1 else 0
     pts_source['initial_sort'] = range(len(pts_source))
     pts_source.sort_values([row_name, col_name, cell_region_name], inplace=True)
     last_pt_row_col = (-1, -1)
@@ -66,7 +66,7 @@ def aggreagate_point_data_to_disks_vectorized(
     counter_new_contain_region = 0
     counter_new_overlap_region = 0
 
-    if len(columns) > 1:
+    if len(c) > 1:
         @time_func_perf
         def sum_contained_all_offset_regions(
                 pt_row,
@@ -89,7 +89,7 @@ def aggreagate_point_data_to_disks_vectorized(
             return sum([grid_id_to_sums[g_id] for g_id in cells_cntd_by_pt_cell]) 
         #
     
-    if len(columns) > 1:
+    if len(c) > 1:
         @time_func_perf
         def sum_contained_by_offset_region(
                 pt_row,
@@ -128,7 +128,7 @@ def aggreagate_point_data_to_disks_vectorized(
     
     
 
-    if len(columns) > 1:
+    if len(c) > 1:
         @time_func_perf
         def sum_overlapped_pts_in_radius(
             pts_in_cells_overlapped_by_pt_region,
@@ -244,7 +244,7 @@ def aggreagate_point_data_to_disks_vectorized(
                 pts_source=pts_source,
                 pts_target=pts_target,
                 r=r,
-                columns=columns,
+                c=c,
                 x=x,
                 y=y,
                 cells_cntd_by_pt_cell=[(row+pt_row,col+pt_col) for row,col in cells_contained_in_all_disks],
@@ -270,7 +270,7 @@ def aggreagate_point_data_to_disks_vectorized(
             
     if exclude_pt_itself and grid.search.tgt_df_contains_src_df:
         # substract data from point itself unless specified otherwise
-        pts_source[sum_radius_names] = pts_source[sum_radius_names].values - pts_source[columns]
+        pts_source[sum_radius_names] = pts_source[sum_radius_names].values - pts_source[c]
     
     # print(
     #     "Share of pts in",
@@ -279,7 +279,7 @@ def aggreagate_point_data_to_disks_vectorized(
     #     "\n- same cell and overlapping same surrounding cells",100 - int(counter_new_overlap_region/len(pts_source)*100),"%")
     def plot_vars(
         self = grid,
-        colnames = _np_array([columns, sum_radius_names]), 
+        colnames = _np_array([c, sum_radius_names]), 
         filename:str='',
         **plot_kwargs:dict,
     ):
@@ -296,7 +296,7 @@ def aggreagate_point_data_to_disks_vectorized(
         print('create plot for radius sums')
         create_plots_for_vars(
             grid=grid,
-            colnames=_np_array([columns, sum_radius_names]),
+            colnames=_np_array([c, sum_radius_names]),
             plot_kwargs=plot_radius_sums,
         )
     #

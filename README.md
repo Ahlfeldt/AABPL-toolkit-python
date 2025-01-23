@@ -11,20 +11,22 @@ Note that while this implementation of the algorithm follows the same basic step
 
 We recommend that users find their own preferred values depending on the context and purpose of the clustering. We aim to allow for a user-specified sampling area so that users can, akin to Ahlfeldt, Albers, and Behrens (2024), exclude arbitrary areas when generating counterfactual establishment distributions. For replication of the results reported in Ahlfeldt, Albers, and Behrens (2024), we refer to the official replication directory.
  
-When using the algorithm in your work, **please cite**: 
-
-Ahlfeldt, Albers, Behrens (2024): Prime locations. American Economic Review: Insights, forthcoming.
+When using the algorithm in your work, **please cite Ahlfeldt, Albers, Behrens (2024): Prime locations. American Economic Review: Insights, forthcoming.**
 
 ## Installation
-To install the Python package of the ABRSQOL-toolkit, run the following command in your python environment in your terminal. 
+To install the Python package of the AABPL-toolkit, run the following command in your python environment in your terminal. 
 
-pip install aabpl
+`pip install aabpl`
+
+If you are **new to Python**, you can download the Anaconda distrbution from [this website](https://www.anaconda.com/download). Then enter the command into the Anaconda Promt.
 
 Alternatively you can also install it from within your python script:
 ```python
 import subprocess, sys
 subprocess.check_call([sys.executable, "-m", "pip", "install", 'aabpl'])
 ```
+If you use the ready-to-use file described below, the package will install automatically.
+
 <details>
 <summary>In case an error occurs at the installation...</summary>
 
@@ -63,7 +65,7 @@ Explain the syntax with its arguments here
 #### Example 1:
 ```python
 
-path_to_your_csv = '../../cbsa_sample_data/plants_10180.txt'
+path_to_your_csv = 'input_data/prime_points_weighted_79.txt'
 crs_of_your_csv =  "EPSG:4326"
 pts = read_csv(path_to_your_csv, sep=",", header=None)
 pts.columns = ["eid", "employment", "industry", "lat","lon","moved"]
@@ -75,7 +77,7 @@ grid = detect_cluster_cells(
     columns=['employment'],
     exclude_pt_itself=True,
     distance_thresholds=2500,
-    k_th_percentiles=[99.97],
+    k_th_percentiles=[99.5],
     n_random_points=int(1e5),
     make_convex=True,
     random_seed=0,
@@ -89,17 +91,21 @@ grid = detect_cluster_cells(
 
 # save files as needed
 # save only only clusters including their geometry, aggregate values, area and id
-grid.save_cell_clusters(filename=output_gis_folder+'grid_clusters', file_format='shp')
-# save sparse grid including cells only those cells that at least contain one point
-grid.save_sparse_grid(filename=output_gis_folder+'grid_clusters', file_format='shp')
-# save full grid including cells that have no points in them (through many empty cells this will occuppy unecessary disk space)
-# grid.save_full_grid(filename=output_gis_folder+'grid_clusters', file_format='shp')
-# grid.save_full_grid(filename=output_data_folder+'grid_clusters', file_format='csv')
+grid.save_cell_clusters(filename=output_gis_folder+'clusters', file_format='shp')
+grid.save_cell_clusters(filename=output_data_folder+'clusters', file_format='csv')
 
-pts.to_csv(output_data_folder+'pts_df_w_clusters.csv')
+# save sparse grid including cells only those cells that at least contain one point
+grid.save_sparse_grid(filename=output_gis_folder+'sparse_grid', file_format='shp')
+grid.save_sparse_grid(filename=output_data_folder+'sparse_grid', file_format='csv')
+
+# save full grid including cells that have no points in them (through many empty cells this will occuppy unecessary disk space)
+# grid.save_full_grid(filename=output_gis_folder+'full_grid', file_format='shp')
+# grid.save_full_grid(filename=output_data_folder+'full_grid', file_format='csv')
+
+pts.to_csv(filename=output_data_folder+'pts_df_w_clusters.csv')
 
 # CREATE PLOTS
-grid.plot.clusters(output_maps_folder+'clusters_employment_750m_9975th')
+grid.plot.clusters(filename=output_maps_folder+'clusters_employment_750m_995th')
 grid.plot.vars(filename=output_maps_folder+'employment_vars')
 grid.plot.cluster_pts(filename=output_maps_folder+'employment_cluster_pts')
 grid.plot.rand_dist(filename=output_maps_folder+'rand_dist_employment')
@@ -109,13 +115,15 @@ grid.plot.rand_dist(filename=output_maps_folder+'rand_dist_employment')
 
 ### Ready-to-use script
 
-If you are new to Python, you may find it useful to execute the [`Example.py`](https://github.com/Ahlfeldt/ABRSQOL-toolkit-python/blob/main/Example.py) (or [`Example.ipynb`](https://github.com/Ahlfeldt/ABRSQOL-toolkit-python/blob/main/Example.ipynb)) script saved in this folder. It will install the package, load the testing data set, generate a quality-of-life index, and save it to your working directory.  It should be straightforward to adapt the script to your data and preferred parameter values.
+If you are new to Python, you may find it useful to execute the [`Example.py`](https://github.com/Ahlfeldt/AABPL-toolkit-python/blob/main/Example.py) (or [`Example.ipynb`](https://github.com/Ahlfeldt/AABPL-toolkit-python/blob/main/Example.ipynb)) script saved in this folder. It will install the package, load the testing data set (we provide on example file in the [`input_data`](https://github.com/Ahlfeldt/AABPL-toolkit-python/tree/main/input_data) subfolder), generate clusters, and save various outputs to your working directory.  It should be straightforward to adapt the script to your data and preferred parameter values. 
+
+You have many options for executing the `Example.py` script. One convenient option is to open the script in Sypder, a development environment that can be launched from the Anaconda Navigator. Spyder will automatically set the working directory to the folder to which you have copied the 'Example.py' file. If you name you name your input file `plants.txt` and save it in an  `input_data` subfolder, you will not have to make any adjustments to the script. For a first trial, we recommend that you just copy the `input_data` (with its content) to the same directory where you save `Example.py` file and then run the script from Spyder.
 
 ### Inputs
 
 The **compulsory input** into the algorithm is a file containing spatial point pattern data. In the application by Ahlfeldt, Albers, and Behrens (2024), spatial points are establishments. However, these could also be individuals, buildings, or any other subjects or objects whose location can be referenced by geographic coordinates. The data file should contain geographic coordinates in standard decimal degrees and a variable that defines the importance of a subject or object. In the application by Ahlfeldt, Albers, and Behrens (2024), the importance is represented by the employment of an establishment. However, it could also be the productivity of a worker, the height of a building, or any weight that summarizes the importance of a data point. Of course, equal importance will be reflected by a uniform value.
 
-In case you wish to use the above `Example.py` script without having to make any adjustments (except for setting your root directory), you should create a comma-separated file with exactly the same name and structure as the `plants.txt` file provided in this repository. Note that this exemplary input file **does not** include variable names. It includes variables in the following order (separated by commas):
+In case you wish to use the above `Example.py` script without having to make any adjustments (except for setting your root directory), you should create a comma-separated file with exactly the same name and structure as the `plants.txt` file provided in this repository (this is just the renamed `prime_points_weighted_79.txt` file from the [AABPL-toolkit](https://github.com/Ahlfeldt/AABPL-toolkit/blob/main/DATA/GlobalCities/prime_points_weighted.zip)). Note that this exemplary input file **does not include variable names**. It includes variables in the following order (separated by commas):
 
 - **identifier variable**: In our case, this is an establishment identifier. If you do not need this, you can set all values to 1.
 - **importance weight**: In our case, this is predicted employment. If you want to use equal weights, you can set all values to 1.
@@ -125,7 +133,7 @@ In case you wish to use the above `Example.py` script without having to make any
 - **placebolder for another variable**: You can ignore it.
 
 
-Variable names will then be assigned by the script. Of course, you can also import data sets that already contain variable names. Just make sure that latitudes and longitudes are defined by variables named `lat` and `lon`. You can define the name of the variable representing your importance weights in the program syntax.
+Variable names will then be assigned by the script. Of course, with some adjustments to the 'Example.py' script, you can also import data sets that already contain variable names. Just make sure that latitudes and longitudes are defined by variables named `lat` and `lon`. You can define the name of the variable representing your importance weights in the program syntax.
 
 For future versions of the package, we aim to allow for a shapefile that defines the sampling area of the counterfactual distribution as an **optional input**. This shapefile must be projected within the WGS1984 geographic coordinate system. Ahlfeldt, Albers, and Behrens (2024) exclude residential and undevelopable areas. Such a shapefile could also restrict the sampling area for counterfactual spatial distributions to inhabitable areas or to areas zoned for the development of tall buildings.
 
@@ -135,16 +143,16 @@ The package will create the a number of folders in your working directory into w
 
 Folder | File  | Description |
 |:------------------------|:-----------------------|:----------------------------------------------------------------------------------|
-| output_data | `pts_df_with_radius_sums.csv` | CSV files containing information on how clustered each establishment in the data set is   |
-| output_data | `grid_with_cluster_ids.csv` | CSV files containing a gridded version of the data set, including groups of clustered grid cells   |
-| output_data | `pl_data.csv` | CSV files attributes of the final outputs, i.e. aggregated clusters (in our case prime locations)   |
-| output_gis | `grid_with_cluster_ids.*` | Shapefile of the grid clusters (and ids) before aggregation (to prime locations)  |
-| output_gis | `grid_with_final_pl_ids.*` | Shapefile of the grid clusters (and ids) after aggregation (to prime locations)  |
-| output_gis | `pl_shape.*` | Shapefile of final output, i.e. aggregated clusters (prime locations)  |
-| output_maps | `grid_with_cluster_ids.png` | Map showing the boundaries of clusters (before aggregation), with the density of the selected importance weight (in our case employment) in the background  |
-| output_maps | `prime_location_map.png` | Map showing the boundaries of the final output, i.e. clusters after aggregation (prime locations), with the density of the selected importance weight (in our case employment) in the background  |
+| output_data | `clusters.csv` | CSV file containing information on the final delineated clusters, including geographic coordinates in decimal degrees, a cluster id that corresponds to the rank in the distribution of total mass within the cluster (in our case employment), the number of cells within the cluster, the total area of the cluster (in square meters). You may choose another file name in the 'Example.py' script. |
+| output_data | `grid_clusters.csv` | CSV file containing a gridded version of the data set, including groups of clustered grid cells identified by the cluster id, geographic coordinates in decimal degrees, and the total mass in the grid cell (in our case employment). You may choose another file name in the 'Example.py' script.   |
+| output_data | `pts_df_w_clusters.csv` | CSV file containing the plants with the input data and, in addition, an identifier for the cluster to which a plant belongs. You may choose another file name in the 'Example.py' script. |
+| output_gis | `grid_clusters.*` | Shapefile of the gridded data set including the same information as in  `grid_clusters.csv`. You may choose another file name in the 'Example.py' script. |
+| output_gis | `clusters.*` | Shapefile of final output, i.e. aggregated clusters (in our case prime locations) along with the same information as in 'clusters.csv'. You may choose another file name in the 'Example.py' script.  |
+| output_maps | `clusters_employment_750m_995th.png` | Map showing the boundaries of the final output, i.e. clusters after aggregation (in our case to prime locations), with the density of the selected importance weight (in our case employment) in the background. You may choose another file name in the 'Example.py' script.  |
+| output_maps | `employment_cluster_pts.png` | Map showing the plants and how clustered they are. You may choose another file name in the 'Example.py' script.  |
+| output_maps | `rand_dist_employment.png` | Technical output to inform the choice of the p-value. You may choose another file name in the 'Example.py' script.  |
 
-
+Other outputs can be generated by activating the respective lines (by removing the '#') in the 'Exmaple.py' script.
 
 ## Folder Structure and Files (OUTDATED)
 
