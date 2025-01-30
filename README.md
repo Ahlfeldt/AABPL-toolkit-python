@@ -65,7 +65,7 @@ Explain the syntax with its arguments here
 #### Example 1:
 ```python
 
-path_to_your_csv = 'input_data/prime_points_weighted_79.txt'
+path_to_your_csv = 'input_data/plants.txt'
 crs_of_your_csv =  "EPSG:4326"
 pts = read_csv(path_to_your_csv, sep=",", header=None)
 pts.columns = ["eid", "employment", "industry", "lat","lon","moved"]
