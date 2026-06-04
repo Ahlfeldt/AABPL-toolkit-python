@@ -10,7 +10,7 @@ with open('./README.md', 'r') as f:
     long_description = f.read()
 setup(
     name=name,
-    version="0.1.27",
+    version="0.2.14",
     description='.',
     long_description=long_description,
     long_description_content_type='text/markdown',
@@ -18,7 +18,7 @@ setup(
     author='Gabriel M Ahlfeldt',
     author_email='g.ahlfeldt@hu-berlin.de',
     license='MIT',
-    install_requires=['numpy','pandas','geopandas','shapely','matplotlib','pyproj'],
+    install_requires=['numpy','pandas','geopandas','shapely','matplotlib','pyproj', 'concave_hull'],
     packages=find_packages(exclude=["tests*",]),
     extras_require={
         'test': extra_test,

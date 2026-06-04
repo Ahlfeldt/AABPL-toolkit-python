@@ -1,17 +1,20 @@
 # replace imports with from imports
 from numpy import (
-    array as _np_array, arange as _np_arange, unique as _np_unique, linspace as _np_linspace, sign as _np_sign,
+    array as _np_array, 
+    asarray as _np_asarray,
+    arange as _np_arange, unique as _np_unique, linspace as _np_linspace, sign as _np_sign,
 )
 from numpy.linalg import norm as _np_linalg_norm
 # from numpy.random import randint, random
 # from matplotlib.animation import FuncAnimation, PillowWriter#
-from math import log10 as _math_log10
 from matplotlib.patches import (Rectangle as _plt_Rectangle, Polygon as _plt_Polygon, Circle as _plt_Circle)
 from matplotlib.colors import LinearSegmentedColormap as _plt_LinearSegmentedColormap
 from matplotlib.colors import Normalize as _plt_Normalize
 from matplotlib.axes._axes import Axes as _plt_Axes
 from matplotlib.cm import ScalarMappable as _plt_ScalarMappable
+from matplotlib.pyplot import subplots as _plt_subplots
 from math import (
+    log10 as _math_log10,
     sin as _math_sin,
     cos as _math_cos,
     asin as _math_asin,
@@ -19,7 +22,11 @@ from math import (
     atan2 as _math_atan2,
     pi as _math_pi)
 from aabpl.utils.general import flatten_list, angle
-from aabpl.utils.distances_to_cell import ( get_cells_relevant_for_disk_by_type, get_cell_farthest_vertex_to_point, get_cell_closest_point_to_points, )
+from aabpl.utils.distances_to_cell import ( get_cell_farthest_vertex_to_point, get_cell_closest_point_to_points, )
+from matplotlib.path import Path as _plt_Path
+from matplotlib.patches import PathPatch as _plt_PathPatch
+from matplotlib.collections import PatchCollection as _plt_PatchCollection
+from shapely.geometry import (Polygon as _shapely_Polygon, MultiPolygon as _shapely_MultiPolygon)
 
 # x = np.linspace(-6,6, num=100)
 # y = np.linspace(-10,10, num=100)
@@ -541,4 +548,23 @@ def create_circle_patches(
         y_off=y_off,
     )
     return [outer_poly_patch, inner_poly_patch]
+#
+
+def plot_polygon(poly, ax=None, **kwargs):
+    if ax is None:
+        fig, ax = _plt_subplots()
+
+    geoms = [poly] if type(poly) == _shapely_Polygon else list(poly.geoms)
+    for geom in geoms:
+        path = _plt_Path.make_compound_path(
+            _plt_Path(_np_asarray(geom.exterior.coords)[:, :2]),
+            *[_plt_Path(_np_asarray(ring.coords)[:, :2]) for ring in geom.interiors]
+            )
+
+        patch = _plt_PathPatch(path, **kwargs)
+        collection = _plt_PatchCollection([patch], **kwargs)
+        
+        ax.add_collection(collection, autolim=True)
+        ax.autoscale_view()
+    return collection
 #

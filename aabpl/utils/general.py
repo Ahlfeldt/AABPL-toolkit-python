@@ -8,31 +8,44 @@ from math import (
     atan2 as _math_atan2,
     pi as _math_pi)
 from math import degrees, atan2
+from shapely.geometry import (Polygon as _shapely_Polygon)
+from mpmath import mp
 
-def angle_to(p1, p2, rotation=0, clockwise=False):
+def angle_to(p1, p2, rotation=0, clockwise=False) -> float:
+    """Calculates angle of line conecting p1->p2 (counter)-clockwise relative horizontal line point right (0,0)->(1,0) 
+    :param p1: point coordinate tuple
+    :param p2: point coordinate tuple
+    :param clockwise: direction per default counter-clockwise
+    :return float angle
     """
-    rotation clockwise
-    """
-    angle = degrees(atan2(p2[1] - p1[1], p2[0] - p1[0])) - rotation
+    mp.precision = 16
+    angle = float(degrees(mp.atan2(p2[1] - p1[1], p2[0] - p1[0]))) - rotation
+    # angle = degrees(atan2(p2[1] - p1[1], p2[0] - p1[0])) - rotation
     if clockwise:
         angle = -angle
     return angle % 360
 #
 
-def angles_to_origin(pts,center):
-    """
-    pts: list of 2D coordinates
-    2D center coordiates 
+def angles_to_origin(pts,center) -> list:
+    """Returns angle counter clockwise relative to line connecting (0,0)->center where pt=2*center will give angle of 180degrees
+    :param pts: list of coordinate tuples
+    :param center: 2D coordinates of center
+    :return List[Tuple[float, float]]:
     """
     rotation = angle_to((0,0), center)
     return [angle_to(center, pt, rotation=rotation) for pt in pts]
 #
 
 def angle(x1, y1, x2, y2):
+    """Calculates angle of line conecting (x1,y2)->(x2,y2) clockwise relative horizontal line point right (0,0)->(1,0) 
+    :param p1: point coordinate tuple
+    :param p2: point coordinate tuple
+    :param clockwise: direction per default counter-clockwise
+    :return float angle clockwise
     """
-    TODO
-    """
-    return _math_atan2(-y2+y1, x2-x1) % (2*_math_pi)
+    mp.dps = 16
+    return float(mp.atan2(y1-y2, x2-x1) % (2*mp.pi))
+    # return _math_atan2(y1-y2, x2-x1) % (2*_math_pi)
 #
 
 def pt_is_left_of_vector(ptx:float, pty:float, startx:float, starty:float, endx:float, endy:float) -> bool:
@@ -162,7 +175,7 @@ class DataFrameRelation(object):
         
         a_columns = set(a.columns)
         b_columns = set(b.columns)
-        if (force_same_columns or not silent) and len(a_columns.difference(b_columns)) > 0:
+        if (force_same_columns or silent==False) and len(a_columns.difference(b_columns)) > 0:
             msg = ("Checking relation of two DataFrame with columns that are not shared: " + 
                 str(a_columns.difference(b_columns))+". Shared columns:"+str(a_columns.intersection(b_columns))
                 )
@@ -209,13 +222,13 @@ class DataFrameRelation(object):
         return is_contained
     #
 #
-def find_column_name(static_part:str, dynamic_part:str, existing_columns:list, maxlen:int=10):
+def find_column_name(static_part:str, dynamic_part:str='', existing_columns:list=[], maxlen:int=10):
     for i in range(len(existing_columns)):
         dynamic = dynamic_part[:-i]
         for j in range(len(static_part)-1):
-            static = static_part[:-j]
+            static = static_part[:-j] if j>0 else static_part 
             for flip in [False,True]:
-                for sep in [1,0,2,3,4,5,6,7]:
+                for sep in [1,0,1,2,3,4,5,6,7][int('' in [static, dynamic]):]:
                     first,last = (static, dynamic)[flip], (static, dynamic)[not flip]
                     name_to_test = first+('_'*sep)+last
                     if len(name_to_test)<=maxlen:
@@ -224,3 +237,55 @@ def find_column_name(static_part:str, dynamic_part:str, existing_columns:list, m
                     elif sep == 0:
                         break
     raise ValueError('Not able to find a column name that is satisfying condition and not already taken', static_part, dynamic_part, existing_columns, maxlen)
+
+
+def dist_line_segment_to_point(x1:int, y1:int, x2:int, y2:int, x3:int, y3:int) -> float: # x3,y3 is the point
+    """
+    Returns shortest distance of p3(x3,y3) to linesegement connecting p1 and p2.
+    """
+    px = x2-x1
+    py = y2-y1
+
+    norm = px*px + py*py
+
+    u =  ((x3 - x1) * px + (y3 - y1) * py) / float(norm)
+
+    if u > 1:
+        u = 1
+    elif u < 0:
+        u = 0
+
+    x = x1 + u * px
+    y = y1 + u * py
+
+    dx = x - x3
+    dy = y - y3
+
+    dist = (dx*dx + dy*dy)**.5
+
+    return dist
+
+def count_polygon_edges(
+            poly
+    ):
+        complexity = 0
+        geoms = [poly] if type(poly) == _shapely_Polygon else list(poly.geoms)
+        for geom in geoms:
+            if type(geom) == _shapely_Polygon:
+                complexity += len(geom.exterior.coords)-2
+                for interior in geom.interiors:
+                    complexity += len(interior.coords)-2
+            #
+        return complexity
+#
+def count_polygon_interiors(
+            poly
+    ):
+        n_interiors = 0
+        geoms = [poly] if type(poly) == _shapely_Polygon else list(poly.geoms)
+        for geom in geoms:
+            if type(geom) == _shapely_Polygon:
+                n_interiors += len(geom.interiors)
+            #^
+        return n_interiors
+#

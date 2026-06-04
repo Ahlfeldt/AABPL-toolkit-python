@@ -59,8 +59,8 @@ class GridPlots(object):
             vmax = X.max()
             norm = _plt_LogNorm(vmin=vmin,vmax=vmax,clip=False) if vmin>=0 else _plt_Normalize(vmin=vmin,vmax=vmax,clip=False)
             cmap = truncate_colormap(_plt_get_cmap('Reds'), 0.3, 1)
-            cmap.set_under('#fff0')
-            cmap.set_under('#cfcd')
+            cmap.set_under('#ffffff00')
+            cmap.set_bad('#ffffff00')
             p = ax.imshow(X=X, interpolation='none', cmap=cmap, norm=norm, extent=extent)
             cb = _plt_colorbar(p, cax=add_color_bar_ax(fig,ax))
             ax.set_xlabel('x/lon') 
@@ -80,7 +80,9 @@ class GridPlots(object):
         """
         Plot cell clusters (for each clusterindicator)
         """
-        
+        if len(self.grid.clustering.by_column)==0:
+            print("No clustering performed. Run detect_cell_clusters or grid.create_clusters first.")
+            return
         if axs is None:
             fig, axs = _plt_subplots(ncols=len(self.grid.search.target.c), figsize=(10,10*len(self.grid.search.target.c)))
             

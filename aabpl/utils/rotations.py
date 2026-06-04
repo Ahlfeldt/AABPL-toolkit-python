@@ -1,4 +1,5 @@
-from numpy import array as _np_array
+from numpy import (array as _np_array, empty as _np_empty)
+
 
 ################ transform_cell_pattern ######################################################################################
 def transform_cell_pattern(
@@ -32,10 +33,11 @@ def transform_cell_pattern(
     if i not in [1,2,3,4,5,6,7,8]:
         raise ValueError("Triangle number must be an integer between 1 and 8")
     if type(cells) != _np_array:
+        if len(cells)==0: return _np_empty(shape=(0,2))
         cells = _np_array(cells)
     else:
         cells = cells.copy()
-
+    
     if i == 1: return cells[:,:] # no change *array([1,1]) # Triangle 1
     if i == 2: return cells[:,::-1]#* _np_array([ 1, 1])   # Triangle 2
     if i == 3: return cells[:,::-1] * _np_array([ 1,-1])   # Triangle 3

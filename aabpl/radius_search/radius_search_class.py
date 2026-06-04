@@ -1,6 +1,6 @@
 from numpy import array as _np_array
 from pandas import (DataFrame as _pd_DataFrame, cut as _pd_cut, concat as _pd_concat) 
-from aabpl.utils.general import ( DataFrameRelation, arr_to_tpls)
+from aabpl.utils.general import DataFrameRelation, arr_to_tpls, find_column_name
 from aabpl.utils.distances_to_cell import get_cells_relevant_for_disk_by_type
 from .two_dimensional_weak_ordering_class import gen_weak_order_rel_to_convex_set
 from .pts_to_cells import assign_points_to_cells, aggregate_point_data_to_cells
@@ -30,6 +30,7 @@ class DiskSearchObject(object):
 
 ################ DiskSearchSource ######################################################################################
 class DiskSearchSource(DiskSearchObject):
+    @time_func_perf
     def __init__(
         self,
         grid,
@@ -47,7 +48,10 @@ class DiskSearchSource(DiskSearchObject):
         self.x = x
         self.row_name = row_name
         self.col_name = col_name
-        self.cell_region_name = next(('cell_reg'+str(i) for i in (['']+list(range(len(pts.columns)))) if not 'cell_reg'+str(i) in pts.columns)) 
+        self.cell_region_name = find_column_name('cell_reg', existing_columns=pts.columns)
+        self.off_x = find_column_name('offset_x', existing_columns=pts.columns)
+        self.off_y = find_column_name('offset_y', existing_columns=pts.columns)
+        
         self.sum_suffix = sum_suffix
         self.aggregate_columns = [str(column)+sum_suffix for column in c]
 
@@ -67,9 +71,12 @@ class DiskSearchSource(DiskSearchObject):
             grid=self.grid,
             pts=self.pts,
             r=self.grid.search.r,
+            nest_depth=self.grid.nest_depth,
             include_boundary=self.grid.search.include_boundary,
             y=self.y,
             x=self.x,
+            off_x=self.off_x,
+            off_y=self.off_y,
             row_name=self.row_name,
             col_name=self.col_name,
             cell_region_name=self.cell_region_name,
@@ -84,6 +91,7 @@ class DiskSearchSource(DiskSearchObject):
 
 ################ DiskSearchTarget ######################################################################################
 class DiskSearchTarget(DiskSearchObject):
+    @time_func_perf
     def __init__(
         self,
         grid,
@@ -118,9 +126,12 @@ class DiskSearchTarget(DiskSearchObject):
         return aggregate_point_data_to_cells(
             grid=self.grid,
             pts=self.pts,
+            y=self.y,
+            x=self.x,
             c=self.c,
             row_name=self.row_name,
             col_name=self.col_name,
+            nest_depth=self.grid.nest_depth,
             silent=silent,
         )
     #
@@ -129,11 +140,14 @@ class DiskSearchTarget(DiskSearchObject):
 
 ################ DiskSearch ######################################################################################
 class DiskSearch(object):
+    @time_func_perf
     def __init__(
         self,
         grid,
         r:float=0.0075,
+        nest_depth:int=None,
         exclude_pt_itself:bool=True,
+        weight_valid_area:str=None,
         include_boundary:bool=False,
     ):
             
@@ -143,11 +157,16 @@ class DiskSearch(object):
         # link to grid
         grid.search = self
         self.grid = grid
+        self.exclude_pt_itself = exclude_pt_itself
+        self.weight_valid_area = weight_valid_area
+        self.include_boundary = include_boundary
 
         self.update_search_params(
             grid=grid,
             exclude_pt_itself=exclude_pt_itself,
+            weight_valid_area=weight_valid_area,
             r=r,
+            nest_depth=nest_depth,
             include_boundary=include_boundary,
         )
         #
@@ -158,12 +177,16 @@ class DiskSearch(object):
         self,
         grid,
         exclude_pt_itself:bool=None,
-        r:float=0.0075,
-        include_boundary:bool=False,
+        weight_valid_area:str=None,
+        r:float=None,
+        nest_depth:int=None,
+        include_boundary:bool=None,
         relation_tgt_to_src:str=None,
     ):
         if exclude_pt_itself is not None:
             self.exclude_pt_itself = exclude_pt_itself
+        if weight_valid_area is not None:
+            self.weight_valid_area = weight_valid_area
         if relation_tgt_to_src is not None:
             self.relation_tgt_to_src = relation_tgt_to_src
         
@@ -174,6 +197,7 @@ class DiskSearch(object):
         
         # store params
         self.r = r
+        self.nest_depth = nest_depth if not nest_depth is None else grid.nest_depth
         self.include_boundary = include_boundary
         self.overlap_checks = []
         self.contain_checks = []
@@ -196,6 +220,7 @@ class DiskSearch(object):
         triangle_1_vertices = _np_array([[0,0],[0.5,0],[0.5,0.5]])
         vertices_is_inside_triangle_1 = _np_array([True,True,False],dtype=bool)
         # TODO r,grid_spacing, include_boundary could be removed from weak_order_tree generation
+        # TODO THIS HAS BECOME OBSOLETE
         self.weak_order_tree = gen_weak_order_rel_to_convex_set(
                 cells=self.cells_maybe_overlapping_a_trgl_disk,
                 convex_set_vertices = triangle_1_vertices,
@@ -204,7 +229,9 @@ class DiskSearch(object):
                 grid_spacing=grid.spacing,
                 include_boundary=include_boundary,
         )
-        self.cells_contained_in_all_disks = arr_to_tpls(self.cells_contained_in_all_disks,int)
+        
+        # TODO lvl is hard coded to 0. IF MULTIPLE LEVELS ARE CONSIDERED THIS MIGHT NEED TO BE ADJUSTED in get_cells_relevant_for_disk_by_type
+        self.cells_contained_in_all_disks = [(0,(row,col)) for (row,col) in arr_to_tpls(self.cells_contained_in_all_disks,int)]
     #
     
     # @time_func_perf
@@ -283,7 +310,7 @@ class DiskSearch(object):
         alr_added_pts_to_grid) = self.check_if_search_obj_already_exist(
             **dict(list(locals().items())[1:8])
         )
-
+        
         self.source = DiskSearchSource(
             grid=self.grid,
             pts=pts,
@@ -360,14 +387,16 @@ class DiskSearch(object):
             #     inplace=True
             # )
         #
+
         if not alr_added_pts_to_grid:
             self.target.aggregate_pt_data_to_cells(silent=silent,)
         #
+
     #
 
+    @time_func_perf
     def perform_search(
             self,
-            plot_radius_sums:dict=None,
             plot_pt_disk:dict=None,
             silent:bool=False,
     ):
@@ -380,12 +409,14 @@ class DiskSearch(object):
             c=self.target.c,
             y=self.source.y,
             x=self.source.x,
+            off_x=self.source.off_x,
+            off_y=self.source.off_y,
             row_name=self.source.row_name,
             col_name=self.source.col_name,
             cell_region_name=self.source.cell_region_name,
             sum_suffix=self.source.sum_suffix,
             exclude_pt_itself=self.exclude_pt_itself,
-            plot_radius_sums=plot_radius_sums,
+            weight_valid_area=self.weight_valid_area,
             plot_pt_disk=plot_pt_disk,
             silent=silent,
         )

@@ -1,6 +1,6 @@
 from math import ceil as _math_ceil
 from matplotlib.pyplot import (subplots as _plt_subplots, figure as _plt_figure)
-from matplotlib.patches import Circle as _plt_circle, Rectangle as _plt_Rectangle
+from matplotlib.patches import Circle as _plt_Circle, Rectangle as _plt_Rectangle, Polygon as _plt_Polygon
 from ..utils.general import flatten_list
 
 
@@ -9,13 +9,18 @@ def plot_cell_pattern(
     overlapped_cells, 
     all_cells,
     r:float,
-    grid_spacing:float, 
+    grid_spacing:float,
+    nested_contained_cells=[],
+    nested_overlapped_cells=[],
+    region_coords:list=None, 
     add_idxs:bool=True,
+    hatch='',
     **plot_kwargs,
 ):
 
     """
     Illustrate method
+    region_coords: list of tuples marking coords for which to draw a circle around
     """
     # specify default plot kwargs and add defaults
     plot_kwargs = {
@@ -34,19 +39,61 @@ def plot_cell_pattern(
     if ax is None:
         fig, ax = _plt_subplots(1,1, figsize=figsize)
     ################################################################################################################
-    colors = ['#ccc', 'green', 'red']
-    for (row, col), color in flatten_list(
-        [[((row, col), color) for row, col in cells] for cells,color in zip(
+    # add circle patches
+    for region_coord in region_coords:
+        ax.add_patch(
+            _plt_Circle(
+                xy=region_coord, radius=r,
+                facecolor=('#000000'+(str(int(60/len(region_coords))) if int(60/len(region_coords))>=10 else '0'+str(int(60/len(region_coords))))),
+                edgecolor='#0006', linewidth=0.25))
+    colors = ['#ccc', "#9ac991ff", "#fdaba3ff"]
+    # if len(nested_contained_cells)+len(nested_overlapped_cells)>0:
+    #     overlapped_cells = []
+    [[((lvl,(row, col)), color) for lvl,(row, col) in cells] for cells,color in zip(
+        [all_cells, contained_cells, overlapped_cells],
+        colors)]
+    for (lvl,(row, col)), color in flatten_list(
+        [[((lvl,(row, col)), color) for lvl,(row, col) in cells] for cells,color in zip(
         [all_cells, contained_cells, overlapped_cells],
         colors)]):
+        lvl=lvl
         ax.add_patch(_plt_Rectangle(
-            xy = (col-0.5, row-0.5), 
-            width=1, height=1, 
-            linewidth=.7, facecolor=color, edgecolor=color, alpha=0.3
+            xy = (float(col)-2**-lvl, float(row)-2**-lvl), 
+            width=2**(1-lvl), height=2**(1-lvl), 
+            linewidth=.7, facecolor=color, edgecolor=color, alpha=1, 
+            **({} if hatch =='' else {'hatch':hatch})
         ))
+        
         if add_idxs and color == colors[0]:
             ax.annotate(text=str(row)+","+str(col), xy=(col,row),horizontalalignment='center')
-
+    
+    colors = ["#1d802a", "#a51414"]
+    for (lvl,(row, col)), color in flatten_list(
+        [[((lvl,(row, col)), color) for lvl, (row, col)  in cells] for cells,color in zip(
+        [nested_contained_cells, nested_overlapped_cells],
+        colors)]):
+        xy = (float(col)-2**(-lvl-1), float(row)-2**(-lvl-1))
+        ax.add_patch(_plt_Rectangle(
+            xy = xy, 
+            width=2**(-lvl), height=2**(-lvl), 
+            linewidth=.7, facecolor=color, edgecolor=color, alpha=0.3, 
+            **({} if hatch =='' else {'hatch':hatch})
+        ))
+    ax.add_patch(_plt_Rectangle(
+            xy = (-.5,-.5), 
+            width=1, height=1, 
+            linewidth=.7, facecolor='white', edgecolor='black', alpha=0.3, 
+            **({} if hatch =='' else {'hatch':hatch})
+        ))
+    
+    
+    # add region polygon
+    ax.add_patch(
+        _plt_Polygon(
+            xy=region_coords,
+            facecolor="#FFFFFF",
+            edgecolor='#000', linewidth=0.25))
+        
     ratio = r/grid_spacing
     cell_steps_max = _math_ceil(ratio+1.5)
 

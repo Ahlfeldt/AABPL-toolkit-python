@@ -10,17 +10,19 @@ func_timer_dict = {
 }
 #
 
-def time_func_perf(func):
+def time_func_perf(func, function_name_alias=None):
     @wraps(func)
     def wrapper(*args,**kwargs):
         start_time = process_time()
         pos = len(func_timer_dict['times'])
-        func_timer_dict['times'].append({'func_name':func.__name__, 'start_time':start_time})
+        func_timer_dict['times'].append({'func_name':func.__name__ if func.__name__ != '__init__' else func.__qualname__, 'start_time':start_time})
         result = func(*args,**kwargs)
         func_timer_dict['times'][pos].update({'end_time':process_time()})
         return result
     return wrapper
 #
+
+
 
 @time_func_perf
 def time_single_perform_overhead():
@@ -81,10 +83,10 @@ def analyze_func_perf(
     grp_dicts = []
     func_dicts = []
     nest_level_max = 0
+    
     for t_dict in func_timer_dict['times']:
 
-        func_name = t_dict['func_name']
-        start_time, end_time = t_dict['start_time'], t_dict['end_time']
+        func_name, start_time, end_time = t_dict['func_name'], t_dict['start_time'], t_dict['end_time']
         time_elapsed = (end_time-start_time)
         process_time = max([0., (end_time-start_time)-overhead])
         if func_name not in func_name_to_cat:
@@ -100,10 +102,9 @@ def analyze_func_perf(
                 'n_calls': 1,
         })
 
-        if len(open_funcs) > 0 and open_funcs[-1]['end_time'] <= start_time:
-                # close the last one maybe save this now to grp dicts?
-                open_funcs.pop()
-        #
+        while len(open_funcs) > 0 and open_funcs[-1]['end_time'] < end_time:
+            open_funcs.pop()
+        
 
         if not any([func['func_name'] == func_name for func in open_funcs]):
             # nest function call
@@ -111,10 +112,11 @@ def analyze_func_perf(
                 open_funcs[-1]['process_time'] = max([0., open_funcs[-1]['process_time'] - time_elapsed])  
             #
             
+            nest_level = len(open_funcs)
+            if nest_level > nest_level_max:
+                nest_level_max = nest_level
             open_funcs.append(t_dict)
             grp_dicts.append(t_dict)
-            nest_level = len(open_funcs)-1
-            nest_level_max = max([nest_level_max, nest_level])
             t_dict.update({
                 'nest_level': nest_level,
                 'path_cat': "-".join([func['cat'] for func in open_funcs]),
@@ -123,9 +125,10 @@ def analyze_func_perf(
                 **{'path_name_'+str(i): "-".join([func['func_name'] for func in open_funcs[:i+1]]) for i, open_func in enumerate(open_funcs)},
             })
             concat_name_to_cat[t_dict['path_name']] = t_dict['path_cat'] 
-            for open_func in open_funcs:
-                t_dict.update({
-                })    
+            
+            # for open_func in open_funcs:
+            #     t_dict.update({
+            #     })    
             #
         else:
             # dont nest function: either its recursively calling itself func1(func1())
@@ -148,7 +151,8 @@ def analyze_func_perf(
     #
     
     grp_df = _pd_DataFrame(grp_dicts)
-    if len(grp_df['path_cat_0'].unique())==1 and nest_level_max > 0:
+    # if len(grp_df['path_cat_0'].unique())==1 and nest_level_max > 0:
+    while len(grp_df['path_cat_0'].unique())==1 and nest_level_max > 0:
         grp_df = grp_df[grp_df['path_cat'] != grp_df['path_cat_0']]
         grp_df.drop(columns=['path_cat_0', 'path_name_0'], inplace=True)
         grp_df.rename(columns={'path_cat_'+str(i):'path_cat_'+str(i-1) for i in range(1, nest_level_max+1)}, inplace=True) 
@@ -160,7 +164,8 @@ def analyze_func_perf(
         for i in range(nest_level_max+1):
             grp_df['path_cat_'+str(i)] = grp_df['path_cat_'+str(i)].str.split('-', n=1).str.get(-1)
             grp_df['path_name_'+str(i)] = grp_df['path_name_'+str(i)].str.split('-', n=1).str.get(-1)
-    
+            
+
     # intial_sort = grp_df.index
     # grp_df.sort_values(['path_cat'])
     # grp_df['path_int'] = range(len(grp_df))
@@ -194,13 +199,18 @@ def analyze_func_perf(
         used_names = []
         used_colors = []
         for i, r in zip(range(nest_level_max)[::-1], _np_linspace(0.0, 1, nest_level_max+1)[1:][::-1]):
-            group_col = ['path_cat_'+str(i)]
+            group_col = 'path_cat_'+str(i)
+            name_col = 'path_name_'+str(i)
+            group_keys = grp_df.groupby([group_col]).groups.keys()
+            group_names = [
+               grp_df[name_col][grp_df[group_col]==k].iloc[0] for k in group_keys
+            ]
             xs = grp_df.groupby(group_col)['process_time'].sum()
             below_threshold = (xs/total_process_time) <= threshold
             # x[below_threshold] = x[below_threshold]
 
-            labels = [label if (x/total_process_time)>threshold else other_name for x, label in zip(xs, grp_df.groupby(group_col).groups.keys())]
-            names = [name if (x/total_process_time)>threshold else other_name for x, name in zip(xs, grp_df.groupby(['path_name_'+str(i)]).groups.keys())]
+            labels = [label if (x/total_process_time)>threshold else other_name for x, label in zip(xs, group_keys)]
+            names = [name if (x/total_process_time)>threshold else other_name for x, name in zip(xs, group_names)]
             colors = [used_cmap(space_dict[key]) if (x/total_process_time)>threshold else other_color for x, key in zip(xs, labels)]
             for name, color, xs0 in zip(names, colors, xs):
                 if name not in used_names:
@@ -210,13 +220,21 @@ def analyze_func_perf(
                     used_colors[used_names.index(name)] = color
 
             # colors = [used_cmap(cmap_dict[key]) for key in labels]
+            labels=[
+                    '' 
+                    if name == other_name else 
+                    (name.split('-')[-1] if name.split('-')[-1] != '__init__' else name.split('-')[-1]) 
+                    if xs/total_process_time>0.000 else 
+                    '' 
+                    for name,xs in zip(names,xs)
+                    ]
             patches, text = ax.pie(
                 x=xs,
                 radius=r,
                 colors=colors,
-                labels=['' if name == other_name else (n.split('-')[-1] if n.split('-')[-1] != '__init__' else n.split('-')[-2]) if xs/total_process_time>0.000 else '' for n,xs in zip(names,xs)],
-                labeldistance=.999,
-                textprops={'fontsize': 7},
+                labels=labels,
+                labeldistance=.999*((i+0.5)/(i+1)),
+                textprops={'fontsize': 7, 'backgroundcolor':'#ffffffaa'},
                 wedgeprops={'edgecolor':'black'}, # TODO maybe its possible to pass a vector of bordercolors in here(remove if same slice)
                 )
             func_timer_dict['cmap_dict']=space_dict

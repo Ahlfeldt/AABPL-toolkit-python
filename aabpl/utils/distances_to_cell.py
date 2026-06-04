@@ -11,15 +11,18 @@ from numpy import (
     logical_or,
     where as _np_where, 
     arange, transpose as _np_transpose, unique, linspace, flip,  concatenate,
-    min,
+    min as _np_min,
     max as _np_max, 
     equal, logical_and, 
     newaxis as _np_newaxis, 
-    sort
+    sort,
+    abs as _np_abs,
+    maximum as _np_maximum,
+    minimum as _np_minimum,
 )
 from numpy.linalg import norm as _np_linalg_norm
 from math import ceil as _math_ceil
-from ..utils.general import ( flatten_list, visualize, depth, list_dict_keys, )
+from ..utils.general import ( flatten_list, visualize, depth, list_dict_keys, dist_line_segment_to_point)
 
 
 # TODO vectorize them such that they can take any input from shape(1,2) to shape(n,2)
@@ -58,6 +61,20 @@ def max_possible_dist_cells_to_cell(
     return _np_linalg_norm(cell_diff + _np_where(cell_diff>=0,1,-1), axis=1)
     # return grid_spacing*((row_diff+(1 if row_diff>=0 else -1))**2 + (col_diff+(1 if col_diff>=0 else -1))**2)**.5
 #
+def max_possible_dist_subcells_to_orig_cell(
+        cell_dest:_np_array,
+        nest_lvl:int,
+    ) -> float:
+    """
+    TODO
+    Returns:
+
+    """
+        
+    cell_diff = 1 + _np_maximum(_np_abs(cell_dest)-2**(nest_lvl-1),0) / 2**nest_lvl
+    return _np_linalg_norm(cell_diff, axis=1)
+    # return grid_spacing*((row_diff+(1 if row_diff>=0 else -1))**2 + (col_diff+(1 if col_diff>=0 else -1))**2)**.5
+#
 def min_possible_dist_trgl1_to_cell(
         cell_dest:_np_array,
         ) -> float:
@@ -75,6 +92,22 @@ def min_possible_dist_trgl1_to_cell(
         (col-(1 if col>0 else 0 if col==0 else -0.5))**2
         )**.5
 #
+
+def min_possible_dist_subcells_to_orig_cell(
+        cell_dest:_np_array,
+        nest_lvl:int,
+    ) -> float:
+    """
+    TODO
+    Returns:
+
+    """
+        
+    cell_diff = _np_maximum(_np_abs(cell_dest)-(1+2**(nest_lvl-1)),0) / 2**nest_lvl
+    return _np_linalg_norm(cell_diff, axis=1)
+    # return grid_spacing*((row_diff+(1 if row_diff>=0 else -1))**2 + (col_diff+(1 if col_diff>=0 else -1))**2)**.5
+#
+
 def max_possible_dist_trgl1_to_cell(
         cell_dest:_np_array,
         ) -> float:
@@ -91,6 +124,105 @@ def max_possible_dist_trgl1_to_cell(
         )**.5
 #
 
+def return_farthest_subcell_vertex_coords(
+        subcell_row_col:_np_array,
+        nest_lvl:int,
+):
+    row, col = subcell_row_col
+    x_inner = (col-_np_sign(col))*1/2**nest_lvl
+    x_outer = col*1/2**nest_lvl
+    y_inner = (row-_np_sign(row))*1/2**nest_lvl
+    y_outer = row*1/2**nest_lvl
+    x_coord = (
+        x_outer if
+            abs(x_inner - .5) < abs(x_outer - .5) or 
+            abs(x_inner - .5) == abs(x_outer - .5) and abs(x_inner) <= abs(x_outer)
+        else x_inner
+    )
+    y_coord = (
+        y_outer if
+            abs(y_inner) < abs(y_outer) or 
+            abs(y_inner) == abs(y_outer) and abs(y_inner+.5) <= abs(y_outer+.5)
+        else y_inner
+    )
+    return (x_coord, y_coord)
+
+#
+
+def max_possible_dist_subcells_to_trgl1(
+        cell_dest:_np_array,
+        nest_lvl:int,
+    ) -> float:
+    """
+    TODO
+    Returns:
+
+    """
+    # the max distance is the distance to either of the three triangle vertices
+    # if row<0: distance to top right corner
+    trgl_vertices = _np_array([(0,0),(0.5,0),(0.5,0.5)])
+    farthest_coords = _np_array([return_farthest_subcell_vertex_coords(cell, nest_lvl=nest_lvl) for cell in cell_dest])  
+    max_dist = _np_max([_np_linalg_norm(farthest_coords-vtx,axis=1) for vtx in trgl_vertices], axis=0)
+    return max_dist
+    # cell_diff_center = 0.5 + _np_maximum((cell_dest)-2**(nest_lvl-1),0) / 2**nest_lvl
+    # cell_diff_mid_right = 0.5 + _np_maximum((cell_dest)-2**(nest_lvl-1),0) / 2**nest_lvl
+    # cell_diff_top_right = 0.5 + _np_maximum((cell_dest)-2**(nest_lvl-1),0) / 2**nest_lvl
+    # cell_diff = max([cell_diff_center, cell_diff_mid_right, cell_diff_top_right])
+    # cell_diff = 1 + _np_maximum(_np_abs(cell_dest)-2**(nest_lvl-1),0) / 2**nest_lvl
+    # return _np_linalg_norm(cell_diff, axis=1)
+    # return grid_spacing*((row_diff+(1 if row_diff>=0 else -1))**2 + (col_diff+(1 if col_diff>=0 else -1))**2)**.5
+#
+
+def return_closest_subcell_vertex_coords(
+        subcell_row_col:_np_array,
+        nest_lvl:int,
+):
+    row, col = subcell_row_col
+    x_inner = (col-_np_sign(col))*1/2**nest_lvl
+    x_outer = col*1/2**nest_lvl
+    y_inner = (row-_np_sign(row))*1/2**nest_lvl
+    y_outer = row*1/2**nest_lvl
+    x_coord = (
+        x_inner if
+            abs(x_inner - .5) < abs(x_outer - .5) or 
+            abs(x_inner - .5) == abs(x_outer - .5) and abs(x_inner) <= abs(x_outer)
+        else x_outer
+    )
+    y_coord = (
+        y_inner if
+            abs(y_inner) < abs(y_outer) or 
+            abs(y_inner) == abs(y_outer) and abs(y_inner+.5) <= abs(y_outer+.5)
+        else y_outer
+    )
+    return (x_coord, y_coord)
+
+#
+def min_possible_dist_subcells_to_trgl1(
+        cell_dest:_np_array,
+        nest_lvl:int,
+    ) -> float:
+    """
+    TODO
+    Returns:
+
+    """
+    # the min distance may be to (any?) point on the three triangle edges
+    # if in row below, then point always lies on bottom edges
+    # if in column to the right, then always on right edge
+    # in all other cases it lies on diagonal edge 
+    # TODO choose cell vertex that is closest
+    # select x coord closest to 0.5 (tiebreak: closer to 0 than to 1)
+    # select y coord closest to 0.0 (tiebreak: closer to +.5 than -.5)
+    # formula to retrieve coordiantes for subcell vertices: 
+    
+    closest_vtx_coords = [return_closest_subcell_vertex_coords(cell, nest_lvl=nest_lvl) for cell in cell_dest]
+    dist_to_diag = [dist_line_segment_to_point(0,0,0.5,0.5,vtx_x,vtx_y) for vtx_x,vtx_y in closest_vtx_coords]   
+    dist_to_hori = [dist_line_segment_to_point(0,0,0.5,0, vtx_x,vtx_y) for vtx_x,vtx_y in closest_vtx_coords]   
+    dist_to_vert = [dist_line_segment_to_point(0.5,0,0.5,0.5, vtx_x,vtx_y) for vtx_x,vtx_y in closest_vtx_coords]   
+    min_dist = _np_min([dist_to_diag, dist_to_hori, dist_to_vert], axis=0)
+    return min_dist
+    # return grid_spacing*((row_diff+(1 if row_diff>=0 else -1))**2 + (col_diff+(1 if col_diff>=0 else -1))**2)**.5
+#
 def get_cell_closest_point_to_points(
         pts_xy:_np_array,
         cell:_np_array,
@@ -198,22 +330,16 @@ def max_dist_points_to_cell(
         cell:_np_array,
         ) -> _np_array:
     """
-    TODO
     Returns:
-        1D array of min distance from points to cell
+        1D array of max distance from each point to cell (distance to farthest vertex)
     """
     if len(pts_xy)==0:
-        print("NOOOOPOINT1",pts_xy)
         return _np_array([])
-    if len(cell)==0:
-        print("NOOOOPOINTcell_cell",cell)
     return _np_linalg_norm(
         _np_array([
-            get_cell_farthest_vertex_to_point(
-                pts_xy,
-                cell
-            ) for pts_xy in pts_xy
-            ]) - pts_xy,
+            get_cell_farthest_vertex_to_point(pt_xy, cell)
+            for pt_xy in pts_xy
+        ]) - pts_xy,
         axis=1
     )
 #
@@ -222,6 +348,7 @@ def is_within_radius(distances,r:float,include_boundary):
     if include_boundary:
         return distances <= r
     return distances < r
+#
 
 def get_cells_relevant_for_disk_by_type(
         grid_spacing:float=250,
@@ -230,6 +357,7 @@ def get_cells_relevant_for_disk_by_type(
         return_type:str=[None, 'contained_by_all', 'contained_by_trgl', 'overlapped_by_all', 'overlapped_by_trgl'][0]
     ) -> tuple:
     """
+    TODO PROBABLY THIS FUNCTION NEEDS TO BE ADJUSTED TO COVER LOWER LEVELS ASWELL. 
     TODO turn it into smaller function to return a specific type only 
     For an undefined point in cell(0,0): Determines which cells are always fully within radius and which cell might be overlaped 
     If count == True returns only count of cells. If not True returns list of tuples of cell row col locations
@@ -293,6 +421,112 @@ def get_cells_relevant_for_disk_by_type(
         cells_maybe_overlapping_a_trgl_disk
     )
 #
+
+def get_cells_by_lvl_relevant_for_disk_by_type(
+        grid_spacing:float=250,
+        r:float=750,
+        nest_depth=0,
+        include_boundary:bool=False,
+        return_type:str=[None, 'contained_by_all', 'contained_by_trgl', 'overlapped_by_all', 'overlapped_by_trgl'][0]
+    ) -> tuple:
+    """
+    TODO PROBABLY THIS FUNCTION NEEDS TO BE ADJUSTED TO COVER LOWER LEVELS ASWELL. 
+    TODO turn it into smaller function to return a specific type only 
+    For an undefined point in cell(0,0): Determines which cells are always fully within radius and which cell might be overlaped 
+    If count == True returns only count of cells. If not True returns list of tuples of cell row col locations
+    Note due to symmetry only 1/8 of radius needs to be checked 
+    Returns
+    - cells_contained_in_all_disks, 
+    - cells_contained_in_all_trgl_disks, 
+    - cells_maybe_overlapping_a_disk, 
+    - cells_maybe_overlapping_a_trgl_disk
+    """
+
+    ratio = r/grid_spacing
+    cell_steps_max = _math_ceil(ratio+1)
+    
+    # create all cells within square
+    unassigned_cells_in_max_steps_square = _np_array(flatten_list([[(row,col) for col in range(-cell_steps_max, cell_steps_max+1)] for row in range(-cell_steps_max, cell_steps_max+1)]))
+    # compare farthest vertex of cells: bool if cell is in contained in disk of radius centered around any pt within grid cell 
+    cell_is_contained_in_all_disks = grid_spacing * max_possible_dist_cells_to_cell(unassigned_cells_in_max_steps_square) <= r
+    cells_contained_in_all_disks = unassigned_cells_in_max_steps_square[cell_is_contained_in_all_disks,:]
+    cells_contained_in_all_disks_by_lvl = [(0,row_col) for row_col in cells_contained_in_all_disks]
+    
+    # for each cell: if contained add (lvl,cell) to contained cells
+    # if not contained and lvl<nest_depth: check 4 subcells
+
+
+    if 'contained_by_all' == return_type:
+        return cells_contained_in_all_disks
+    
+    # those cells should not be part of other sets
+    unassigned_cells_in_max_steps_square = unassigned_cells_in_max_steps_square[_np_invert(cell_is_contained_in_all_disks),:]
+    # compare closest vertex of cells: bool if cell is potentially overlaped by a disk of radius around pt within grid cell 
+    cell_may_overlap_a_disk = (
+        grid_spacing * min_possible_dist_cells_to_cell(unassigned_cells_in_max_steps_square) <= r
+        ) if include_boundary else (
+        grid_spacing * min_possible_dist_cells_to_cell(unassigned_cells_in_max_steps_square) < r
+        )
+    # [min_possible_dist_cell_to_cell(cell, grid_spacing) <= r for cell in unassigned_cells_in_max_steps_square]
+    cells_maybe_overlapping_a_disk = unassigned_cells_in_max_steps_square[cell_may_overlap_a_disk,:]
+    if 'overlapped_by_all' == return_type:
+        return cells_maybe_overlapping_a_disk
+    
+    # compare farthest vertex of cells: bool if cell is in contained in disk of radius centered around any pt within triangle 1 
+    cell_is_contained_in_all_trgl_disks = [grid_spacing * max_possible_dist_trgl1_to_cell(cell) <= r for cell in unassigned_cells_in_max_steps_square]
+    cells_contained_in_all_trgl_disks = unassigned_cells_in_max_steps_square[cell_is_contained_in_all_trgl_disks]    
+    
+    if 'contained_by_trgl' == return_type:
+        return cells_contained_in_all_trgl_disks
+    
+    # those cells should not be in cells maybe overlapping disk around pts in triangle as they are surely contain
+    unassigned_cells_in_max_steps_square = unassigned_cells_in_max_steps_square[_np_invert(cell_is_contained_in_all_trgl_disks),:]
+    # compare closest vertex of cells: bool if cell is potentially overlaped by a disk of radius around pt within triangle 1
+    cell_may_overlap_trgl_disk = (
+        [grid_spacing * min_possible_dist_trgl1_to_cell(cell) <= r for cell in unassigned_cells_in_max_steps_square]
+        ) if include_boundary else (
+        [grid_spacing * min_possible_dist_trgl1_to_cell(cell) < r for cell in unassigned_cells_in_max_steps_square]
+        )
+    cells_maybe_overlapping_a_trgl_disk = unassigned_cells_in_max_steps_square[cell_may_overlap_trgl_disk,:]
+
+    if 'overlapped_by_trgl' == return_type:
+        return cells_maybe_overlapping_a_trgl_disk
+    
+    return (
+        cells_contained_in_all_disks, 
+        cells_contained_in_all_trgl_disks, 
+        cells_maybe_overlapping_a_disk, 
+        cells_maybe_overlapping_a_trgl_disk
+    )
+#
+
+def get_cells_by_lvl_overlapped_by_cell_buffer(
+        grid_spacing:float=250,
+        r:float=750,
+        nest_depth=0,
+): 
+    ratio = r/grid_spacing
+    cell_steps_max = _math_ceil(ratio+1)
+    
+    # create all cells within square
+    unassigned_cells_in_max_steps_square = _np_array(flatten_list([[(row,col) for col in range(-cell_steps_max, cell_steps_max+1)] for row in range(-cell_steps_max, cell_steps_max+1)]))
+    
+    contained_cells, overlapped_cells = [],[]
+    for row,col in unassigned_cells_in_max_steps_square:
+        row_abs, col_abs = abs(row), abs(col)
+        closest_dist = (max(0,row_abs-1))**2 + (max(0,col_abs-1)**2)**.5 * grid_spacing
+        if closest_dist > r:
+            continue
+        farthest_dist = ((row_abs)**2 + (col_abs)**2)**.5 * grid_spacing
+        if farthest_dist <= r:
+            contained_cells.append((0,(row,col)))
+        else:
+            overlapped_cells.append((0,(row,col)))
+    
+    return contained_cells, overlapped_cells
+
+
+
 
 # relevant cell types:
 # cells always contained

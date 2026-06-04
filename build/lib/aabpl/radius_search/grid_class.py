@@ -8,10 +8,12 @@ from numpy import (
 )
 from pyproj import Transformer
 from pandas import DataFrame as _pd_DataFrame
-from math import log10 as _math_log10
+from math import log10 as _math_log10, inf as _math_inf
 from aabpl.utils.general import flatten_list, find_column_name
+from aabpl.utils.crs_transformation import convert_bounds_to_local_crs
 from aabpl.illustrations.plot_utils import map_2D_to_rgb, get_2D_rgb_colobar_kwargs
 from aabpl.illustrations.grid import GridPlots#plot_cell_sums, plot_grid_ids, plot_clusters, plot_cluster_vars
+from aabpl.illustrations.illustrate_sample_area import plot_sample_area
 from aabpl.illustrations.plot_pt_vars import create_plots_for_vars
 from .radius_search_class import (
     aggregate_point_data_to_cells,
@@ -28,6 +30,13 @@ from .clusters import Clustering
 from shapely.geometry import Polygon, Point
 from shapely.ops import unary_union
 from geopandas import GeoDataFrame as _gpd_GeoDataFrame
+from aabpl.valid_area import process_sample_poly_to_grid
+# from decimal import Decimal as _decimal_Decimal, getcontext as _decimal_getcontext
+
+# def get_spacing_decimal(xmin, xmax, n_steps, ndec = 20):
+#     _decimal_getcontext(ndec)
+#     return _decimal_Decimal(xmax-xmin)/_decimal_Decimal(n_steps)
+
 
 class Bounds(object):
     __slots__ = ('xmin', 'xmax', 'ymin', 'ymax', 'np_array_of_bounds') # use this syntax to save some memory. also only create vars that are really neccessary
@@ -38,6 +47,30 @@ class Bounds(object):
         self.ymax = ymax
     #
 #
+
+def find_optimal_spacing(
+    r:float,
+    n_pts_src:int, 
+    n_pts_tgt:int, 
+    x_range:float, 
+    y_range:float,
+    spacings:list,
+    ):
+    return r/3
+    min_score = _math_inf
+    best_s = None
+    for s in spacings:
+        
+        grid_creation_time = 0.1*x_range/s*y_range/s
+        create_micro_region_time = 0.1*(r/s)**2+0.2*(r/s)+0.3
+        aggregate_cell_based_time = 0.1*x_range/s*y_range/s+0.1*n_pts_tgt+0.1*x_range/s*y_range/s*n_pts_tgt
+        search_pts_time = n_pts_src*n_pts_tgt
+        score = grid_creation_time + create_micro_region_time + aggregate_cell_based_time + search_pts_time
+        if score < min_score:
+            min_score = score
+            best_s = s
+    return best_s
+        
 
 class Grid(object):
     """
@@ -102,16 +135,19 @@ class Grid(object):
         ymin:float,
         ymax:float,
         initial_crs:str,
-        local_crs:str,
+        local_crs:str='auto',
         set_fixed_spacing:float=None,
         r:float=750,
-        n_points:int=10000,
+        n_pts_src:int=None,
+        n_pts_tgt:int=None,
+        nest_depth:int=None,
+        data_crs:str=None,
         silent = False,
         ):
 
         """
         Returns an object of Grid class, that is used to enhance point search and bundle results and methods
-        
+        (xmax-xmin)/spacing is not an integer it will add space evenly on both sides s.t. 'real xmin' is is xmin-((xmax-xmin)%spacing)/2
         Args:
         -------
 
@@ -126,14 +162,73 @@ class Grid(object):
         n_points:int=10000,
         silent = False,
         """
-        if set_fixed_spacing:
-            spacing = set_fixed_spacing
-        else:
-            # find optimal spacing TODO
-            print("TODO find optimal spacing for",r, n_points)
-            spacing = 1.
-        self.spacing = spacing
 
+        if nest_depth is None:
+            nest_depth = 0
+        
+
+        # if local crs should be found automatically or 
+        if local_crs == 'auto' or initial_crs != local_crs:
+            local_crs, (xmin,xmax,ymin,ymax) = convert_bounds_to_local_crs(
+                xmin=xmin,
+                xmax=xmax,
+                ymin=ymin,
+                ymax=ymax,
+                initial_crs=initial_crs,
+                target_crs=local_crs,
+                silent=silent
+            )
+        if data_crs is None:
+            data_crs = initial_crs
+        self.data_crs = data_crs
+        
+        
+        if not set_fixed_spacing is None:
+            spacing = set_fixed_spacing
+            if False: # add this after testing
+                spacings = [set_fixed_spacing*2**i for i in range(6)[::-1]]+[set_fixed_spacing*(1/2**i) for i in range(1,6)]
+                spacings = [set_fixed_spacing]
+                spacing = find_optimal_spacing(
+                    r=r,
+                    n_pts_src=n_pts_src,
+                    n_pts_tgt=n_pts_tgt,
+                    x_range=xmax-xmin, 
+                    y_range=ymax-ymin,
+                    spacings=spacings
+                )
+        else:
+            # f(x_range, y_range, r, n_pts_src,n_pts_tgt) -> (spacing, nest_depth)
+            # distribution concentration of pts might matter. 
+            # but this metric can be slow to compute - careful here.
+            if n_pts_src is None:
+                n_pts_src = 10000
+                print("Specifying 'n_pts_src' can improve performance when searching along grid.")
+            if n_pts_tgt is None:
+                n_pts_tgt = n_pts_src
+            
+            spacings = []
+            for i in range(1,32):
+                spacings.append(r/i)
+                for j in range(1,i+1):
+                    k = (i**2+j**2)**.5
+                    if k <=32:
+                        spacings.append(r/k)
+            #spacings add break points like r/2**.5
+            spacing = find_optimal_spacing(
+                n_pts_src=n_pts_src,
+                n_pts_tgt=n_pts_tgt,
+                x_range=xmax-xmin, 
+                y_range=ymax-ymin,
+                spacings=spacings
+            )
+
+        self.spacing = spacing
+        self.nest_depth = nest_depth
+        
+        self.nest_height = 0
+        self.levels = [0]
+        self.ref_lvl = 0
+        
         self.clustering = Clustering(self)
         self.plot = GridPlots(self)
         # TODO total_bounds should also contain excluded area if not contained 
@@ -143,42 +238,183 @@ class Grid(object):
         x_padding = ((xmin-xmax) % spacing)/2
         y_padding = ((ymin-ymax) % spacing)/2
         self.total_bounds = total_bounds = Bounds(xmin=xmin-x_padding,xmax=xmax+x_padding,ymin=ymin-y_padding,ymax=ymax+y_padding)
-        n_xsteps = -int((total_bounds.xmin-total_bounds.xmax)/spacing)+1 # round up
-        n_ysteps = -int((total_bounds.ymin-total_bounds.ymax)/spacing)+1 # round up 
+        # n_xsteps = -int((total_bounds.xmin-total_bounds.xmax)/spacing)+1 # round up
+        # n_ysteps = -int((total_bounds.ymin-total_bounds.ymax)/spacing)+1 # round up 
+        n_xsteps = -int((xmin-xmax)/spacing)+2 # round up
+        n_ysteps = -int((ymin-ymax)/spacing)+2 # round up 
         self.x_steps = x_steps = _np_linspace(total_bounds.xmin, total_bounds.xmax, n_xsteps)
         self.y_steps = y_steps = _np_linspace(total_bounds.ymin, total_bounds.ymax, n_ysteps)
-        self.row_ids = row_ids = _np_arange(n_ysteps-1)#[::-1]
-        self.col_ids = col_ids =  _np_arange(n_xsteps-1)
-        self.ids = tuple(flatten_list([[(row_id, col_id) for col_id in col_ids] for row_id in row_ids]))
-        self.n_cells = len(self.ids)
-        # TODO replace row_col_to_centroid with function fetching it from 1d arrays to no clog up memory for fine grids
-        self.centroids = _np_array([centroid for centroid in flatten_list([
-                [(x_steps[col_id:col_id+2].mean(), y_steps[row_id:row_id+2].mean()) for col_id in col_ids] 
-                for row_id in row_ids]
-                )])
-        # self.bounds = flatten_list([
-        #         [((x_steps[col_id], y_steps[row_id]), (x_steps[col_id+1], y_steps[row_id+1])) for col_id in col_ids] 
-        #         for row_id in row_ids])
-        # TODO replace row_col_to_centroid with function fetching it from 1d arrays to no clog up memory for fine grids
-        self.row_col_to_centroid = {g_row_col:centroid for (g_row_col,centroid) in flatten_list([
-                [((row_id,col_id),(x_steps[col_id:col_id+2].mean(), y_steps[row_id:row_id+2].mean())) for col_id in col_ids] 
-                for row_id in row_ids]
-                )}
+        self.row_ids = _np_arange(n_ysteps-1)#[::-1]
+        self.col_ids = _np_arange(n_xsteps-1)
+        self.n_cells = len(self.row_ids)*len(self.col_ids)
+        
+        self.sample_area = None
+        self.sample_grid_bounds = None
+        self.cells_rndm_sample = set()
+
         
         # TODO replace row_col_to_centroid with function fetching it from 1d arrays to no clog up memory for fine grids
-        self.row_col_to_bounds = {(row_id,col_id): bounds for ((row_id,col_id),bounds) in flatten_list([
-                [((row_id,col_id),((x_steps[col_id], y_steps[row_id]), (x_steps[col_id+1], y_steps[row_id+1]))) for col_id in col_ids] 
-                for row_id in row_ids]
-                )}
+        
+        self.centroids = None
+        self.row_col_to_centroid = None
+
+        grid_xmin = total_bounds.xmin
+        grid_ymin = total_bounds.ymin
+        grid_xmax = total_bounds.xmax
+        grid_ymax = total_bounds.ymax
+        # self.get_cell_centroid = lambda row, col: (float(grid_xmin+col*(spacing+.5)),float(grid_ymin+row*(spacing+.5)))
+        min_row, max_row, min_col, max_col = min(self.row_ids), max(self.row_ids), min(self.row_ids), max(self.col_ids) 
+        self.get_cell_centroid = lambda row, col, x_steps=self.x_steps, y_steps=self.y_steps: (
+            float(
+                x_steps[int(col):int(col)+2].sum()/2 if min_col<=col<=max_col else 
+                grid_xmin+(col+.5)*spacing if min_col<col else 
+                grid_xmax+(col-max_col-1+.5)*spacing
+            ),
+            float(
+                y_steps[int(row):int(row)+2].sum()/2 if min_row<=row<=max_row else
+                grid_ymin+(row+.5)*spacing if min_row<row else 
+                grid_ymax+(row-max_row-1+.5)*spacing
+            )
+            ) if row%1==0 and col%1==0 else (
+            float(
+                x_steps[int(round(col)):int(round(col))+2].sum()/2 + (col-round(col))*spacing if min_col<=col<=max_col else 
+                grid_xmin+(col+.5)*spacing if min_col<col else 
+                grid_xmax+(col-max_col-1+.5)*spacing
+            ),
+            float(
+                y_steps[int(round(row)):int(round(row))+2].sum()/2 + (row-round(row))*spacing if min_row<=row<=max_row else
+                grid_ymin+(row+.5)*spacing if min_row<row else 
+                grid_ymax+(row-max_row-1+.5)*spacing
+            )
+            )
+        
+        self.get_cell_poly = lambda row, col, x_steps=self.x_steps, y_steps=self.y_steps: [
+            ((x_mean-spacing/(2**(1+lvl)),y_mean-spacing/(2**(1+lvl))), 
+             (x_mean+spacing/(2**(1+lvl)),y_mean-spacing/(2**(1+lvl))), 
+             (x_mean+spacing/(2**(1+lvl)),y_mean+spacing/(2**(1+lvl))), 
+             (x_mean-spacing/(2**(1+lvl)),y_mean+spacing/(2**(1+lvl))))
+            for x_mean,y_mean,lvl in [(
+            float(
+                x_steps[int(col):int(col)+2].sum()/2 if min_col<=col<=max_col else 
+                grid_xmin+(col+.5)*spacing if min_col<col else 
+                grid_xmax+(col-max_col-1+.5)*spacing
+            ),
+            float(
+                y_steps[int(row):int(row)+2].sum()/2 if min_row<=row<=max_row else
+                grid_ymin+(row+.5)*spacing if min_row<row else 
+                grid_ymax+(row-max_row-1+.5)*spacing
+            ),
+            0
+            ) if row%1==0 and col%1==0 else (
+            float(
+                x_steps[int(round(col)):int(round(col))+2].sum()/2 + (col-round(col))*spacing if min_col<=col<=max_col else 
+                grid_xmin+(col+.5)*spacing if min_col<col else 
+                grid_xmax+(col-max_col-1+.5)*spacing
+            ),
+            float(
+                y_steps[int(round(row)):int(round(row))+2].sum()/2 + (row-round(row))*spacing if min_row<=row<=max_row else
+                grid_ymin+(row+.5)*spacing if min_row<row else 
+                grid_ymax+(row-max_row-1+.5)*spacing
+            ),
+            next((i for i,n in enumerate(range(max(20,nest_depth+1))) if row%.5%(2**-(n+1))==0),max(21,nest_depth+2)) # UPDATE if max_nest_level > 20
+            )]][0]
+        
+        self.get_cell_bounds = lambda row, col, x_steps=self.x_steps, y_steps=self.y_steps: [
+            ((x_mean-spacing/(2**(1+lvl)),
+              y_mean-spacing/(2**(1+lvl))), 
+             (x_mean+spacing/(2**(1+lvl)),
+              y_mean+spacing/(2**(1+lvl))))
+            for x_mean,y_mean,lvl in [(
+            float(
+                x_steps[int(col):int(col)+2].sum()/2 if min_col<=col<=max_col else 
+                grid_xmin+(col+.5)*spacing if min_col<col else 
+                grid_xmax+(col-max_col-1+.5)*spacing
+            ),
+            float(
+                y_steps[int(row):int(row)+2].sum()/2 if min_row<=row<=max_row else
+                grid_ymin+(row+.5)*spacing if min_row<row else 
+                grid_ymax+(row-max_row-1+.5)*spacing
+            ),
+            0
+            ) if row%1==0 and col%1==0 else (
+            float(
+                x_steps[int(round(col)):int(round(col))+2].sum()/2 + (col-round(col))*spacing if min_col<=col<=max_col else 
+                grid_xmin+(col+.5)*spacing if min_col<col else 
+                grid_xmax+(col-max_col-1+.5)*spacing
+            ),
+            float(
+                y_steps[int(round(row)):int(round(row))+2].sum()/2 + (row-round(row))*spacing if min_row<=row<=max_row else
+                grid_ymin+(row+.5)*spacing if min_row<row else 
+                grid_ymax+(row-max_row-1+.5)*spacing
+            ),
+            next((i for i,n in enumerate(range(max(20,nest_depth+1))) if row%.5%(2**-(n+1))==0),max(21,nest_depth+2)) # UPDATE if max_nest_level > 20
+            )]][0]
+
         if not silent:
-            print('Create grid with '+str(n_ysteps-1)+'x'+str(n_xsteps-1)+'='+str((n_ysteps-1)*(n_xsteps-1)))
+            print('Create grid with '+str(n_ysteps-1)+'*'+str(n_xsteps-1)+'='+str((n_ysteps-1)*(n_xsteps-1))+" with spacing "+str(spacing))
         #
     #
     # add functions
     aggregate_point_data_to_cells = aggregate_point_data_to_cells
-    assign_points_to_cell_regions = assign_points_to_cell_regions
+    assign_points_to_cell_regions = assign_points_to_cell_regions # OUTDATED? REPLACE WITH assign_points_to_mirco_regions?
+    process_sample_poly_to_grid = process_sample_poly_to_grid
     aggregate_point_data_to_disks_vectorized = aggregate_point_data_to_disks_vectorized
     disk_cell_intersection_area = disk_cell_intersection_area
+    
+    def get_all_ids(
+            self,
+            store:bool=False,
+    ):
+        if hasattr(self,'ids') and not self.ids is None:
+            return self.ids 
+        col_ids = self.col_ids
+        row_ids = self.row_ids
+        ids = tuple(flatten_list([[(int(row_id), int(col_id)) for col_id in col_ids] for row_id in row_ids]))
+        if store:
+            self.ids = ids
+        return ids
+    #
+
+    def get_all_centroids(
+                self,
+                store:bool=False,
+        ):
+            if not self.centroids is None:
+                return self.centroids
+            row_ids = self.row_ids
+            col_ids = self.col_ids
+            x_steps = self.x_steps
+            y_steps = self.y_steps
+            centroids = _np_array([centroid for centroid in flatten_list([
+                [(x_steps[col_id:col_id+2].mean(), y_steps[row_id:row_id+2].mean()) for col_id in col_ids] 
+                for row_id in row_ids]
+            )])
+            if store:
+                self.centroids = centroids
+            return centroids
+        # self.bounds = flatten_list([
+        #         [((x_steps[col_id], y_steps[row_id]), (x_steps[col_id+1], y_steps[row_id+1])) for col_id in col_ids] 
+        #         for row_id in row_ids])
+        # TODO replace row_col_to_centroid with function fetching it from 1d arrays to no clog up memory for fine grids
+        
+    def get_all_row_col_to_centroids(
+            self,
+            store:bool=False,
+        ):
+        
+        if not self.row_col_to_centroid is None:
+            return self.row_col_to_centroid
+        row_ids = self.row_ids
+        col_ids = self.col_ids
+        x_steps = self.x_steps
+        y_steps = self.y_steps
+        row_col_to_centroid = {g_row_col:centroid for (g_row_col,centroid) in flatten_list([
+            [((row_id,col_id),(x_steps[col_id:col_id+2].mean(), y_steps[row_id:row_id+2].mean())) for col_id in col_ids] 
+            for row_id in row_ids]
+            )}
+        if store:
+            self.row_col_to_centroid = row_col_to_centroid
+        return row_col_to_centroid
     # append plots
     # # append cluster functions
     # create_clusters = create_clusters
@@ -192,7 +428,22 @@ class Grid(object):
     # save_full_grid = Clustering.save_full_grid
     # save_sparse_grid = Clustering.save_sparse_grid
     # save_cell_clusters = Clustering.save_cell_clusters
-
+    def plot_sample_area(self,
+        pts:_pd_DataFrame=None,
+        x:str=None,
+        y:str=None,
+        filename:str='',
+        plot_kwargs:dict={},
+        close_plot:bool=False,):
+        plot_sample_area(
+            grid=self,
+            pts=pts or self.pts if hasattr(self,"pts") else None,
+            x=x or self.x if hasattr(self,"x") else None,
+            y=y or self.y if hasattr(self,"y") else None,
+            filename=filename,
+            plot_kwargs=plot_kwargs,
+            close_plot=close_plot,
+        )
     def create_full_grid_df(self, target_crs:str=['initial','local','EPSG:4326'][0], max_column_name_length:int=10):
         """returns geopandas.GeoDataFrame with entry for each grid cell with attributes on its Polygon, centroid, sum of indicator(s), and cluster id
         
@@ -212,7 +463,7 @@ class Grid(object):
         sums = _np_zeros((self.n_cells, len(self.clustering.by_column)),int)
         polys = []
         id_to_sums = self.id_to_sums
-        centroids = _np_array(list(self.row_col_to_centroid.values()))
+        centroids = _np_array(list(self.get_all_row_col_to_centroids().values()))
         target_crs = self.initial_crs if target_crs=='initial' else self.local_crs if target_crs=='local' else target_crs
         if target_crs != self.local_crs:
             transformer = Transformer.from_crs(crs_from=self.local_crs, crs_to=self.initial_crs, always_xy=True)
@@ -273,13 +524,14 @@ class Grid(object):
         x_steps = self.x_steps
         y_steps = self.y_steps
         col_ids = self.col_ids
+        centroids = self.get_all_centroids()
         polys = []
         target_crs = self.initial_crs if target_crs=='initial' else self.local_crs if target_crs=='local' else target_crs
         if target_crs != self.local_crs:
             transformer = Transformer.from_crs(crs_from=self.local_crs, crs_to=target_crs, always_xy=True)
-            centroids_x_full, centroids_y_full = transformer.transform(self.centroids[:,0], self.centroids[:,1])
+            centroids_x_full, centroids_y_full = transformer.transform(centroids[:,0], centroids[:,1])
         else:
-            centroids_x_full, centroids_y_full = self.centroids[:,0], self.centroids[:,1]
+            centroids_x_full, centroids_y_full = centroids[:,0], centroids[:,1]
         centroids_x = _np_zeros(self.n_cells,float)
         centroids_y = _np_zeros(self.n_cells,float)
         sparse_row_ids = _np_zeros(self.n_cells,int)

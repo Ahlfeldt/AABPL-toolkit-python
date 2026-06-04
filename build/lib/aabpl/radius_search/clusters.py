@@ -8,7 +8,6 @@ from shapely.geometry import Polygon, Point
 from shapely.ops import unary_union
 from aabpl.utils.general import find_column_name, arr_to_tpls
 from aabpl.utils.distances_to_cell import min_possible_dist_cells_to_cell
-from geopandas import GeoDataFrame as _gpd_GeoDataFrame
 
 def merge_condition_queen_contingency(max_steps:int=1)->bool:
     """
@@ -72,6 +71,11 @@ def merge_condition_distance_based(max_centroid_dist:float, max_border_dist:floa
         return False
     return check_if_merge
 
+def get_val_if_not_already_scalar(val_or_vals, index:int):
+    if type(val_or_vals) in [list, _np_array]:
+        return val_or_vals[index]
+    return val_or_vals
+
 class Clustering(object):
     """ 
     Methods:
@@ -90,8 +94,8 @@ class Clustering(object):
     def create_clusters(
         self,
         pts:_pd_DataFrame,
-        c:str='employment',
-        cluster_c:str='employment_cluster',
+        c:str=['employment'],
+        cluster_c:str=['employment_cluster'],
         queen_contingency:int=1,
         rook_contingency:int=0,
         centroid_dist_threshold:float=None,
@@ -103,7 +107,6 @@ class Clustering(object):
         row_name:str='id_y',
         col_name:str='id_x',
         cluster_suffix:str='_750m',
-        plot_cluster_cells:dict=None,
     ):
         """
         Detects all grid cells containing a point that is labeled as clusters. those cells are then labeled as cluster cells. 
@@ -174,11 +177,6 @@ class Clustering(object):
             clusters_for_column.add_geom_to_clusters()
             clusters_for_column.add_area_to_clusters()
             clusters_for_column.add_cluster_id_to_pts(column, cluster_column)
-
-        
-        if not plot_cluster_cells is None:
-            self.plot_clusters()
-
     
     def make_cluster_orthogonally_convex(
             self
@@ -188,7 +186,9 @@ class Clustering(object):
         exception: a cell is part of another cluster already
         """
         id_to_sums = self.grid.id_to_sums
-        row_col_to_centroid = self.grid.row_col_to_centroid
+        grid_xmin = self.grid.grid_xmin
+        grid_ymin = self.grid.grid_ymin
+        spacing = self.grid.spacing
         for (cluster_column, clusters) in self.by_column.items():
             all_clustered_cells = set()
             for cluster in clusters['prime_locs']:
@@ -253,7 +253,9 @@ class Clustering(object):
                     n_last_it = len(cluster.cells)
                 
                 cluster.total = sum([id_to_sums[cell] for cell in cells_in_convex_cluster if cell in id_to_sums])
-                cluster.centroid = _np_array([row_col_to_centroid[cell] for cell in cells_in_convex_cluster]).sum(axis=0)/len(cells_in_convex_cluster)
+                cluster.centroid = _np_array([(grid_xmin+(c+.5)*spacing, grid_ymin+(r+.5)*spacing) for row,col in cells_in_convex_cluster]).sum(axis=0)/len(cells_in_convex_cluster)
+                # TODO why c instead of col and r instrad of row? line below would change that.
+                # cluster.centroid = _np_array([(grid_xmin+(col+.5)*spacing, grid_ymin+(row+.5)*spacing) for row,col in cells_in_convex_cluster]).sum(axis=0)/len(cells_in_convex_cluster)
             #
         #
     #
@@ -268,15 +270,17 @@ class Clustering(object):
                 cell_in_cluster:list,
                 centroid:tuple,
                 total:float,
+                get_cell_centroid,
         ):
             """
             bind Clusters object to grid 
             """
             self.id = id
             self.cells = [cell_in_cluster]
-            self.centroid = centroid#row_col_to_centroid[cell_in_cluster]
-            self.total = total#id_to_sums[cell_in_cluster][column_id]
+            self.centroid = centroid
+            self.total = total
             self.n_cells = 1
+            self.get_cell_centroid = get_cell_centroid
 
         
         def annex_cluster(self, cluster_to_annex):
@@ -297,17 +301,26 @@ class Clustering(object):
         def add_cells_to_cluster(
                 self,
                 cells_to_add:set,
-                row_col_to_centroid:dict,
+                grid_xmin:float,
+                grid_ymin:float,
+                spacing:float,
                 id_to_sums:dict,
                 column_id:int,
         ):
+            """
+            Add cells to cluster and update total, centroid, and n_cells
+            """
+            if len(cells_to_add) == 0:
+                return
             self.total += sum([id_to_sums[cell][column_id] for cell in cells_to_add if cell in id_to_sums])
             n_cells_to_add = len(cells_to_add)
             n_cells = self.n_cells + n_cells_to_add
+            centroids_of_cells_to_add = _np_array([self.get_cell_centroid(row,col) for row,col in cells_to_add])
             self.centroid = (
-                (self.centroid[0]*self.n_cells + sum([row_col_to_centroid[cell][0] for cell in cells_to_add])) / n_cells,
-                (self.centroid[1]*self.n_cells + sum([row_col_to_centroid[cell][1] for cell in cells_to_add])) / n_cells
+                (self.centroid[0]*self.n_cells + centroids_of_cells_to_add[:,0].sum()) / n_cells,
+                (self.centroid[1]*self.n_cells + centroids_of_cells_to_add[:,1].sum()) / n_cells
             )
+      
             self.n_cells = n_cells
             self.cells = self.cells + list(cells_to_add)
         
@@ -320,15 +333,37 @@ class Clustering(object):
         #
         def add_geometry(
                 self,
-                row_col_to_bounds:dict,
+                grid_xmin:float,
+                grid_ymin:float,
+                spacing:float,
         ):
             """add shapely polygon unaray union geometry"""
             # there are more efficient methods
-            self.geometry = unary_union(
-                [[Polygon(((xmin,ymin),(xmax,ymin),(xmax,ymax),(xmin,ymax)))
-                for (xmin,ymin),(xmax,ymax) in [row_col_to_bounds[cell]]][0]
-                for cell in self.cells]
+            
+            self.geometry = unary_union([
+                Polygon([
+                    (grid_xmin+col*spacing, grid_ymin+row*spacing),
+                    (grid_xmin+(col+1)*spacing, grid_ymin+row*spacing),
+                    (grid_xmin+(col+1)*spacing, grid_ymin+(row+1)*spacing),
+                    (grid_xmin+col*spacing, grid_ymin+(row+1)*spacing)
+                    ])
+                for row,col in self.cells]
             )
+
+            self.geometry = unary_union([
+                Polygon([
+                    (grid_xmin+col*spacing, grid_ymin+row*spacing),
+                    (grid_xmin+(col+1)*spacing, grid_ymin+row*spacing),
+                    (grid_xmin+(col+1)*spacing, grid_ymin+(row+1)*spacing),
+                    (grid_xmin+col*spacing, grid_ymin+(row+1)*spacing)
+                    ])
+                for row,col in self.cells]
+            )
+            # self.geometry = unary_union(
+            #     [[Polygon(((xmin,ymin),(xmax,ymin),(xmax,ymax),(xmin,ymax)))
+            #     for (xmin,ymin),(xmax,ymax) in [row_col_to_bounds[cell]]][0]
+            #     for cell in self.cells]
+            # )
     #
 
 
@@ -352,14 +387,18 @@ class Clustering(object):
             self.column_id = column_id
             self.clustered_cells = set(arr_to_tpls(clustered_cells, int))
             id_to_sums = self.grid.id_to_sums    
-            row_col_to_centroid = self.grid.row_col_to_centroid
-
+            grid_xmin = self.grid.total_bounds.xmin
+            grid_ymin = self.grid.total_bounds.ymin
+            spacing = self.grid.spacing
+            get_cell_centroid = grid.get_cell_centroid
             self.clusters = [Clustering.Cluster(
                 id=i,
-                cell_in_cluster=cell,
-                centroid = row_col_to_centroid[cell],
-                total=id_to_sums[cell][column_id],
-                ) for i, cell in enumerate(self.clustered_cells)]
+                cell_in_cluster=(row,col),
+                centroid = get_cell_centroid(row,col),
+                # centroid = (grid_xmin+(col+.5)*spacing, grid_ymin+(row+.5)*spacing),
+                total = get_val_if_not_already_scalar(id_to_sums[(row,col)],column_id),
+                get_cell_centroid=get_cell_centroid,
+                ) for i, (row,col) in enumerate(self.clustered_cells)]
             self.by_id = {cluster.id: cluster for cluster in self.clusters}
         #
 
@@ -421,15 +460,36 @@ class Clustering(object):
         ):  
             set_clustered_cells = self.clustered_cells 
             id_to_sums = self.grid.id_to_sums
-            row_col_to_centroid = self.grid.row_col_to_centroid
-            row_col_to_bounds = self.grid.row_col_to_bounds
+            
+            grid_xmin = self.grid.total_bounds.xmin
+            grid_ymin = self.grid.total_bounds.ymin
+            spacing = self.grid.spacing
+            
             for cluster in self.clusters:
                 cells = cluster.cells
                 cells_in_convex_cluster = set(cells)
                 cells_to_add = set()
-                hull_poly = unary_union(
-                    [[Polygon(((xmin,ymin),(xmax,ymin),(xmax,ymax),(xmin,ymax))) for (xmin,ymin),(xmax,ymax) in [row_col_to_bounds[cell]]][0] for cell in cells]
+                # 
+                centroids = [self.grid.get_cell_centroid(row,col)  for row,col in cells]
+                hull_poly = unary_union([
+                    Polygon([
+                        (cx-.5*spacing, cy-.5*spacing),
+                        (cx+.5*spacing, cy-.5*spacing),
+                        (cx+.5*spacing, cy+.5*spacing),
+                        (cx-.5*spacing, cy+.5*spacing),
+                        ]) for cx,cy in centroids
+                  ]
                 ).convex_hull
+                hull_poly = unary_union([
+                    Polygon([
+                        (grid_xmin+col*spacing, grid_ymin+row*spacing),
+                        (grid_xmin+(col+1)*spacing, grid_ymin+row*spacing),
+                        (grid_xmin+(col+1)*spacing, grid_ymin+(row+1)*spacing),
+                        (grid_xmin+col*spacing, grid_ymin+(row+1)*spacing)
+                        ])
+                    for row,col in cells]
+                ).convex_hull
+                
                 check_fun = hull_poly.contains if 1==1 else hull_poly.overlaps
                 row_ids = sorted(set([row for row,col in cells]))
                 col_ids = sorted(set([col for row,col in cells]))
@@ -437,11 +497,11 @@ class Clustering(object):
                 col_range = range(min(col_ids), max(col_ids)+1)
                 for r in row_range:
                     for c in col_range:
-                        if not (r,c) in set_clustered_cells and check_fun(Point(row_col_to_centroid[(r,c)])):
+                        if not (r,c) in set_clustered_cells and check_fun(Point(grid_xmin+(c+.5)*spacing, grid_ymin+(r+.5)*spacing)):
                             cells_in_convex_cluster.add((r,c))
                             set_clustered_cells.add((r,c))
                             cells_to_add.add((r,c))
-                cluster.add_cells_to_cluster(cells_to_add=cells_to_add, row_col_to_centroid=row_col_to_centroid, id_to_sums=id_to_sums, column_id=self.column_id)
+                cluster.add_cells_to_cluster(cells_to_add=cells_to_add, grid_xmin=grid_xmin, grid_ymin=grid_ymin, spacing=spacing, id_to_sums=id_to_sums, column_id=self.column_id)
             #
             self.update_ids()
         #
@@ -454,9 +514,11 @@ class Clustering(object):
         #
 
         def add_geom_to_clusters(self):
-            row_col_to_bounds = self.grid.row_col_to_bounds
+            grid_xmin = self.grid.total_bounds.xmin
+            grid_ymin = self.grid.total_bounds.ymin
+            spacing = self.grid.spacing
             for cluster in self.clusters:
-                cluster.add_geometry(row_col_to_bounds)
+                cluster.add_geometry(grid_xmin, grid_ymin, spacing)
             
         def add_area_to_clusters(self):
             for cluster in self.clusters:
