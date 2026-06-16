@@ -21,8 +21,8 @@ from math import (
     acos as _math_acos,
     atan2 as _math_atan2,
     pi as _math_pi)
-from aabpl.utils.general import flatten_list, angle
-from aabpl.utils.distances_to_cell import ( get_cell_farthest_vertex_to_point, get_cell_closest_point_to_points, )
+from aabpl.utils.misc import flatten_list, angle
+from aabpl.utils.cell_geometry import ( get_cell_farthest_vertex_to_point, get_cell_closest_point_to_points, )
 from matplotlib.path import Path as _plt_Path
 from matplotlib.patches import PathPatch as _plt_PathPatch
 from matplotlib.collections import PatchCollection as _plt_PatchCollection

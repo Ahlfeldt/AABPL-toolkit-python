@@ -1,26 +1,35 @@
 from numpy import (
-    array as _np_array, 
+    array as _np_array,
     linspace as _np_linspace,
     stack as _np_stack,
-    arange as _np_arange, 
+    arange as _np_arange,
     unique as _np_unique,
     zeros as _np_zeros,
+    min as _np_min,
+    max as _np_max,
+    mean as _np_mean,
+    median as _np_median,
+    std as _np_std,
+    ceil as _np_ceil,
+    pi as _np_pi,
+    sum as _np_sum,
+    log2 as _np_log2,
 )
 from pyproj import Transformer
 from pandas import DataFrame as _pd_DataFrame
 from math import log10 as _math_log10, inf as _math_inf
-from aabpl.utils.general import flatten_list, find_column_name
+from aabpl.utils.misc import flatten_list, find_column_name
 from aabpl.utils.crs_transformation import convert_bounds_to_local_crs
 from aabpl.illustrations.plot_utils import map_2D_to_rgb, get_2D_rgb_colobar_kwargs
-from aabpl.illustrations.grid import GridPlots#plot_cell_sums, plot_grid_ids, plot_clusters, plot_cluster_vars
-from aabpl.illustrations.illustrate_sample_area import plot_sample_area
+from aabpl.illustrations.plot_grid import GridPlots#plot_cell_sums, plot_grid_ids, plot_clusters, plot_cluster_vars
+from aabpl.illustrations.plot_sample_area import plot_sample_area
 from aabpl.illustrations.plot_pt_vars import create_plots_for_vars
-from .radius_search_class import (
+from .disk_search_state import (
     aggregate_point_data_to_cells,
-    aggregate_point_data_to_disks_vectorized
+    search_and_aggregate
 )
-from .pts_to_offset_regions import assign_points_to_cell_regions
-from aabpl.valid_area import disk_cell_intersection_area
+from .point_region_assignment import assign_points_to_cell_regions
+from .sample_area import compute_disk_cell_overlap, intersect_polygon_with_grid
 from aabpl.testing.test_performance import time_func_perf
 # from .clusters import (
 #     create_clusters, add_geom_to_cluster, connect_cells_to_clusters,
@@ -30,8 +39,14 @@ from .clusters import Clustering
 from shapely.geometry import Polygon, Point
 from shapely.ops import unary_union
 from geopandas import GeoDataFrame as _gpd_GeoDataFrame
-from aabpl.valid_area import process_sample_poly_to_grid
 # from decimal import Decimal as _decimal_Decimal, getcontext as _decimal_getcontext
+import math
+from .spacing_topology import (
+    compute_spatial_stats, compute_spacing_breakpoints,
+    choose_nest_depth,
+    predict_timing, choose_spacing_and_depth,
+)
+from aabpl import config as _cfg
 
 # def get_spacing_decimal(xmin, xmax, n_steps, ndec = 20):
 #     _decimal_getcontext(ndec)
@@ -48,28 +63,8 @@ class Bounds(object):
     #
 #
 
-def find_optimal_spacing(
-    r:float,
-    n_pts_src:int, 
-    n_pts_tgt:int, 
-    x_range:float, 
-    y_range:float,
-    spacings:list,
-    ):
-    return r/3
-    min_score = _math_inf
-    best_s = None
-    for s in spacings:
-        
-        grid_creation_time = 0.1*x_range/s*y_range/s
-        create_micro_region_time = 0.1*(r/s)**2+0.2*(r/s)+0.3
-        aggregate_cell_based_time = 0.1*x_range/s*y_range/s+0.1*n_pts_tgt+0.1*x_range/s*y_range/s*n_pts_tgt
-        search_pts_time = n_pts_src*n_pts_tgt
-        score = grid_creation_time + create_micro_region_time + aggregate_cell_based_time + search_pts_time
-        if score < min_score:
-            min_score = score
-            best_s = s
-    return best_s
+
+
         
 
 class Grid(object):
@@ -135,39 +130,22 @@ class Grid(object):
         ymin:float,
         ymax:float,
         initial_crs:str,
+        r:float,
         local_crs:str='auto',
-        set_fixed_spacing:float=None,
-        r:float=750,
         n_pts_src:int=None,
         n_pts_tgt:int=None,
-        nest_depth:int=None,
+        pts_tgt_xy=None,
         data_crs:str=None,
-        silent = False,
-        ):
-
+        output_spacing:float=None,
+        output_spacing_y:float=None,
+        silent=False,
+    ):
         """
-        Returns an object of Grid class, that is used to enhance point search and bundle results and methods
-        (xmax-xmin)/spacing is not an integer it will add space evenly on both sides s.t. 'real xmin' is is xmin-((xmax-xmin)%spacing)/2
-        Args:
-        -------
-
-        xmin:float,
-        xmax:float,
-        ymin:float,
-        ymax:float,
-        initial_crs:str,
-        local_crs:str,
-        set_fixed_spacing:float=None,
-        r:float=750,
-        n_points:int=10000,
-        silent = False,
+        Returns an object of Grid class used to enhance point search and bundle results/methods.
+        Spacing and nest_depth are chosen automatically via timing models, or overridden via
+        config.FIXED_SPACING_RATIO / config.FIXED_NEST_DEPTH before calling.
         """
-
-        if nest_depth is None:
-            nest_depth = 0
-        
-
-        # if local crs should be found automatically or 
+        # if local crs should be found automatically or
         if local_crs == 'auto' or initial_crs != local_crs:
             local_crs, (xmin,xmax,ymin,ymax) = convert_bounds_to_local_crs(
                 xmin=xmin,
@@ -181,46 +159,17 @@ class Grid(object):
         if data_crs is None:
             data_crs = initial_crs
         self.data_crs = data_crs
-        
-        
-        if not set_fixed_spacing is None:
-            spacing = set_fixed_spacing
-            if False: # add this after testing
-                spacings = [set_fixed_spacing*2**i for i in range(6)[::-1]]+[set_fixed_spacing*(1/2**i) for i in range(1,6)]
-                spacings = [set_fixed_spacing]
-                spacing = find_optimal_spacing(
-                    r=r,
-                    n_pts_src=n_pts_src,
-                    n_pts_tgt=n_pts_tgt,
-                    x_range=xmax-xmin, 
-                    y_range=ymax-ymin,
-                    spacings=spacings
-                )
-        else:
-            # f(x_range, y_range, r, n_pts_src,n_pts_tgt) -> (spacing, nest_depth)
-            # distribution concentration of pts might matter. 
-            # but this metric can be slow to compute - careful here.
-            if n_pts_src is None:
-                n_pts_src = 10000
-                print("Specifying 'n_pts_src' can improve performance when searching along grid.")
-            if n_pts_tgt is None:
-                n_pts_tgt = n_pts_src
-            
-            spacings = []
-            for i in range(1,32):
-                spacings.append(r/i)
-                for j in range(1,i+1):
-                    k = (i**2+j**2)**.5
-                    if k <=32:
-                        spacings.append(r/k)
-            #spacings add break points like r/2**.5
-            spacing = find_optimal_spacing(
-                n_pts_src=n_pts_src,
-                n_pts_tgt=n_pts_tgt,
-                x_range=xmax-xmin, 
-                y_range=ymax-ymin,
-                spacings=spacings
-            )
+
+        # auto choose spacing ratio and depth unless explictly set by the user via config.
+        spacing, nest_depth = choose_spacing_and_depth(
+            r=r,
+            spacing_ratio=_cfg.FIXED_SPACING_RATIO,
+            nest_depth=_cfg.FIXED_NEST_DEPTH,
+            n_pts_src=n_pts_src,
+            n_pts_tgt=n_pts_tgt,
+            pts_tgt_xy=pts_tgt_xy,
+            silent=silent,
+        )
 
         self.spacing = spacing
         self.nest_depth = nest_depth
@@ -231,7 +180,7 @@ class Grid(object):
         
         self.clustering = Clustering(self)
         self.plot = GridPlots(self)
-        # TODO total_bounds should also contain excluded area if not contained 
+        # TODO total_bounds should also contain excluded area if not cntd 
         # min(points.total_bounds+r, max(points.total_bounds, excluded_area_total_bound))  
         self.initial_crs = initial_crs
         self.local_crs = local_crs
@@ -247,7 +196,22 @@ class Grid(object):
         self.row_ids = _np_arange(n_ysteps-1)#[::-1]
         self.col_ids = _np_arange(n_xsteps-1)
         self.n_cells = len(self.row_ids)*len(self.col_ids)
-        
+
+        # Output grid — user-facing cell size for exports and plots.
+        # Defaults to internal spacing when not specified.
+        self.output_spacing = output_spacing if output_spacing is not None else spacing
+        self.output_spacing_y = output_spacing_y if output_spacing_y is not None else self.output_spacing
+        if self.output_spacing == spacing and self.output_spacing_y == spacing:
+            self.output_x_steps = x_steps
+            self.output_y_steps = y_steps
+        else:
+            n_out_xsteps = -int((xmin - xmax) / self.output_spacing) + 2
+            n_out_ysteps = -int((ymin - ymax) / self.output_spacing_y) + 2
+            self.output_x_steps = _np_linspace(total_bounds.xmin, total_bounds.xmax, n_out_xsteps)
+            self.output_y_steps = _np_linspace(total_bounds.ymin, total_bounds.ymax, n_out_ysteps)
+        self.output_id_to_sums = {}
+        self._output_val_cols = []
+
         self.sample_area = None
         self.sample_grid_bounds = None
         self.cells_rndm_sample = set()
@@ -357,9 +321,9 @@ class Grid(object):
     # add functions
     aggregate_point_data_to_cells = aggregate_point_data_to_cells
     assign_points_to_cell_regions = assign_points_to_cell_regions # OUTDATED? REPLACE WITH assign_points_to_mirco_regions?
-    process_sample_poly_to_grid = process_sample_poly_to_grid
-    aggregate_point_data_to_disks_vectorized = aggregate_point_data_to_disks_vectorized
-    disk_cell_intersection_area = disk_cell_intersection_area
+    intersect_polygon_with_grid = intersect_polygon_with_grid
+    search_and_aggregate = search_and_aggregate
+    compute_disk_cell_overlap = compute_disk_cell_overlap
     
     def get_all_ids(
             self,
@@ -415,6 +379,192 @@ class Grid(object):
         if store:
             self.row_col_to_centroid = row_col_to_centroid
         return row_col_to_centroid
+
+
+    def assign_output_cell_ids(
+        self,
+        pts: _pd_DataFrame,
+        x: str,
+        y: str,
+        row_name: str,
+        col_name: str,
+    ) -> None:
+        """
+        Assign each point to its output grid cell and store the column names
+        on the grid as ``self.output_row_name`` / ``self.output_col_name``.
+
+        When output spacing equals internal spacing the existing row/col
+        columns are reused (no new columns written to pts).  Otherwise new
+        columns ``'out_{row_name}'`` / ``'out_{col_name}'`` are added to pts.
+        """
+        from numpy import floor as _np_floor
+        if self.output_spacing == self.spacing and self.output_spacing_y == self.spacing:
+            self.output_row_name = row_name
+            self.output_col_name = col_name
+            return
+        out_col_name = 'out_' + col_name
+        out_row_name = 'out_' + row_name
+        pts[out_col_name] = _np_floor(
+            (pts[x].values - self.output_x_steps[0]) / self.output_spacing
+        ).astype(int)
+        pts[out_row_name] = _np_floor(
+            (pts[y].values - self.output_y_steps[0]) / self.output_spacing_y
+        ).astype(int)
+        self.output_row_name = out_row_name
+        self.output_col_name = out_col_name
+
+    def aggregate_pts_to_output_cells(
+        self,
+        pts: _pd_DataFrame,
+        val_cols: list,
+        x: str = 'lon',
+        y: str = 'lat',
+        agg: str = 'sum',
+    ) -> dict:
+        """
+        Aggregate per-point values into output grid cells and store in
+        ``self.output_id_to_sums``.
+
+        Uses ``self.output_spacing`` / ``self.output_spacing_y`` and
+        ``self.output_x_steps`` / ``self.output_y_steps`` — all set in
+        ``__init__``.
+
+        Args:
+            pts: DataFrame containing ``x``, ``y``, and all ``val_cols``.
+            val_cols: Column names to aggregate (must already exist in ``pts``).
+            x: X-coordinate column (must be in the same projection as the grid).
+            y: Y-coordinate column.
+            agg: Aggregation method — ``'sum'``, ``'mean'``, or ``'count'``.
+
+        Returns:
+            ``self.output_id_to_sums`` — dict mapping ``(row, col)`` to a
+            numpy array of aggregated values (one entry per val_col).
+        """
+        from numpy import floor as _np_floor
+        from pandas import DataFrame as _pd_DataFrame_local
+
+        xmin_out = self.output_x_steps[0]
+        ymin_out = self.output_y_steps[0]
+        sx = self.output_spacing
+        sy = self.output_spacing_y
+
+        col_idx = _np_floor((pts[x].values - xmin_out) / sx).astype(int)
+        row_idx = _np_floor((pts[y].values - ymin_out) / sy).astype(int)
+
+        val_cols = list(val_cols)
+        tmp = _pd_DataFrame_local({'_row': row_idx, '_col': col_idx})
+        for col in val_cols:
+            tmp[col] = pts[col].values
+
+        grp = tmp.groupby(['_row', '_col'])[val_cols]
+        if agg == 'sum':
+            agg_df = grp.sum()
+        elif agg == 'mean':
+            agg_df = grp.mean()
+        elif agg == 'count':
+            agg_df = grp.count()
+        else:
+            raise ValueError(f"agg must be 'sum', 'mean', or 'count'; got {agg!r}")
+
+        self.output_id_to_sums = {rc: row.values for rc, row in agg_df.iterrows()}
+        self._output_val_cols = val_cols
+        return self.output_id_to_sums
+
+    @time_func_perf
+    def calc_micro_region_stats(self):
+        """
+        Calculate statistics on the micro regions created by the radius search, 
+        such as the average number of distinct cntd and overlapped cells per region, 
+        and their area. 
+        Useful for understanding the characteristics of the micro regions and 
+        for comparing different radius search configurations in optimization.
+        """
+        # Helper function to avoid redundant list comprehension syntax
+        def calc_cells_area(cells):
+            return sum(2**(-2 * lvl) for lvl, _ in cells)
+
+        # 1. Base shared metrics
+        n_shared = {
+            "cntd": len(self.search.shared_cntd_cells),
+            "ovlpd": 0
+        }
+        area_shared = {
+            "cntd": calc_cells_area(self.search.shared_cntd_cells),
+            "ovlpd": 0
+        }
+
+        # 2. Accumulators for regions
+        totals = {
+            "count": {"cntd": 0.0, "ovlpd": 0.0},
+            "area":  {"cntd": 0.0, "ovlpd": 0.0}
+        }
+        total_reg_area = 0.0
+        total_reg_count = 0
+
+        # 3. Process regions
+        mult = self.search.region_and_trgl_mult
+        for reg_id, reg_area in self.search.region_id_to_area.items():
+            total_reg_area += reg_area
+            total_reg_count += 1
+
+            # Use triangle 1 as representative (all triangles share the same list unless
+            # by_trgl overrides exist; for aggregate stats any triangle is equivalent)
+            cells_data = {
+                "cntd": self.search.region_and_trgl_id_to_distinct_cntd_cells[reg_id * mult + 1],
+                "ovlpd": self.search.region_and_trgl_id_to_distinct_ovlpd_cells[reg_id * mult + 1]
+            }
+
+            for state in ["cntd", "ovlpd"]:
+                cells = cells_data[state]
+                c_count = len(cells)
+                c_area = calc_cells_area(cells)
+
+                # Accumulate values
+                totals["count"][state] += c_count
+                totals["area"][state]  += c_area
+                
+                # Weighted by region area
+                totals["count"][f"{state}_weighted"] += c_count * reg_area
+                totals["area"][f"{state}_weighted"]  += c_area * reg_area
+
+        # 4. Normalization and final aggregation
+        for state in ["cntd", "ovlpd"]:
+            if total_reg_count > 0:
+                # Normalize by count
+                totals["count"][state] /= total_reg_count
+                totals["area"][state]  /= total_reg_count
+            
+            if total_reg_area > 0:
+                # Normalize by area
+                totals["count"][f"{state}_weighted"] /= total_reg_area
+                totals["area"][f"{state}_weighted"]  /= total_reg_area
+
+            # Add shared components
+            totals["count"][state] += n_shared[state]
+            totals["area"][state]  += n_shared[state]
+
+            totals["count"][f"{state}_weighted"] += area_shared[state]
+            totals["area"][f"{state}_weighted"]  += area_shared[state]
+
+        # 5. Normalise areas by circle area (π·r²), expressed in spacing² units.
+        #    This ratio depends only on r/spacing and nest_depth, so it is
+        #    reusable across different point clouds with the same geometry.
+        from math import pi as _pi
+        r = self.search.r
+        spacing = self.spacing
+        circle_area_in_spacing_units = _pi * (r / spacing) ** 2
+        totals["area_share"] = {}
+        for state in ["cntd", "ovlpd"]:
+            for suffix in ["", "_weighted"]:
+                key = state + suffix
+                totals["area_share"][key] = (
+                    totals["area"][key] / circle_area_in_spacing_units
+                    if circle_area_in_spacing_units > 0 else 0.0
+                )
+
+        self.micro_region_stats = totals
+        return totals
+    
     # append plots
     # # append cluster functions
     # create_clusters = create_clusters
@@ -428,13 +578,14 @@ class Grid(object):
     # save_full_grid = Clustering.save_full_grid
     # save_sparse_grid = Clustering.save_sparse_grid
     # save_cell_clusters = Clustering.save_cell_clusters
+
     def plot_sample_area(self,
         pts:_pd_DataFrame=None,
         x:str=None,
         y:str=None,
         filename:str='',
         plot_kwargs:dict={},
-        close_plot:bool=False,):
+        show:bool=True,):
         plot_sample_area(
             grid=self,
             pts=pts or self.pts if hasattr(self,"pts") else None,
@@ -442,7 +593,7 @@ class Grid(object):
             y=y or self.y if hasattr(self,"y") else None,
             filename=filename,
             plot_kwargs=plot_kwargs,
-            close_plot=close_plot,
+            show=show,
         )
     def create_full_grid_df(self, target_crs:str=['initial','local','EPSG:4326'][0], max_column_name_length:int=10):
         """returns geopandas.GeoDataFrame with entry for each grid cell with attributes on its Polygon, centroid, sum of indicator(s), and cluster id
@@ -520,69 +671,73 @@ class Grid(object):
             with entry for each grid cell
         """
         
-        id_to_sums = self.id_to_sums
-        x_steps = self.x_steps
-        y_steps = self.y_steps
-        col_ids = self.col_ids
-        centroids = self.get_all_centroids()
+        id_to_sums = self.output_id_to_sums
+        x_steps = self.output_x_steps
+        y_steps = self.output_y_steps
+        out_row_ids = _np_arange(len(y_steps) - 1)
+        out_col_ids = _np_arange(len(x_steps) - 1)
+        n_out_cells = len(out_row_ids) * len(out_col_ids)
         polys = []
         target_crs = self.initial_crs if target_crs=='initial' else self.local_crs if target_crs=='local' else target_crs
         if target_crs != self.local_crs:
             transformer = Transformer.from_crs(crs_from=self.local_crs, crs_to=target_crs, always_xy=True)
-            centroids_x_full, centroids_y_full = transformer.transform(centroids[:,0], centroids[:,1])
-        else:
-            centroids_x_full, centroids_y_full = centroids[:,0], centroids[:,1]
-        centroids_x = _np_zeros(self.n_cells,float)
-        centroids_y = _np_zeros(self.n_cells,float)
-        sparse_row_ids = _np_zeros(self.n_cells,int)
-        sparse_col_ids = _np_zeros(self.n_cells,int)
-        sums = _np_zeros((self.n_cells, len(self.clustering.by_column)),float)
-        c_ids = _np_zeros((self.n_cells, len(self.clustering.by_column)),int)
+        centroids_x = _np_zeros(n_out_cells, float)
+        centroids_y = _np_zeros(n_out_cells, float)
+        sparse_row_ids = _np_zeros(n_out_cells, int)
+        sparse_col_ids = _np_zeros(n_out_cells, int)
+        n_val_cols = max(len(self.clustering.by_column), 1)
+        sums = _np_zeros((n_out_cells, n_val_cols), float)
+        c_ids = _np_zeros((n_out_cells, len(self.clustering.by_column)), int)
         i = 0
-        js_clusters_for_columns = [x for x in enumerate(self.clustering.by_column.values())]
-        for row in self.row_ids:
-            (ymin,ymax) = (y_steps[row], y_steps[row+1])
+        js_clusters_for_columns = list(enumerate(self.clustering.by_column.values()))
+        for row in out_row_ids:
+            ymin_c, ymax_c = y_steps[row], y_steps[row + 1]
             sparse_row_ids[i:] = row
-            for col in col_ids:
+            for col in out_col_ids:
                 cell_in_a_cluster = False
                 for j, clusters_for_column in js_clusters_for_columns:
-                    if (row,col) in clusters_for_column.cell_to_cluster_id: 
-                        c_ids[i,j] = clusters_for_column.cell_to_cluster_id[(row,col)]
+                    if (row, col) in clusters_for_column.cell_to_cluster_id:
+                        c_ids[i, j] = clusters_for_column.cell_to_cluster_id[(row, col)]
                         cell_in_a_cluster = True
-                
-                if (row,col) in id_to_sums: 
-                    sums[i] = id_to_sums[(row,col)]
+                if (row, col) in id_to_sums:
+                    vals = id_to_sums[(row, col)]
+                    sums[i, :len(vals)] = vals
                 elif not cell_in_a_cluster:
                     continue
                 sparse_col_ids[i] = col
-                (xmin, xmax) = (x_steps[col], x_steps[col+1])
-                centroids_x[i] = centroids_x_full[row*col+col] 
-                centroids_y[i] = centroids_y_full[row*col+col]
-                polys.append(Polygon(((xmin,ymin),(xmax,ymin),(xmax,ymax),(xmin,ymax))))
+                xmin_c, xmax_c = x_steps[col], x_steps[col + 1]
+                cx, cy = (xmin_c + xmax_c) / 2, (ymin_c + ymax_c) / 2
+                if target_crs != self.local_crs:
+                    cx, cy = transformer.transform(cx, cy)
+                centroids_x[i] = cx
+                centroids_y[i] = cy
+                polys.append(Polygon(((xmin_c, ymin_c), (xmax_c, ymin_c), (xmax_c, ymax_c), (xmin_c, ymax_c))))
                 i += 1
-            #
-        #
+        out_row_name = getattr(self, 'output_row_name', self.search.source.row_name)
+        out_col_name = getattr(self, 'output_col_name', self.search.source.col_name)
         df = _gpd_GeoDataFrame({
-            self.search.source.row_name: sparse_row_ids[i],
-            self.search.source.col_name: sparse_col_ids[i],
+            out_row_name: sparse_row_ids[:i],
+            out_col_name: sparse_col_ids[:i],
             'centroid_x': centroids_x[:i],
             'centroid_y': centroids_y[:i],
             }, geometry=polys,
             crs=self.local_crs
             )
-        if len(self.clustering.by_column)<=1:
-            df['cluster_id'] = c_ids[:i]
-            df['sum'] = sums[:i]
+        val_cols = getattr(self, '_output_val_cols', [])
+        if len(self.clustering.by_column) <= 1:
+            df['cluster_id'] = c_ids[:i, 0] if c_ids.shape[1] > 0 else 0
+            for k, vcol in enumerate(val_cols):
+                df[vcol] = sums[:i, k]
         else:
             for j, column in enumerate(self.clustering.by_column):
                 c_id_colname = find_column_name("cluster_id", column, df.columns, max_column_name_length)
-                agg_colname = find_column_name("sum_radius", column, df.columns, max_column_name_length)
-                df[c_id_colname] = c_ids[:i,j]
-                df[agg_colname] = sums[:i,j]
-        
+                df[c_id_colname] = c_ids[:i, j]
+            for k, vcol in enumerate(val_cols):
+                df[vcol] = sums[:i, k]
+
         if target_crs != self.local_crs:
             df.to_crs(target_crs, inplace=True)
-        
+
         return df
     #
 
@@ -750,7 +905,7 @@ class Grid(object):
 
 #
 
-class ExludedArea:
+class ExcludedArea:
     def __init__(self,excluded_area_geometry_or_list, grid:Grid):
         # recursively split exluded area geometry along grid 
         # then sort it into grid cell

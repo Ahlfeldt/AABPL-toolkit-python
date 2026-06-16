@@ -18,7 +18,7 @@ setup(
     author='Gabriel M Ahlfeldt',
     author_email='g.ahlfeldt@hu-berlin.de',
     license='MIT',
-    install_requires=['numpy','pandas','geopandas','shapely','matplotlib','pyproj', 'concave_hull'],
+    install_requires=['numpy','pandas','geopandas','shapely','matplotlib','pyproj','concave_hull','mpmath'],
     packages=find_packages(exclude=["tests*",]),
     extras_require={
         'test': extra_test,

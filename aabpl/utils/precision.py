@@ -1,6 +1,6 @@
 from math import (
-    sin as _math_sin, cos as _math_cos, atan2 as _math_atan2, pi as _math_pi, 
-    acos as _math_acos , sin as _math_asin, log10 as _math_log10,
+    sin as _math_sin, cos as _math_cos, atan2 as _math_atan2, pi as _math_pi,
+    acos as _math_acos, log10 as _math_log10,
     factorial as _math_factorial
 )
 from decimal import Decimal as _decimal_Decimal, getcontext as _decimal_getcontext

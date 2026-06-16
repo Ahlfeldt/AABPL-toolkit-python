@@ -25,3 +25,4 @@ output_data/*
 output_gis/*
 output_maps/*
 temp/*
+perf_test/*

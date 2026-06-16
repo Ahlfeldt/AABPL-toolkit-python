@@ -1,0 +1,287 @@
+from numpy import (
+    array as _np_array,
+    sign as _np_sign,
+)
+from pandas import DataFrame as _pd_DataFrame
+from math import degrees, pi as _math_pi
+from shapely.geometry import (Polygon as _shapely_Polygon)
+from mpmath import mp
+
+def angle_to(p1, p2, rotation=0, clockwise=False) -> float:
+    """Calculates angle of line conecting p1->p2 (counter)-clockwise relative horizontal line point right (0,0)->(1,0) 
+    :param p1: point coordinate tuple
+    :param p2: point coordinate tuple
+    :param clockwise: direction per default counter-clockwise
+    :return float angle
+    """
+    mp.precision = 16
+    angle = float(degrees(mp.atan2(p2[1] - p1[1], p2[0] - p1[0]))) - rotation
+    # angle = degrees(atan2(p2[1] - p1[1], p2[0] - p1[0])) - rotation
+    if clockwise:
+        angle = -angle
+    return angle % 360
+#
+
+def angles_to_origin(pts,center) -> list:
+    """Returns angle counter clockwise relative to line connecting (0,0)->center where pt=2*center will give angle of 180degrees
+    :param pts: list of coordinate tuples
+    :param center: 2D coordinates of center
+    :return List[Tuple[float, float]]:
+    """
+    rotation = angle_to((0,0), center)
+    return [angle_to(center, pt, rotation=rotation) for pt in pts]
+#
+
+def angle(x1, y1, x2, y2):
+    """Calculates angle of line conecting (x1,y2)->(x2,y2) clockwise relative horizontal line point right (0,0)->(1,0) 
+    :param p1: point coordinate tuple
+    :param p2: point coordinate tuple
+    :param clockwise: direction per default counter-clockwise
+    :return float angle clockwise
+    """
+    mp.dps = 16
+    return float(mp.atan2(y1-y2, x2-x1) % (2*mp.pi))
+    # return _math_atan2(y1-y2, x2-x1) % (2*_math_pi)
+#
+
+def pt_is_left_of_vector(ptx:float, pty:float, startx:float, starty:float, endx:float, endy:float) -> bool:
+    """
+    returns True if point is on the leftside of vector. False if to the right or on the vector
+    """
+    if (startx - endx)*(pty- endy) - (starty - endy)*(ptx - endx)  == 0:
+        raise ValueError('Point is on vector!',locals())
+    return (startx - endx)*(pty- endy) - (starty - endy)*(ptx - endx) < 0
+#
+
+
+def flatten_list(nestedList:list)->list:
+    """
+    Flatten list of lists once: [[1,2,],[3,[4,5]]] -> [1,2,3,[4,5]]
+    """
+    return [item for sublist in nestedList for item in sublist] 
+#
+
+
+def make_bins_from_vals(vals:list) -> list:
+    """
+    returns list of tuples of upper and lower bounds for bins crated from sorted set of vals
+    """
+    vals = sorted(set(vals))
+    return [(lower,upper) for lower,upper in zip(vals[:-1], vals[1:])]
+
+def get_vals_from_bins(bins:list) -> list:
+    """
+    return sorted unique vals retrieved from bins upper and lower bounds
+    """
+    return sorted(set([v[0] for v in bins] + [v[1] for v in bins])) 
+
+
+def sort_2D_array_by_rows(
+        arr:_np_array
+):
+    for i in range(arr.shape[1])[::-1]:
+        arr=arr[arr[:,i].argsort()]
+    return arr
+#
+
+# copied helpefer funs 
+def depth(d):
+    if isinstance(d, dict):
+        return 1 + (max(map(depth, d.values())) if d else 0)
+    return 0
+#
+
+def visualize(root, indent=0):
+    if type(root) == dict:
+        for k, v in root.items():
+            print(" - "*indent + f"{k}:")
+            visualize(v, indent+1)
+    else:
+        print(" - "*indent + repr(root))
+#
+
+def visualize(root:dict, indent:int,single_nest:str):
+    for i,(k, v) in enumerate(root.items()):
+        k_s = ' '*(2-len(str(k)))+str(k)
+        if i==0:
+            if len(v.items())>0:
+                visualize(v, indent+0, single_nest + k_s+' --> ')
+            else:
+                print('    '*indent+single_nest + k_s+'')
+        else:
+            print(''.join([('    ' if j<indent-1 else '|--> ') for j in range(indent)])+ k_s+'')
+            visualize(v, indent+1,'')
+    #
+#
+
+def list_dict_keys(d:dict):
+    res = []#list(d.keys())
+    for key,val in d.items():
+       res += [key]+list_dict_keys(val) 
+    return res
+#
+
+def arr_to_tpls(arr:_np_array,tgt_type:type=None):
+    """
+    transform 2d numpy array to list of tuples and convert to type if specified
+    """
+    if tgt_type is None:
+        return list([tuple(el for el in row) for row in arr])
+    return list([tuple(tgt_type(el) for el in row) for row in arr])
+#
+
+class DataFrameRelation(object):
+    """
+    
+    """
+    EQUAL = 'equal'
+    SUBSET = 'subset'
+    SUPERSET = 'superset'
+    OVERLAP = 'overlap'
+    DISJOINT = 'disjoint'
+    
+    @staticmethod
+    def get_bilateral_relation_type(
+        a:_pd_DataFrame,b:_pd_DataFrame, force_same_columns:bool=False, silent:bool=False
+        )->str:
+        """
+        returns relations of `a` towards `b` for shared columns.
+        Args:
+        a : pandas.DataFrame
+        any DataFrame to check its relation towards `b` 
+        b : pandas.DataFrame
+        any DataFrame to check relation of `a` towards `b`
+        force_same_columns : bool
+        if True will raise an error if DataFrames don't share all columns
+        silent : bool
+        if True will surpress warning if DataFrames don't share all columns
+        
+        Returns:
+        relation : str
+        - 'equal': `a` equals `b`
+        - 'subset': `a` is a subset of `b`
+        - 'superset': `a` is a superset of `b`
+        - 'overlap': `a` and `b` have intersection but neither is a subset of the other
+        - 'disjoint': `a` and `b` have no intersection
+        """
+        if type(a) != _pd_DataFrame or type(b) != _pd_DataFrame:
+            raise TypeError("search source and target both have be of type pandas.DataFrame. Types supplied:",type(a),type(b))
+        if a is b: return DataFrameRelation.EQUAL
+        if a.equals(b): return DataFrameRelation.EQUAL
+        
+        a_columns = set(a.columns)
+        b_columns = set(b.columns)
+        if (force_same_columns or silent==False) and len(a_columns.difference(b_columns)) > 0:
+            msg = ("Checking relation of two DataFrame with columns that are not shared: " + 
+                str(a_columns.difference(b_columns))+". Shared columns:"+str(a_columns.intersection(b_columns))
+                )
+            if force_same_columns:
+                raise ValueError(msg)
+            elif not silent:
+                print(msg)
+        
+        # drop duplicates to check if intersection includes all
+        a_no_dup = a.drop_duplicates()
+        b_no_dup = b.drop_duplicates()
+        len_df_intersection = len(a_no_dup.merge(b_no_dup, how='inner'))
+        
+        if len_df_intersection == 0: return DataFrameRelation.DISJOINT
+        if len_df_intersection < len(a_no_dup) and len_df_intersection < len(b_no_dup): return DataFrameRelation.OVERLAP
+        if len_df_intersection < len(a_no_dup): return DataFrameRelation.SUPERSET
+        if len_df_intersection < len(b_no_dup): return DataFrameRelation.SUBSET 
+        return DataFrameRelation.EQUAL
+    #
+
+    @staticmethod
+    def check_if_df_is_contained(
+            a:_pd_DataFrame,b:_pd_DataFrame, force_same_columns:bool=False, silent:bool=False
+    ) -> bool:
+        """
+        returns whether `a` is equal to `b` or a subset of `b`for shared columns.
+        Args:
+        a : pandas.DataFrame
+        any DataFrame to check its relation towards `b` 
+        b : pandas.DataFrame
+        any DataFrame to check relation of `a` towards `b`
+        force_same_columns : bool
+        if True will raise an error if DataFrames don't share all columns
+        silent : bool
+        if True will surpress warning if DataFrames don't share all columns
+        
+        Returns:
+        is_contained : bool
+          True if a equals b or a is subset of b. False otherwise
+        """
+        is_contained = DataFrameRelation.get_bilateral_relation_type(
+            a=a,b=b,force_same_columns=force_same_columns,silent=silent
+            ) in (DataFrameRelation.EQUAL, DataFrameRelation.SUBSET)
+        return is_contained
+    #
+#
+def find_column_name(static_part:str, dynamic_part:str='', existing_columns:list=[], maxlen:int=10):
+    for i in range(len(existing_columns)):
+        dynamic = dynamic_part[:-i]
+        for j in range(len(static_part)-1):
+            static = static_part[:-j] if j>0 else static_part 
+            for flip in [False,True]:
+                for sep in [1,0,1,2,3,4,5,6,7][int('' in [static, dynamic]):]:
+                    first,last = (static, dynamic)[flip], (static, dynamic)[not flip]
+                    name_to_test = first+('_'*sep)+last
+                    if len(name_to_test)<=maxlen:
+                        if name_to_test not in existing_columns:
+                            return name_to_test
+                    elif sep == 0:
+                        break
+    raise ValueError('Not able to find a column name that is satisfying condition and not already taken', static_part, dynamic_part, existing_columns, maxlen)
+
+
+def dist_line_segment_to_point(x1:int, y1:int, x2:int, y2:int, x3:int, y3:int) -> float: # x3,y3 is the point
+    """
+    Returns shortest distance of p3(x3,y3) to linesegement connecting p1 and p2.
+    """
+    px = x2-x1
+    py = y2-y1
+
+    norm = px*px + py*py
+
+    u =  ((x3 - x1) * px + (y3 - y1) * py) / float(norm)
+
+    if u > 1:
+        u = 1
+    elif u < 0:
+        u = 0
+
+    x = x1 + u * px
+    y = y1 + u * py
+
+    dx = x - x3
+    dy = y - y3
+
+    dist = (dx*dx + dy*dy)**.5
+
+    return dist
+
+def count_polygon_edges(
+            poly
+    ):
+        complexity = 0
+        geoms = [poly] if type(poly) == _shapely_Polygon else list(poly.geoms)
+        for geom in geoms:
+            if type(geom) == _shapely_Polygon:
+                complexity += len(geom.exterior.coords)-2
+                for interior in geom.interiors:
+                    complexity += len(interior.coords)-2
+            #
+        return complexity
+#
+def count_polygon_interiors(
+            poly
+    ):
+        n_interiors = 0
+        geoms = [poly] if type(poly) == _shapely_Polygon else list(poly.geoms)
+        for geom in geoms:
+            if type(geom) == _shapely_Polygon:
+                n_interiors += len(geom.interiors)
+            #^
+        return n_interiors
+#

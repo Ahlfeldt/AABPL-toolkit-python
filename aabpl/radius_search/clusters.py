@@ -6,8 +6,8 @@ from pyproj import Transformer
 from pandas import DataFrame as _pd_DataFrame
 from shapely.geometry import Polygon, Point
 from shapely.ops import unary_union
-from aabpl.utils.general import find_column_name, arr_to_tpls
-from aabpl.utils.distances_to_cell import min_possible_dist_cells_to_cell
+from aabpl.utils.misc import find_column_name, arr_to_tpls
+from aabpl.utils.cell_geometry import min_possible_dist_cells_to_cell
 
 def merge_condition_queen_contingency(max_steps:int=1)->bool:
     """

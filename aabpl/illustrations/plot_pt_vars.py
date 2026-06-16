@@ -3,7 +3,7 @@ from matplotlib.pyplot import get_cmap as _plt_get_cmap
 from matplotlib.pyplot import close as _plt_close
 from matplotlib.colors import LogNorm as _plt_LogNorm, Normalize as _plt_Normalize, LinearSegmentedColormap as _plt_LinearSegmentedColormap, ListedColormap as _plt_ListedColormap
 from matplotlib.patches import Patch as _plt_Patch
-from numpy import array as _np_array
+from numpy import array as _np_array, zeros as _np_zeros
 from aabpl.illustrations.plot_utils import truncate_colormap, set_map_frame, plot_polygon
 from shapely.geometry import Polygon as _shapely_Polygon, MultiPoint as _shapely_MultiPoint
 
@@ -44,11 +44,41 @@ def create_plots_for_vars(
         colnames:_np_array,
         filename:str="",
         save_kwargs:dict={},
-        plot_kwargs:dict={}, 
-        close_plot:bool=False,
+        plot_kwargs:dict={},
+        show:bool=True,
+        display_dpi:int=100,
 ):
     """
-    TODO Descripiton
+    Scatter plot of source points coloured by the value of one or more columns.
+
+    Parameters
+    ----------
+    grid
+        Grid object returned by ``radius_search`` / ``detect_cluster_pts``.
+    colnames : np.ndarray
+        Array of column names to plot. One subplot per entry.
+    filename : str
+        Save path. Empty string skips saving (default ``''``).
+    save_kwargs : dict
+        Forwarded to ``fig.savefig()``.
+        Defaults: ``{'dpi': 300, 'bbox_inches': 'tight'}``.
+    plot_kwargs : dict
+        Supported keys:
+        - ``figsize`` : tuple — figure size (default ``(10*n_cols, 8*n_rows)``)
+        - ``cmap`` : str — colormap name (default ``'Reds'``)
+        - ``s`` : float — scatter marker size (default auto)
+        - ``vmin``, ``vmax`` : float — colormap range
+        - ``sample_area_colors`` : list[str, str] — colours for [valid, excluded] area
+        - ``fig``, ``axs`` — existing Figure/Axes to draw into
+    show : bool
+        Display the figure (default ``True``).
+    display_dpi : int
+        Resolution for inline/screen display (default ``100``).
+        Use ``save_kwargs={'dpi': 300}`` to control saved-file resolution.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
     """
     nrows = colnames.shape[0]
     ncols = 1 if len(colnames.shape)==1 else colnames.shape[1]
@@ -76,8 +106,10 @@ def create_plots_for_vars(
     if len(additional_varnames)>nrows:
         # TODO this is not compelted
         nrows = len(additional_varnames)
+    cmap_name = plot_kwargs.pop('cmap', 'Reds')
+    cmap = truncate_colormap(_plt_get_cmap(cmap_name), 0.1, 1)
     if fig is None or axs is None:
-        fig, axs = _plt_subplots(nrows,ncols, figsize=figsize)
+        fig, axs = _plt_subplots(nrows, ncols, figsize=figsize, dpi=display_dpi)
     if not grid.sample_grid_bounds is None and not grid.sample_area is None:
         non_valid_area = _shapely_Polygon([
             (grid.sample_grid_bounds[0], grid.sample_grid_bounds[1]),
@@ -107,7 +139,20 @@ def create_plots_for_vars(
             row_max = int(round((grid.sample_grid_bounds[3]-grid.total_bounds.ymin)/grid.spacing-1,0))
             # row_min, row_max = min([row for row,col in grid.cells_rndm_sample]), max([row for row,col in grid.cells_rndm_sample])
             # col_min, col_max = min([col for row,col in grid.cells_rndm_sample]), max([col for row,col in grid.cells_rndm_sample])
-            X = _np_array([[not (cells_rndm_sample if type(cells_rndm_sample)==bool else (row,col) in cells_rndm_sample ) for col in  range(col_min,col_max+1)] for row in range(row_min,row_max+1)[::-1]])
+            n_rows_x = row_max - row_min + 1
+            n_cols_x = col_max - col_min + 1
+            if type(cells_rndm_sample) == bool:
+                X = _np_zeros((n_rows_x, n_cols_x), dtype=bool)
+                if not cells_rndm_sample:
+                    X[:] = True
+            else:
+                X = _np_zeros((n_rows_x, n_cols_x), dtype=bool)
+                X[:] = True
+                for (row, col) in cells_rndm_sample:
+                    ri = row_max - row
+                    ci = col - col_min
+                    if 0 <= ri < n_rows_x and 0 <= ci < n_cols_x:
+                        X[ri, ci] = False
             cmap_binary = _plt_ListedColormap([sample_area_color, non_valid_area_color])
             extent = [grid.sample_grid_bounds[0],grid.sample_grid_bounds[2],grid.sample_grid_bounds[1],grid.sample_grid_bounds[3]]
             p = ax.imshow(X=X, interpolation='none', cmap=cmap_binary, extent=extent)#, To-Do the extent is imprecise as it does not cover the full grid only its points
@@ -121,8 +166,7 @@ def create_plots_for_vars(
         vmax=plot_kwargs['vmax'] if 'vmax' in plot_kwargs else c.max(),
         # norm = plot_kwargs['norm'] if 'norm' in plot_kwargs else _plt_LogNorm(vmin=c.min(),vmax=c.max()) if (c.min() > 0) else _plt_LogNorm()
         norm = plot_kwargs['norm'] if 'norm' in plot_kwargs else _plt_LogNorm(vmin=c.min(),vmax=c.max()) if (c.min() > 0) else 'linear'
-        plot_kwargs['cmap'] = truncate_colormap(_plt_get_cmap(plot_kwargs['cmap']),0.1,1)
-        scttr = ax.scatter(x=xs,y=ys,c=c, norm=norm, **plot_kwargs)
+        scttr = ax.scatter(x=xs, y=ys, c=c, norm=norm, cmap=cmap, rasterized=True, **plot_kwargs)
         plot_polygon(poly=non_valid_area, ax=ax, facecolor="none", edgecolor='black')
         fig.colorbar(scttr, ax=ax)
         set_map_frame(ax=ax,xmin=xmin,xmax=xmax,ymin=ymin,ymax=ymax)
@@ -130,7 +174,7 @@ def create_plots_for_vars(
     if not fig is None:
         if filename:
             fig.savefig(filename, **save_kwargs)
-        if close_plot:
+        if not show:
             _plt_close(fig)
     return fig
     #

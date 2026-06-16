@@ -1,8 +1,10 @@
 from pandas import DataFrame as _pd_DataFrame
 from numpy import (
     array as _np_array,
+    zeros as _np_zeros,
     linspace as _np_linspace,
     searchsorted as _np_searchsorted,
+    sort as _np_sort,
 )
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
@@ -12,8 +14,6 @@ from matplotlib.pyplot import (subplots as _plt_subplots, colorbar as _plt_color
 from matplotlib.patches import Patch as _plt_Patch
 from aabpl.illustrations.plot_utils import add_color_bar_ax, set_map_frame, truncate_colormap, plot_polygon
 from shapely.geometry import Polygon as _shapely_Polygon
-from aabpl.illustrations.plot_utils import truncate_colormap
-from shapely.geometry import Polygon as _shapely_Polygon, MultiPoint as _shapely_MultiPoint
 
 def create_distribution_plot(
         pts:_pd_DataFrame,
@@ -27,10 +27,50 @@ def create_distribution_plot(
         y:str='lat',
         filename:str='',
         plot_kwargs:dict={},
-        close_plot:bool=False,
+        show:bool=True,
+        display_dpi:int=100,
 ):
     """
-    TODO Descripiton
+    Four-panel plot comparing the random-point null distribution to the
+    observed radius-sum distribution. Called via ``grid.plot.rand_dist()``.
+
+    Parameters
+    ----------
+    pts : DataFrame
+        Source points with radius-sum columns already appended.
+    rndm_pts : DataFrame
+        Random points with radius-sum columns appended by ``compute_null_distribution``.
+    cluster_threshold_values : list[float]
+        One threshold per column — the k-th percentile cutoff value.
+    k_th_percentile : list[float]
+        Percentile values used to derive ``cluster_threshold_values``.
+    radius_sum_columns : list[str]
+        Column names of the radius sums to plot.
+    grid
+        Grid object (used to draw sample-area overlay).
+    r : float
+        Search radius in metres (used for the plot title).
+    x, y : str
+        Coordinate column names in ``pts`` and ``rndm_pts``.
+    filename : str
+        Save path. Empty string skips saving (default ``''``).
+    plot_kwargs : dict
+        Supported keys:
+        - ``figsize`` : tuple (default ``(10, 10)``)
+        - ``s`` : float — scatter marker size (default ``0.8``)
+        - ``color`` : str — marker colour (default ``'#eaa'``)
+        - ``hlines`` : dict — kwargs for ``ax.hlines`` threshold line
+        - ``vlines`` : dict — kwargs for ``ax.vlines`` percentile line
+        - ``fig``, ``axs`` — existing Figure/Axes to draw into
+    show : bool
+        Display the figure (default ``True``).
+    display_dpi : int
+        Resolution for inline/screen display (default ``100``).
+        Use ``save_kwargs={'dpi': 300}`` to control saved-file resolution.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
     """
     x_coord_name, y_coord_name = x,y
     disk_sums_for_random_points = rndm_pts[radius_sum_columns]
@@ -61,7 +101,7 @@ def create_distribution_plot(
 
     if fig is None or axs is None:
 
-        fig = plt.figure(figsize=figsize)
+        fig = plt.figure(figsize=figsize, dpi=display_dpi)
         outer = gridspec.GridSpec(ncols, 1, wspace=0.0, hspace=0.05)
     
     fig.suptitle(
@@ -88,7 +128,7 @@ def create_distribution_plot(
         right_col = gridspec.GridSpecFromSubplotSpec(2, 1, subplot_spec=columns[1], wspace=0.0, hspace=0.15)
         
         # CUMULATIVE DISTRIBUTION RANDOM POINTS
-        ys = sorted(random_vals[:,i])
+        ys = _np_sort(random_vals[:,i])
         ymin, ymax = min(ys), max(ys)
         # round percentile value as far as necessary only 
         # e.g. threshold value is 10.5328... and next smaller/larger in distribution are 10.51..., 10.6... 
@@ -129,18 +169,14 @@ def create_distribution_plot(
         ax.scatter(x=xs_random_pts,y=ys, **plot_kwargs)
         # SET LIMITS
         ax.set_xlim([xmin,xmax])
-        if ymin==ymax:
-            print("ymin==ymax",ymin,ymax)
-        try:
+        if ymin != ymax:
             ax.set_ylim([ymin,ymax])
-        except:
-            print("Failed to set axis y-lims: ("+str(ymin)+","+str(ymax)+")")
         
         fig.add_subplot(ax)
 
 
         # CUMULATIVE DISTRIBUTION ORIGNAL POINTS
-        ys = sorted(pts_vals[:,i])
+        ys = _np_sort(pts_vals[:,i])
         ymin, ymax = min(ys), max(ys)
         # SELECT AX (IF MULTIPLE)
         ax = plt.Subplot(fig, left_col[1])
@@ -164,12 +200,8 @@ def create_distribution_plot(
         ax.scatter(x=xs_pts,y=ys, **plot_kwargs)
         # SET LIMITS
         ax.set_xlim([xmin,xmax])
-        if ymin==ymax:
-            print("ymin==ymax",ymin,ymax)
-        try:
+        if ymin != ymax:
             ax.set_ylim([ymin,ymax])
-        except:
-            print("Failed to set axis y-lims: ("+str(ymin)+","+str(ymax)+")")
         fig.add_subplot(ax)
 
         # combine them and build a new colormap
@@ -204,7 +236,20 @@ def create_distribution_plot(
             row_min = int(round((grid.sample_grid_bounds[1]-grid.total_bounds.ymin)/grid.spacing,0))
             col_max = int(round((grid.sample_grid_bounds[2]-grid.total_bounds.xmin)/grid.spacing-1,0))
             row_max = int(round((grid.sample_grid_bounds[3]-grid.total_bounds.ymin)/grid.spacing-1,0))
-            X = _np_array([[not (cells_rndm_sample if type(cells_rndm_sample) == bool else (row,col) in cells_rndm_sample) for col in  range(col_min,col_max+1)] for row in range(row_min,row_max+1)[::-1]])
+            n_rows_x = row_max - row_min + 1
+            n_cols_x = col_max - col_min + 1
+            if type(cells_rndm_sample) == bool:
+                X = _np_zeros((n_rows_x, n_cols_x), dtype=bool)
+                if not cells_rndm_sample:
+                    X[:] = True
+            else:
+                X = _np_zeros((n_rows_x, n_cols_x), dtype=bool)
+                X[:] = True
+                for (row, col) in cells_rndm_sample:
+                    ri = row_max - row
+                    ci = col - col_min
+                    if 0 <= ri < n_rows_x and 0 <= ci < n_cols_x:
+                        X[ri, ci] = False
             cmap_binary = _plt_ListedColormap([sample_area_color, non_valid_area_color])
             extent = [grid.sample_grid_bounds[0],grid.sample_grid_bounds[2],grid.sample_grid_bounds[1],grid.sample_grid_bounds[3]]
             p = ax.imshow(X=X, interpolation='none', cmap=cmap_binary, extent=extent)#, To-Do the extent is imprecise as it does not cover the full grid only its points
@@ -246,7 +291,7 @@ def create_distribution_plot(
 
     if filename:
         fig.savefig(filename, dpi=300, bbox_inches="tight")
-    if close_plot:
+    if not show:
         _plt_close(fig)
     return fig
     #

@@ -19,8 +19,7 @@ os.makedirs(temp_folder, exist_ok=True)
 
 ### Import packages
 from pandas import read_csv
-from aabpl.main import radius_search, detect_cluster_pts, detect_cluster_cells
-from aabpl.valid_area import infer_sample_area_from_pts
+from aabpl import radius_search, detect_cluster_pts, detect_cluster_cells, infer_sample_area_from_pts
 
 path_to_your_csv = 'input_data/hist_New_York.txt'
 crs_of_your_csv =  "EPSG:4326"

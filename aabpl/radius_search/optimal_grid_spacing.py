@@ -1,8 +1,8 @@
 from numpy import linspace as _np_linspace
 from pandas import DataFrame as _pd_DataFrame
 from math import pi
-from aabpl.illustrations.illustrate_optimal_grid_spacing import ( create_optimal_grid_spacing_gif, )
-from aabpl.utils.distances_to_cell import ( get_always_contained_potentially_overlapped_cells,)
+from aabpl.illustrations.plot_grid_spacing import ( create_optimal_grid_spacing_gif, )
+from aabpl.utils.cell_geometry import ( partition_cells_by_disk_relation,)
 
 def get_next_relevant_grid_spacing(
         relevantGridSizes:_pd_DataFrame,
@@ -30,7 +30,7 @@ def get_next_relevant_grid_spacing(
         current = (upper_bound * (5+early_it) + lower_bound*(5-early_it)) / 10
         
         
-        contain_count, overlap_count = get_always_contained_potentially_overlapped_cells(grid_spacing=current, r=r, countOnly=True)
+        contain_count, overlap_count = partition_cells_by_disk_relation(grid_spacing=current, r=r, countOnly=True)
         #
         changeDetected = (
             relevantGridSizes.iloc[-1]['contain_count'] != contain_count or
@@ -78,7 +78,7 @@ def find_relevant_grid_spacings(
     current = largest
     print('Start searching for relevant gridsizes.')
     
-    smallest_contain_count, smallest_overlap_count = get_always_contained_potentially_overlapped_cells(
+    smallest_contain_count, smallest_overlap_count = partition_cells_by_disk_relation(
         grid_spacing=smallest, r=r, countOnly=True)
 
     while current > smallest:
@@ -92,7 +92,7 @@ def find_relevant_grid_spacings(
             smallest_overlap_count=smallest_overlap_count
         )
 
-        contain_count, overlap_count, contain_ids, overlap_ids, cell_steps_max = get_always_contained_potentially_overlapped_cells(
+        contain_count, overlap_count, contain_ids, overlap_ids, cell_steps_max = partition_cells_by_disk_relation(
             grid_spacing=current, r=r, countOnly=False)
 
         relevantGridSizes.loc[current]= {

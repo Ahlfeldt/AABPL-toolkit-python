@@ -49,7 +49,8 @@ def convert_coords_to_local_crs(
     """Reprojects coordinates into target crs. Modifies DataFrame and returns string of local_crs. If non specified it chooses best crs based on the mean coordinate.
     
     """
-    if target_crs == 'auto': 
+    tgt_was_auto = target_crs == 'auto'
+    if tgt_was_auto: 
         if initial_crs != "EPSG:4326":
             transformer = _pyproj_Transformer.from_crs(crs_from=initial_crs, crs_to=local_crs, always_xy=True)
             x_wgs,y_wgs = transformer.transform(pts[x], pts[y])
@@ -60,8 +61,7 @@ def convert_coords_to_local_crs(
         local_crs = target_crs
     transformer = _pyproj_Transformer.from_crs(crs_from=initial_crs, crs_to=local_crs, always_xy=True)
     pts[proj_x],pts[proj_y] = transformer.transform(pts[x], pts[y])
-    if True:
-    # if not silent and initial_crs != local_crs:
+    if initial_crs != local_crs and (silent==False or tgt_was_auto):
         print("Reproject from " +str(initial_crs)+' to '+local_crs)
     return local_crs
 #
@@ -70,9 +70,9 @@ def convert_pts_to_crs(
     pts:_pd_DataFrame=None,
     x:str='lon',
     y:str='lat',
-    initial_crs:str='EPSG:4326', 
+    initial_crs:str='EPSG:4326',
     target_crs:str='auto',
-    silent:bool=True,
+    silent:bool=False,
 ):
         
     proj_x = next(('proj_x'+str(i) for i in ['']+list(range(len(pts.columns))) if 'proj_x'+str(i) not in pts.columns))
@@ -123,8 +123,5 @@ def convert_bounds_to_local_crs(
         local_crs = target_crs
     transformer = _pyproj_Transformer.from_crs(crs_from=initial_crs, crs_to=local_crs, always_xy=True)
     xs_local,ys_local = transformer.transform(bounds_corners_x, bounds_corners_y)
-    if True:
-    # if not silent and initial_crs != local_crs:
-        print("Reproject from " +str(initial_crs)+' to '+local_crs)
     return local_crs, (min(xs_local), max(xs_local),min(ys_local), max(ys_local))
 #
