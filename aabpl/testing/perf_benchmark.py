@@ -523,7 +523,17 @@ def run_sweep(
     n_screen  : number of source points used in the screening phase (default 2000)
     top_k     : number of configs per radius to promote to full-scale validation
     """
-    pts_xy = pts[["lon", "lat"]].values if "lat" in pts.columns else pts.iloc[:, :2].values
+    from aabpl.utils.crs_transformation import convert_pts_to_crs as _convert_pts_to_crs
+    _pts_proj = pts.copy()
+    _x_proj, _y_proj, _local_crs = _convert_pts_to_crs(
+        pts=_pts_proj,
+        x="lon" if "lon" in pts.columns else pts.columns[0],
+        y="lat" if "lat" in pts.columns else pts.columns[1],
+        initial_crs=crs,
+        target_crs=local_crs,
+        silent=True,
+    )
+    pts_xy = _pts_proj[[_x_proj, _y_proj]].values
     dist_stats_cache = {r: compute_spatial_stats(target_points=pts_xy, search_radii=[r]) for r in radii}
 
     completed = set()

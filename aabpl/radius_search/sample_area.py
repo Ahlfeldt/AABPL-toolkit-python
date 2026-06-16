@@ -17,6 +17,7 @@ from matplotlib import pyplot as plt
 from matplotlib.patches import (Rectangle as _plt_Rectangle, Polygon as _plt_Polygon, Circle as _plt_Circle)
 from aabpl.illustrations.plot_utils import plot_polygon
 from aabpl.utils.misc import count_polygon_interiors
+from aabpl.utils.crs_transformation import convert_pts_to_crs as _convert_pts_to_crs
 from aabpl.utils.intersections import circle_line_segment_intersection
 from aabpl.utils.cell_geometry import (classify_disk_cells, get_cells_by_lvl_ovlpd_by_cell_buffer)
 from aabpl.testing.test_performance import time_func_perf
@@ -386,6 +387,8 @@ def infer_sample_area_from_pts(
         tolerance:float=None,
         x:str='lon',
         y:str='lat',
+        crs:str=None,
+        proj_crs:str='auto',
         min_pts_to_sample_cell:int=1,
         plot_sample_area:dict=None,
 ) -> _shapely_Polygon:
@@ -422,6 +425,13 @@ def infer_sample_area_from_pts(
     sample_poly (shapely.geometry.Polygon):
         a grid covering all points (custom class containing 
     """
+    # Reproject pts to a metric CRS so that buffer is in metres and hull is computed
+    # in projected space. Temporary columns are dropped before returning.
+    _proj_cols_to_drop = []
+    if crs is not None:
+        x, y, _proj_crs = _convert_pts_to_crs(pts=pts, x=x, y=y, initial_crs=crs, target_crs=proj_crs)
+        _proj_cols_to_drop = [x, y]
+
     # To-Do maybe add minumum observations per cell to be kept
     if tolerance is None:
         tolerance = buffer
@@ -589,12 +599,15 @@ def infer_sample_area_from_pts(
             tolerance = tolerance*0.8
         #
 
+    if _proj_cols_to_drop:
+        pts.drop(columns=_proj_cols_to_drop, inplace=True, errors='ignore')
+
     # plot_polygon(poly=sample_poly)
     if not plot_sample_area is None:
         fig,ax = plt.subplots(nrows=1,ncols=1,figsize=(8,8))
         ax.scatter(x=pts[x], y=pts[y], color="#51da58", s=0.3)
         plot_polygon(ax=ax, poly=sample_poly, facecolor="#06047640", edgecolor='red')
-    # shoot warning if polygon is getting comple
+    # shoot warning if polygon is getting complex
 
     return sample_poly
 #

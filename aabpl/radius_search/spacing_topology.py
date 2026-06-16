@@ -177,8 +177,8 @@ def choose_nest_depth(r_over_s: float) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Timing model — LASSO→OLS benchmark regression (2026-06)
-# geo: 55 rows (R²=0.734)  srch: 621 rows (R²=0.941)  agg: 927 rows (R²=0.965)
+# Timing model — LASSO→OLS benchmark regression (2026-06, v2 with cubic terms)
+# geo: 55 rows (R²=0.732)  srch: 621 rows (R²=0.981)  agg: 927 rows (R²=0.992)
 # ---------------------------------------------------------------------------
 
 def predict_timing(
@@ -213,69 +213,82 @@ def predict_timing(
     log_wc   = math.log(max(wrld_crcl, 1e-9))
     log_4nd  = math.log1p(4.0 ** nd)
     log_ros2 = log_ros ** 2
+    log_ros3 = log_ros ** 3
     log_nts2 = log_nts ** 2
     log_ntt2 = log_ntt ** 2
+    log_ppc2 = log_ppc ** 2
+    log_ppc3 = log_ppc ** 3
     nd2      = nd ** 2
+    nd3      = nd ** 3
 
     # ── Geometry (absolute seconds, uncached only, topology features only) ──
+    # geo: 55 rows (R²=0.732)
     if geometry_cached:
         geo_s = 0.0
     else:
-        lv = (3.8803
-              - 1.802  * log_ros
-              + 2.193  * log_ros2
-              + 1.048  * nd
-              + 0.114  * nd2
-              - 1.214  * log_4nd
-              - 0.019  * log_ngc
-              - 0.080  * log_ros2 * nd
-              + 0.061  * log_ros  * nd2
-              - 0.004  * log_ngc  * nd)
-        geo_s = math.exp(lv)
+        lv = (2.6429
+              + 0.077  * log_ros2
+              + 0.724  * log_ros3
+              - 0.064  * nd
+              + 0.012  * nd3
+              - 0.018  * log_ngc
+              + 0.018  * log_ros2 * nd2
+              - 0.006  * log_ngc  * nd)
+        geo_s = math.exp(min(lv, 50.0))
 
-    # ── Search (absolute seconds) ────────────────────────────────────────────
-    lv = (2.7203
-          + 1.663  * log_ros2
-          + 0.390  * nd
-          + 0.027  * nd2
-          + 0.309  * log_4nd
-          + 0.342  * log_ngc
-          - 0.026  * log_ros  * nd2
-          - 2.485  * log_ntt
-          + 0.124  * log_ntt2
-          + 0.613  * log_nts
-          - 0.006  * log_ntt2 * nd
-          + 0.117  * log_ppc  * log_ros
-          - 0.116  * log_skw  * log_ros
-          + 0.229  * log_wc   * log_ros)
-    srch_s = math.exp(lv)
+    # ── Search (absolute seconds) — srch: 621 rows (R²=0.981) ──────────────
+    lv = (-10.0134
+          + 1.883  * log_ros
+          - 0.418  * log_ros3
+          + 0.564  * log_4nd
+          - 0.031  * log_ros2 * nd2
+          + 0.031  * log_4nd  * log_ros
+          + 0.459  * log_nts
+          - 0.002  * log_ntt2 * nd
+          - 0.007  * log_ntt2 * log_ros2
+          + 0.076  * log_nts  * log_ros
+          + 0.004  * log_nts  * nd2
+          + 0.033  * log_ntt  * log_nts
+          - 0.005  * log_ppc  * nd2
+          + 0.029  * log_ppc2
+          - 0.008  * log_ppc2 * log_ros
+          - 0.001  * log_ppc3 * nd
+          + 0.000  * log_ppc3 * nd2
+          + 0.002  * log_ppc2 * log_ntt
+          - 0.005  * log_ppc2 * log_nts
+          - 0.021  * log_skw  * nd2
+          - 0.039  * log_skw  * log_ppc
+          + 0.031  * log_skw  * log_ntt
+          - 0.003  * log_wc   * nd2
+          + 0.006  * log_wc   * log_ppc
+          - 0.002  * log_wc   * log_ppc2
+          + 0.089  * log_ppc  * log_ros * nd)
+    srch_s = math.exp(min(lv, 50.0))
 
-    # ── Aggregation (absolute seconds) ──────────────────────────────────────
-    lv = (-8.3060
-          + 0.555  * log_ros2
-          + 0.681  * log_ros2 * nd
-          + 0.005  * log_ntt2
-          + 0.033  * log_nts2
-          + 0.005  * log_ntt2 * nd
-          + 0.001  * log_ntt2 * nd2
-          + 0.938  * log_ppc
-          - 0.344  * log_ppc  * log_ros
-          - 0.158  * log_ppc  * nd
-          + 0.872  * log_skw
-          - 1.038  * log_skw  * log_ros
-          - 0.091  * log_skw  * nd
-          - 1.047  * log_wc   * log_ros
-          + 0.724  * log_wc   * log_ros2
-          - 0.019  * log_wc   * nd
-          + 0.020  * log_wc   * nd2)
-    agg_s = math.exp(lv)
+    # ── Aggregation (absolute seconds) — agg: 927 rows (R²=0.992) ──────────
+    lv = (-0.5476
+          + 0.278  * log_ros3
+          - 0.031  * log_ngc
+          - 0.776  * log_ntt
+          + 0.053  * log_ntt2
+          + 0.001  * log_ntt2 * log_ros2
+          + 0.000  * log_ntt2 * nd2
+          + 0.024  * log_ntt  * log_nts
+          + 0.005  * log_ppc  * nd2
+          - 0.032  * log_ppc2 * log_ros
+          - 0.007  * log_ppc2 * nd
+          - 0.000  * log_ppc3 * nd
+          + 0.005  * log_ppc2 * log_nts
+          - 0.129  * log_wc
+          + 0.003  * (log_nts - log_ngc) * nd
+          + 0.029  * log_ntt  * log_ros * nd)
+    agg_s = math.exp(min(lv, 50.0))
 
-    return (0.0 if geometry_cached else max(geo_s, 1.0)), max(srch_s, 1.0), max(agg_s, 1.0)
+    return geo_s, srch_s, agg_s
 
 
 def choose_spacing_and_depth(
     r: float,
-    candidate_spacings: list,
     spacing_ratio: int = None,
     nest_depth: int = None,
     n_pts_src: int = None,
@@ -296,7 +309,7 @@ def choose_spacing_and_depth(
     skewness       = 10.0
     spatial_width  = r * 100.0   # fallback: pretend world is 100× radius
     spatial_height = r * 100.0
-    if pts_tgt_xy is not None and n_tgt > 1000:
+    if pts_tgt_xy is not None and n_tgt >= 1000:
         _stats = compute_spatial_stats(target_points=pts_tgt_xy, search_radii=[r])
         _skew_2r = _stats.get('density_skewness_2r')
         skewness       = max((_skew_2r[0] if isinstance(_skew_2r, list) and _skew_2r else None)
@@ -304,11 +317,18 @@ def choose_spacing_and_depth(
         spatial_width  = max(_stats.get('spatial_width',  1e-9), 1e-9)
         spatial_height = max(_stats.get('spatial_height', 1e-9), 1e-9)
 
+    import math as _math
+    _ppc_debug = n_tgt * _math.pi * r**2 / max(spatial_width * spatial_height, 1e-30)
+    if _cfg.DEV_MODE:
+        print(f"  [spacing dbg] r={r}  n_tgt={n_tgt:.0f}  W={spatial_width:.1f}  H={spatial_height:.1f}"
+            f"  ppc={_ppc_debug:.3f}  skew={skewness:.2f}"
+            f"  {'(fallback)' if pts_tgt_xy is None or n_tgt <= 1000 else '(from pts)'}")
+
     cache = _cfg.disk_region_cache
 
+    # s iterates over dimensionless r/spacing ratios; actual spacing = r/s
     def _is_cached(s, nd):
-        rs = round(r / s, 8)
-        return (rs, nd, False) in cache or (rs, nd, True) in cache
+        return (round(s, 8), nd, False) in cache or (round(s, 8), nd, True) in cache
 
     pairs = [(s, nd) for s in candidate_spacings for nd in candidate_depths]
 
@@ -320,7 +340,7 @@ def choose_spacing_and_depth(
     for s, nd in pairs:
         cached = _is_cached(s, nd)
         geo_s, srch_s, agg_s = predict_timing(
-            r / s, nd, n_src, n_tgt,
+            s, nd, n_src, n_tgt,
             r, spatial_width, spatial_height,
             skewness, geometry_cached=cached,
         )
@@ -337,18 +357,16 @@ def choose_spacing_and_depth(
         chosen_s, chosen_nd = best_cached_pair
 
     geo_s, srch_s, agg_s = predict_timing(
-        r / chosen_s, chosen_nd, n_src, n_tgt,
+        chosen_s, chosen_nd, n_src, n_tgt,
         r, spatial_width, spatial_height,
         skewness, geometry_cached=_is_cached(chosen_s, chosen_nd),
     )
     _prog._BUILD_EST_SECONDS  = geo_s
     _prog._SEARCH_EST_SECONDS = srch_s + agg_s
 
-    if not silent:
-        print(f"  chosen spacing_ratio={r/chosen_s:.3f}  nest_depth={chosen_nd}"
+    if _cfg.DEV_MODE:
+        print(f"  chosen spacing_ratio={chosen_s:.3f}  nest_depth={chosen_nd}"
               f"  pred={geo_s+srch_s+agg_s:.2f}s"
               f"  (geo={geo_s:.2f}s  srch={srch_s:.2f}s  agg={agg_s:.2f}s)")
 
-    if _cfg.DEV_MODE:
-        print("spacing, nest_depth",chosen_s/r, chosen_nd)
-    return chosen_s, chosen_nd
+    return r / chosen_s, chosen_nd
