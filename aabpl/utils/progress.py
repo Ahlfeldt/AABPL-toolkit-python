@@ -50,6 +50,24 @@ _LINE_WIDTH = 115  # must exceed the longest line any renderer can produce
 _RATIO_EMA_ALPHA: float = 0.25
 
 
+def progress_print(*args, **kwargs) -> None:
+    """
+    Print a message without disrupting the active progress bar.
+
+    Clears the current bar line, prints the message (with a newline so it
+    stays visible), then redraws the bar on the line below.  Falls back to
+    plain ``print`` when no bar is active.
+    """
+    outer = _OUTER_PROGRESS.get()
+    if outer is not None and getattr(outer, '_active', False):
+        _sys.stdout.write(f"\r{' ' * _LINE_WIDTH}\r")
+        _sys.stdout.flush()
+        print(*args, **kwargs)
+        outer._render()
+    else:
+        print(*args, **kwargs)
+
+
 def _update_ratio(wall: float, cpu: float) -> None:
     """Update WALL_TO_CPU_RATIO EMA from a (wall_elapsed, cpu_elapsed) observation."""
     try:

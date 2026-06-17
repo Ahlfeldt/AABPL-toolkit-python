@@ -89,7 +89,7 @@ def create_plots_for_vars(
         'axs': None,
         's': s,
         'cmap': 'Reds',
-        'figsize': (10*ncols,8*nrows),
+        'figsize': (10*ncols, 5*nrows),
         'additional_varnames':[],
         'sample_area_colors': ["#ffffff",  "#bedbe6"]
     }, **plot_kwargs)
@@ -109,7 +109,8 @@ def create_plots_for_vars(
     cmap_name = plot_kwargs.pop('cmap', 'Reds')
     cmap = truncate_colormap(_plt_get_cmap(cmap_name), 0.1, 1)
     if fig is None or axs is None:
-        fig, axs = _plt_subplots(nrows, ncols, figsize=figsize, dpi=display_dpi)
+        fig, axs = _plt_subplots(nrows, ncols, figsize=figsize, dpi=display_dpi,
+                                  constrained_layout=True)
     if not grid.sample_grid_bounds is None and not grid.sample_area is None:
         non_valid_area = _shapely_Polygon([
             (grid.sample_grid_bounds[0], grid.sample_grid_bounds[1]),
@@ -159,16 +160,16 @@ def create_plots_for_vars(
             non_valid_patch = _plt_Patch(facecolor=non_valid_area_color, label='Non-valid area', edgecolor='black')
             sample_patch = _plt_Patch(facecolor=sample_area_color, label='Sample area', edgecolor='black')
             ax.legend(handles=[non_valid_patch, sample_patch], loc='best')
-            plot_polygon(poly=non_valid_area, ax=ax, facecolor=non_valid_area_color, edgecolor='black')
+            plot_polygon(poly=non_valid_area, ax=ax, facecolor=non_valid_area_color, edgecolor='black', linewidth=0.5)
         # ADD DISTRIUBTION PLOT
         c = grid.search.source.pts[colname]
         vmin=plot_kwargs['vmin'] if 'vmin' in plot_kwargs else c.min()
         vmax=plot_kwargs['vmax'] if 'vmax' in plot_kwargs else c.max(),
         # norm = plot_kwargs['norm'] if 'norm' in plot_kwargs else _plt_LogNorm(vmin=c.min(),vmax=c.max()) if (c.min() > 0) else _plt_LogNorm()
         norm = plot_kwargs['norm'] if 'norm' in plot_kwargs else _plt_LogNorm(vmin=c.min(),vmax=c.max()) if (c.min() > 0) else 'linear'
-        scttr = ax.scatter(x=xs, y=ys, c=c, norm=norm, cmap=cmap, rasterized=True, **plot_kwargs)
-        plot_polygon(poly=non_valid_area, ax=ax, facecolor="none", edgecolor='black')
-        fig.colorbar(scttr, ax=ax)
+        scttr = ax.scatter(x=xs, y=ys, c=c, norm=norm, cmap=cmap, rasterized=True, linewidths=0.3, **plot_kwargs)
+        plot_polygon(poly=non_valid_area, ax=ax, facecolor="none", edgecolor='black', linewidth=0.5)
+        fig.colorbar(scttr, ax=ax, fraction=0.046, pad=0.04)
         set_map_frame(ax=ax,xmin=xmin,xmax=xmax,ymin=ymin,ymax=ymax)
 
     if not fig is None:

@@ -55,9 +55,9 @@ def search_and_aggregate(
     else:
         grid_padding = -int(-grid_spacing//r)
         # take all cells that are part of the sampling grid
-        invalid_cells = set([id for id in 
+        invalid_cells = set([id for id in
                              tuple(flatten_list([
-            [(0, (int(row_id), int(col_id))) for col_id in range(min(grid.col_ids)-grid_padding, max(grid.col_ids)+grid_padding)] 
+            [(int(row_id), int(col_id)) for col_id in range(min(grid.col_ids)-grid_padding, max(grid.col_ids)+grid_padding)]
             for row_id in range(min(grid.row_ids)-grid_padding, max(grid.row_ids)+grid_padding)]))
              if not id in cells_rndm_sample])
     

@@ -16,7 +16,7 @@ from .illustrations.plot_pt_vars import create_plots_for_vars
 from .illustrations.distribution_plot import create_distribution_plot
 from .utils.misc import count_polygon_edges, find_column_name
 from .utils.crs_transformation import convert_MultiPolygon_crs, convert_coords_to_local_crs, convert_pts_to_crs, convert_wgs_to_utm
-from .utils.progress import _OUTER_PROGRESS, RadiusSearchProgress, DetectClusterProgress
+from .utils.progress import _OUTER_PROGRESS, RadiusSearchProgress, DetectClusterProgress, progress_print
 
 def _validate_kwargs(
         pts:_pd_DataFrame,
@@ -107,9 +107,9 @@ def _validate_kwargs(
     else:
         local_crs = proj_crs
     if crs != local_crs:
-        x,y,local_crs = convert_pts_to_crs(pts=pts, x=x, y=y, initial_crs=crs, target_crs=proj_crs, silent=bool(silent))
+        x,y,local_crs = convert_pts_to_crs(pts=pts, x=x, y=y, initial_crs=crs, target_crs=proj_crs)
         if not same_target:
-            x_tgt,y_tgt,local_crs = convert_pts_to_crs(pts=pts_target, x=x_tgt, y=y_tgt, initial_crs=crs, target_crs=proj_crs, silent=bool(silent))
+            x_tgt,y_tgt,local_crs = convert_pts_to_crs(pts=pts_target, x=x_tgt, y=y_tgt, initial_crs=crs, target_crs=proj_crs)
         else:
             x_tgt,y_tgt = x,y
     
@@ -157,7 +157,7 @@ def resolve_sample_area(
         sample_area = 'grid'
     if type(sample_area) == str:
         if no_plot:
-            print("Creating sample area with method '"+sample_area+"' and buffer=tolerance="+str(r)+". Use 'grid.sample_area' to inspect.")
+            progress_print("Creating sample area with method '"+sample_area+"' and buffer=tolerance="+str(r)+". Use 'grid.sample_area' to inspect.")
         sample_area = infer_sample_area_from_pts(
             pts=pts,
             grid=grid,
@@ -393,6 +393,10 @@ def radius_search(
             row_name_tgt=row_name_tgt, col_name_tgt=col_name_tgt,
             trynew=trynew, proj_crs=proj_crs, silent=silent,
     )
+    # TODO: replace with the actual output column names once spacing/nesting
+    # changes how row/col indices are stored (may differ from input row_name/col_name)
+    grid.output_row_name = row_name
+    grid.output_col_name = col_name
 
     if agg in ['count','mean']:
         count_helper_col = find_column_name('count','_helper_col', existing_columns=pts_target.columns)
@@ -845,7 +849,7 @@ def detect_cluster_cells(
      ) = _validate_kwargs(
             pts=pts, crs=crs, sample_area_crs=sample_area_crs, r=r, c=c, agg=agg,
             x=x, y=y, row_name=row_name, col_name=col_name, sum_suffix=sum_suffix, pts_target=pts_target, x_tgt=x_tgt, y_tgt=y_tgt,
-            row_name_tgt=row_name_tgt, col_name_tgt=col_name_tgt, grid=grid,
+            row_name_tgt=row_name_tgt, col_name_tgt=col_name_tgt,
             proj_crs=proj_crs, silent=silent,
     )
     if centroid_dist_threshold is None:
@@ -866,7 +870,6 @@ def detect_cluster_cells(
         k_th_percentile=k_th_percentile,
         n_random_points=n_random_points,
         random_seed=random_seed,
-        grid=grid,
         x=x,
         y=y,
         row_name=row_name,
@@ -885,7 +888,11 @@ def detect_cluster_cells(
         _dev=_dev,
         silent=silent,
     )
-    
+    # TODO: replace with actual output names once spacing/nesting changes column naming
+    if not hasattr(grid, 'output_row_name'):
+        grid.output_row_name = row_name
+        grid.output_col_name = col_name
+
     grid.clustering.create_clusters(
         pts=pts,
         c=c,

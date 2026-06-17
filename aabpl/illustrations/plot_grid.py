@@ -63,6 +63,13 @@ class GridPlots(object):
     def __init__(self, grid):
         self.grid = grid
 
+    def vars(self, colnames=None, filename='', **plot_kwargs):
+        from aabpl.illustrations.plot_pt_vars import create_plots_for_vars
+        import numpy as np
+        if colnames is None:
+            colnames = np.array(self.grid.search.target.c)
+        return create_plots_for_vars(grid=self.grid, colnames=colnames, filename=filename, plot_kwargs=plot_kwargs)
+
     def cell_aggregates(
         self,
         filename:str='',

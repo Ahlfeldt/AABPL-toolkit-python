@@ -142,6 +142,72 @@ All parameters from `detect_cluster_pts` apply, plus:
 
 ---
 
+## How cluster detection works
+
+Cluster detection proceeds in four stages, each building on the previous.
+
+### Stage 1 — Radius aggregation
+
+For every point *i*, `radius_search` computes the sum (or count/mean) of a variable across all other points within a circle of radius *r*:
+
+```
+agg_i = Σ_{j: d(i,j) ≤ r, j ≠ i}  value_j
+```
+
+This produces one number per point that reflects local concentration. A point with a high aggregate is surrounded by many (or high-valued) neighbours.
+
+To avoid an O(n²) all-pairs distance loop, the area is discretised into a grid of cells with spacing chosen automatically from `CANDIDATE_SPACINGS_BREAKPOINTS` (dimensionless multiples of *r*). Points are assigned to cells, then each point only needs to inspect the grid cells that overlap its search circle — typically a small fixed number regardless of total point count. Cells that partially overlap the circle boundary are handled by a pre-computed fractional-area lookup.
+
+Edge effects near the study-area boundary are corrected by weighting each aggregate by the inverse of the fraction of the circle that falls within the valid sampling area.
+
+### Stage 2 — Null distribution
+
+To decide whether an aggregate is *significantly* elevated, `detect_cluster_pts` constructs a **null distribution** by drawing `n_random_points` uniformly at random from the sample area and running `radius_search` on them with the same radius and the same source points. This produces the distribution of aggregates that would be expected if the data points had no tendency to cluster beyond what the spatial extent of the dataset would produce.
+
+The **k-th percentile** of this null distribution becomes the cluster threshold `τ`. A point is labelled a cluster point if its aggregate exceeds `τ`:
+
+```
+cluster_i = 1  iff  agg_i > τ
+```
+
+Because the null distribution is drawn fresh each call, its shape automatically accounts for the actual study-area geometry, including irregular boundaries and gaps.
+
+### Stage 3 — Cell-level cluster delineation (`detect_cluster_cells`)
+
+Rather than working with individual points, `detect_cluster_cells` aggregates radius sums onto a regular output grid (default cell size `r/3`) and applies the same threshold cell-by-cell. Contiguous groups of cells that all exceed the threshold form **raw cluster patches**.
+
+Adjacent raw patches are then merged into a single cluster when they are close enough to plausibly represent the same concentration:
+
+- **Queen contiguity** — cells sharing an edge or corner are joined.
+- **Rook contiguity** — cells sharing an edge are joined.
+- **Centroid-distance merging** — two patches merge if their centroids are within `centroid_dist_threshold` (default `r × 10/3`) and their borders are within `border_dist_threshold` (default `r × 4/3`).
+
+Small resulting clusters whose total aggregate falls below `min_cluster_share_after_contingency` of the dataset total are dropped.
+
+If `make_convex=True` (the default), all grid cells that lie inside the convex hull of each cluster are added to it, filling in any internal gaps.
+
+### Stage 4 — Cluster polygons
+
+Each final cluster is dissolved from its constituent cells into a single polygon, available at `grid.clustering`. These can be exported as shapefiles or CSVs via `grid.save_cell_clusters`.
+
+### Summary diagram
+
+```
+pts  ──► radius_search ──► agg_i per point
+                                │
+         n random pts ──► agg_j per random point ──► k-th percentile = τ
+                                │
+                          agg_i > τ ? ──► cluster_i (point label)
+                                │
+                     aggregate to output grid cells
+                                │
+                     contiguous cell patches ──► merge ──► convexify
+                                │
+                         cluster polygons
+```
+
+---
+
 ## The Grid object
 
 All three functions return a `Grid` object that exposes plots and saved outputs.
