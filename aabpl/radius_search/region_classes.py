@@ -1835,7 +1835,7 @@ class OffsetRegion(object):
             reg2_poly = _to_shapely_polygon(reg2, arc_steps_per_degree=20)
             reg1_is_valid = reg1_poly.is_valid if reg1_poly is not None else False
             reg2_is_valid = reg2_poly.is_valid if reg2_poly is not None else False
-            if plot_split or (
+            if plot_split or False and (
                 len(reg1.edges) != len(reg1.vertices) or 
                 len(reg2.edges) != len(reg2.vertices) or 
                 not reg1.is_closed or
