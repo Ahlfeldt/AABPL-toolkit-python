@@ -22,12 +22,47 @@ from collections import OrderedDict as _OrderedDict
 # Set to False to fall back to the original scalar per-edge Python loop.
 USE_VEC_VERTEX_CHECKS: bool = True
 
+# Per-function CPU-time profiling via the time_func_perf decorator.
+# OFF by default: when False the decorator is a zero-overhead passthrough.
+# When True it records start/end process_time for every decorated call into
+# test_performance.func_timer_dict (consumed by analyze_func_perf). Some of those
+# decorated functions run once PER SEARCH POINT, where the wrapper adds ~3 us/call
+# and grows an unbounded in-memory call log (~240 MB per 1e6 calls) — so leave
+# this False in production. The benchmark harness (run_single_config) turns it on
+# for the duration of a measured run; enable it manually if calling
+# analyze_func_perf() yourself.
+# TEMPORARILY True while collecting benchmark data — set back to False after
+# testing (the production default should be False). See roadmap.md.
+PROFILE_FUNC_TIMES: bool = True
+
+# Note: the search loop now always uses the integer cell-key codec, the vectorized
+# group masks, and the always-on (group x candidates) overlap batch — these were
+# previously the experimental flags USE_INT_CELL_KEYS / VECTORIZED_SEARCH_LOOP /
+# BATCH_OVERLAP / BATCH_OVERLAP_MIN_GROUP. Benchmarking settled them (always batch
+# wins, 1.4-1.8x and growing with scale; all byte-identical to the old scalar loop),
+# so they are baked in and the flags removed. See disk_aggregation.search_and_aggregate.
+
 # Shared geometry cache: maps (r/spacing, nest_depth, include_boundary) → lookup result.
 # Keyed on geometry only (no point data), so shared across all Grid instances.
 # Clear with config.disk_region_cache.clear() to force a rebuild.
 # Maximum number of geometry configs held in disk_region_cache before the
-# oldest is evicted.  Each entry covers one (r/spacing, nest_depth) combination.
-DISK_REGION_CACHE_MAXSIZE: int = 8
+# least-recently-used is evicted (LRU: reuse moves an entry to the back; eviction
+# pops the front in disk_region_geometry.py). Each entry covers one
+# (r/spacing, nest_depth) combination.
+#
+# Memory footprint is small and bounded — it stores cell geometry only, never the
+# point data, and nest_depth/spacing come from small candidate sets. Measured
+# pickled entry sizes at r/spacing=1.414 (in-memory ~2-5x larger, but still tens
+# of MB total for a full cache):
+#     nd=0 → 0.05 MB,  nd=2 → 0.22 MB,  nd=4 → 1.03 MB,
+#     nd=5 → 2.22 MB,  nd=6 → 4.64 MB   (~2x per +1 nest_depth; sub-4^nd thanks
+#                                        to sparse pruning). Larger r/spacing
+#                                        grows entries somewhat but stays in the
+#                                        tens-of-MB range, never GB.
+# The real cost of deep nesting is BUILD TIME, not memory: constructing the nd=6
+# geometry once took ~97s (vs sub-second at low nd) — which is why
+# choose_nest_depth caps around 4 in practice. Hence the cache: build once, reuse.
+DISK_REGION_CACHE_MAXSIZE: int = 10
 disk_region_cache: _OrderedDict = _OrderedDict()
 
 # ---------------------------------------------------------------------------
@@ -72,3 +107,19 @@ N_POINTS_CUM: int = 0
 # Updated automatically by progress bars; used to convert CPU-based EMA
 # estimates to wall-time ETA for display.
 WALL_TO_CPU_RATIO: float = 1.3
+
+
+# ---------------------------------------------------------------------------
+# Geometry Amortization Weights
+# ---------------------------------------------------------------------------
+
+# Factor used to discount the upfront geometry build cost (geo_s).
+# Reflects the expected number of query cycles per geometry lifecycle.
+# A value of 0.75 assumes the build cost pays off across multiple runs,
+# preventing the optimizer from over-penalizing heavy indexing structures.
+GEO_AMORTIZATION_WEIGHT: float = 0.75
+
+
+# Only for dev purposes and experimental.
+USE_OPTIMIZED_METHOD = False
+VALIDATE = False

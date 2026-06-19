@@ -82,6 +82,14 @@ def create_plots_for_vars(
     """
     nrows = colnames.shape[0]
     ncols = 1 if len(colnames.shape)==1 else colnames.shape[1]
+    # Callers (e.g. grid.plot.vars / grid.plot.cluster_pts) forward **plot_kwargs;
+    # extract control args that must not leak into ax.scatter().
+    show = plot_kwargs.pop('show', show)
+    display_dpi = plot_kwargs.pop('display_dpi', display_dpi)
+    if 'save_kwargs' in plot_kwargs:
+        save_kwargs = plot_kwargs.pop('save_kwargs')
+    plot_kwargs.pop('filename', None)
+    plot_kwargs.pop('colnames', None)
     # specify default plot kwargs and add defaults
     s = 1 if not 'figsize' in plot_kwargs else 0.1*plot_kwargs['figsize'][0]
     plot_kwargs = handle_plot_kwargs(default_kwargs={
@@ -134,10 +142,10 @@ def create_plots_for_vars(
         if not grid.sample_grid_bounds is None and not grid.sample_area is None:
             ax.set_facecolor(sample_area_color)
             cells_rndm_sample = grid.cells_rndm_sample
-            col_min = int(round((grid.sample_grid_bounds[0]-grid.total_bounds.xmin)/grid.spacing,0))
-            row_min = int(round((grid.sample_grid_bounds[1]-grid.total_bounds.ymin)/grid.spacing,0))
-            col_max = int(round((grid.sample_grid_bounds[2]-grid.total_bounds.xmin)/grid.spacing-1,0))
-            row_max = int(round((grid.sample_grid_bounds[3]-grid.total_bounds.ymin)/grid.spacing-1,0))
+            col_min = int(round((grid.sample_grid_bounds[0]-grid.total_bounds.xmin)/grid._search_spacing,0))
+            row_min = int(round((grid.sample_grid_bounds[1]-grid.total_bounds.ymin)/grid._search_spacing,0))
+            col_max = int(round((grid.sample_grid_bounds[2]-grid.total_bounds.xmin)/grid._search_spacing-1,0))
+            row_max = int(round((grid.sample_grid_bounds[3]-grid.total_bounds.ymin)/grid._search_spacing-1,0))
             # row_min, row_max = min([row for row,col in grid.cells_rndm_sample]), max([row for row,col in grid.cells_rndm_sample])
             # col_min, col_max = min([col for row,col in grid.cells_rndm_sample]), max([col for row,col in grid.cells_rndm_sample])
             n_rows_x = row_max - row_min + 1

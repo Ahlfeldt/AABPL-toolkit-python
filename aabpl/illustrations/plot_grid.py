@@ -9,6 +9,7 @@ from matplotlib.pyplot import subplots as _plt_subplots, colorbar as _plt_colorb
 from matplotlib.pyplot import get_cmap as _plt_get_cmap
 from matplotlib.pyplot import close as _plt_close
 from matplotlib.patches import (Rectangle as _plt_Rectangle, Polygon as _plt_Polygon, Circle as _plt_Circle)
+from matplotlib.collections import PatchCollection as _plt_PatchCollection
 from matplotlib.colors import LogNorm as _plt_LogNorm, Normalize as _plt_Normalize
 from aabpl.illustrations.plot_utils import truncate_colormap, map_2D_to_rgb, get_2D_rgb_colobar_kwargs, add_color_bar_ax, set_map_frame
 from aabpl.illustrations.plot_pt_vars import create_plots_for_vars
@@ -111,40 +112,43 @@ class GridPlots(object):
         if axs is None:
             fig, axs = _plt_subplots(ncols=len(self.grid.search.target.c), figsize=figsize, dpi=display_dpi)
 
-        id_to_sums = self.grid.id_to_sums
-        imshow_kwargs = {
-            'xmin':self.grid.x_steps.min(),
-            'ymin':self.grid.y_steps.min(),
-            'xmax':self.grid.x_steps.max(),
-            'ymax':self.grid.y_steps.max(),
-        }
-        extent=[imshow_kwargs['xmin'],imshow_kwargs['xmax'],imshow_kwargs['ymax'],imshow_kwargs['ymin']]
-        row_ids = list(reversed(self.grid.row_ids))
-        col_ids = list(self.grid.col_ids)
-        row_to_idx = {r: idx for idx, r in enumerate(row_ids)}
-        col_to_idx = {c: idx for idx, c in enumerate(col_ids)}
-        n_rows, n_cols = len(row_ids), len(col_ids)
+        # Output grid + cached per-output-cell aggregates are built lazily here.
+        self.grid.update_spacing()
+        # Draw one coloured square per NON-EMPTY output cell (from the cached
+        # grid.output_id_to_sums) as a PatchCollection — no dense full-grid array,
+        # so memory scales with populated cells, not the bounding-box area. The axes
+        # still span the full output extent, so the plot looks the same as a raster.
+        sx, sy = self.grid.output_spacing, self.grid.output_spacing_y
+        ox, oy = self.grid.output_x_steps[0], self.grid.output_y_steps[0]
+        extent = [self.grid.output_x_steps[0], self.grid.output_x_steps[-1],
+                  self.grid.output_y_steps[-1], self.grid.output_y_steps[0]]
+        out_sums = self.grid.output_id_to_sums
         for i,column in enumerate(self.grid.search.target.c):
             ax = axs if len(self.grid.search.target.c)==1 else axs.flat[i]
-            X = _np_zeros((n_rows, n_cols))
-            for (row, col), vals in id_to_sums.items():
-                ri = row_to_idx.get(row)
-                ci = col_to_idx.get(col)
-                if ri is not None and ci is not None:
-                    X[ri, ci] = vals[i]
-            ux = _np_unique(X)
-            vmin = ux[ux!=0].min()
-            vmax = X.max()
-            norm = _plt_LogNorm(vmin=vmin,vmax=vmax,clip=False) if vmin>=0 else _plt_Normalize(vmin=vmin,vmax=vmax,clip=False)
+            rects, vals = [], []
+            for (row, col), v in out_sums.items():
+                val = v[i]
+                if val == 0:
+                    continue
+                rects.append(_plt_Rectangle((ox + int(col) * sx, oy + int(row) * sy), sx, sy))
+                vals.append(val)
+            if not vals:
+                continue
+            vals = _np_array(vals)
+            vmin = vals[vals != 0].min()
+            vmax = vals.max()
+            norm = _plt_LogNorm(vmin=vmin,vmax=vmax,clip=False) if vmin>0 else _plt_Normalize(vmin=vmin,vmax=vmax,clip=False)
             cmap = truncate_colormap(_plt_get_cmap(cmap_name), 0.3, 1)
             cmap.set_under('#ffffff00')
             cmap.set_bad('#ffffff00')
-            p = ax.imshow(X=X, interpolation='none', cmap=cmap, norm=norm, extent=extent)
-            cb = _plt_colorbar(p, cax=add_color_bar_ax(fig,ax))
+            pc = _plt_PatchCollection(rects, cmap=cmap, norm=norm)
+            pc.set_array(vals)
+            ax.add_collection(pc)
+            cb = _plt_colorbar(pc, cax=add_color_bar_ax(fig,ax))
             ax.set_xlabel('x/lon')
             ax.set_ylabel('y/lat')
             ax.title.set_text('Aggregated value per cell for '+str(column))
-            set_map_frame(ax=ax,xmin=self.grid.x_steps.min(),xmax=self.grid.x_steps.max(),ymin=self.grid.y_steps.min(),ymax=self.grid.y_steps.max())
+            set_map_frame(ax=ax, xmin=extent[0], xmax=extent[1], ymin=extent[3], ymax=extent[2])
         if not fig is None:
             if filename:
                 fig.savefig(filename, **save_kwargs)
@@ -197,12 +201,15 @@ class GridPlots(object):
         if axs is None:
             fig, axs = _plt_subplots(ncols=n, figsize=figsize, dpi=display_dpi)
 
-        id_to_sums = self.grid.id_to_sums
-        row_ids = list(self.grid.row_ids)
-        col_ids = list(self.grid.col_ids)
-        row_to_idx = {r: idx for idx, r in enumerate(row_ids)}
-        col_to_idx = {c: idx for idx, c in enumerate(col_ids)}
-        n_rows, n_cols = len(row_ids), len(col_ids)
+        # Output grid + cached per-output-cell aggregates built lazily here; the
+        # background matches grid.plot.cell_aggregates. Cluster outlines are drawn in
+        # coordinate space below and are unaffected by the grid choice.
+        self.grid.update_spacing()
+        sx, sy = self.grid.output_spacing, self.grid.output_spacing_y
+        ox, oy = self.grid.output_x_steps[0], self.grid.output_y_steps[0]
+        extent = [self.grid.output_x_steps[0], self.grid.output_x_steps[-1],
+                  self.grid.output_y_steps[-1], self.grid.output_y_steps[0]]
+        out_sums = self.grid.output_id_to_sums
 
         for i, (cluster_column, clusters_for_column) in enumerate(self.grid.clustering.by_column.items()):
             ax = axs.flat[i] if n > 1 else axs
@@ -210,36 +217,33 @@ class GridPlots(object):
             ax.set_ylabel('y/lat '+str(self.grid.local_crs))
             clusters = clusters_for_column.clusters
             ax.title.set_text(str(len(clusters))+' cluster'+ ('s' if len(clusters)!=1 else '') +' for '+str(cluster_column))
-            imshow_kwargs = {
-                'xmin':self.grid.x_steps.min(),
-                'ymin':self.grid.y_steps.min(),
-                'xmax':self.grid.x_steps.max(),
-                'ymax':self.grid.y_steps.max(),
-            }
-            extent=[imshow_kwargs['xmin'],imshow_kwargs['xmax'],imshow_kwargs['ymax'],imshow_kwargs['ymin']]
 
-            X = _np_zeros((n_rows, n_cols))
-            for (row, col), vals in id_to_sums.items():
-                ri = row_to_idx.get(row)
-                ci = col_to_idx.get(col)
-                if ri is not None and ci is not None:
-                    X[ri, ci] = vals[i]
-            X_flat = X.flat
+            # one coloured square per non-empty output cell (sparse, no dense raster)
+            rects, vals = [], []
+            for (row, col), v in out_sums.items():
+                val = v[i]
+                if val == 0:
+                    continue
+                rects.append(_plt_Rectangle((ox + int(col) * sx, oy + int(row) * sy), sx, sy))
+                vals.append(val)
             cmap = _plt_get_cmap(cmap_name)
-            vmin, vmax = (X.flat[X_flat != 0]).min(), X.max()
-            norm = _plt_LogNorm(vmin=vmin,vmax=vmax,clip=False) if vmin>=0 else _plt_Normalize(vmin=vmin,vmax=vmax,clip=False)
             cmap = truncate_colormap(cmap, 0.1, 1)
             cmap.set_under('#fff0')
-
-            p = ax.imshow(X=X, interpolation='none', cmap=cmap, norm=norm, extent=extent)
-            cb = _plt_colorbar(p, cax=add_color_bar_ax(fig,ax))
+            if vals:
+                vals = _np_array(vals)
+                vmin, vmax = vals[vals != 0].min(), vals.max()
+                norm = _plt_LogNorm(vmin=vmin,vmax=vmax,clip=False) if vmin>0 else _plt_Normalize(vmin=vmin,vmax=vmax,clip=False)
+                pc = _plt_PatchCollection(rects, cmap=cmap, norm=norm)
+                pc.set_array(vals)
+                ax.add_collection(pc)
+                cb = _plt_colorbar(pc, cax=add_color_bar_ax(fig,ax))
             for cluster in clusters:
                 geoms = [cluster.geometry] if hasattr(cluster.geometry, 'exterior') else cluster.geometry.geoms
                 for geom in geoms:
                     ax.add_patch(_plt_Polygon(xy=geom.exterior.coords, hatch='////', facecolor='#f000', edgecolor='#f00'))
                 ax.annotate(cluster.id, xy=cluster.centroid, fontsize=15, weight='bold', color='red')
 
-            set_map_frame(ax=ax,xmin=self.grid.x_steps.min(),xmax=self.grid.x_steps.max(),ymin=self.grid.y_steps.min(),ymax=self.grid.y_steps.max())
+            set_map_frame(ax=ax,xmin=self.grid._search_x_steps.min(),xmax=self.grid._search_x_steps.max(),ymin=self.grid._search_y_steps.min(),ymax=self.grid._search_y_steps.max())
 
         if not fig is None:
             if filename:
@@ -332,16 +336,16 @@ class GridPlots(object):
         if ax is None:
             fig, ax = _plt_subplots(ncols=3, figsize=figsize, dpi=display_dpi)
         imshow_kwargs = {
-            'xmin':self.grid.x_steps.min(),
-            'ymin':self.grid.y_steps.min(),
-            'xmax':self.grid.x_steps.max(),
-            'ymax':self.grid.y_steps.max(),
+            'xmin':self.grid._search_x_steps.min(),
+            'ymin':self.grid._search_y_steps.min(),
+            'xmax':self.grid._search_x_steps.max(),
+            'ymax':self.grid._search_y_steps.max(),
         }
         extent=[imshow_kwargs['xmin'],imshow_kwargs['xmax'],imshow_kwargs['ymax'],imshow_kwargs['ymin']]
-        X = _np_array([[map_2D_to_rgb(x,y, **imshow_kwargs) for x in  self.grid.x_steps[:-1]] for y in reversed(self.grid.y_steps[:-1])])
+        X = _np_array([[map_2D_to_rgb(x,y, **imshow_kwargs) for x in  self.grid._search_x_steps[:-1]] for y in reversed(self.grid._search_y_steps[:-1])])
         # ax.flat[0].imshow(X=X, interpolation='none', extent=extent)
-        # ax.flat[0].pcolormesh([self.grid.x_steps, self.grid.y_steps], X)
-        # ax.flat[0].pcolormesh(X, edgecolor="black", linewidth=.1/max([len(self.grid.col_ids), len(self.grid.row_ids)]))
+        # ax.flat[0].pcolormesh([self.grid._search_x_steps, self.grid._search_y_steps], X)
+        # ax.flat[0].pcolormesh(X, edgecolor="black", linewidth=.1/max([len(self.grid._search_col_ids), len(self.grid._search_row_ids)]))
         ax.flat[0].imshow(X=X, interpolation='none', extent=extent)
         # ax.flat[0].set_aspect(2)
         colorbar_kwargs = get_2D_rgb_colobar_kwargs(**imshow_kwargs)
@@ -356,14 +360,14 @@ class GridPlots(object):
         ax.flat[0].title.set_text("Grid lat / lon coordinates")
 
         imshow_kwargs = {
-            'xmin':self.grid.col_ids.min(),
-            'ymin':self.grid.row_ids.min(),
-            'xmax':self.grid.col_ids.max(),
-            'ymax':self.grid.row_ids.max(),
+            'xmin':self.grid._search_col_ids.min(),
+            'ymin':self.grid._search_row_ids.min(),
+            'xmax':self.grid._search_col_ids.max(),
+            'ymax':self.grid._search_row_ids.max(),
         }
         extent=[imshow_kwargs['xmin'],imshow_kwargs['xmax'],imshow_kwargs['ymax'],imshow_kwargs['ymin']]
 
-        X = _np_array([[map_2D_to_rgb(x,y, **imshow_kwargs) for x in  self.grid.col_ids] for y in reversed(self.grid.row_ids)])
+        X = _np_array([[map_2D_to_rgb(x,y, **imshow_kwargs) for x in  self.grid._search_col_ids] for y in reversed(self.grid._search_row_ids)])
         ax.flat[1].imshow(X=X, interpolation='none', extent=extent)
         # ax.flat[1].set_aspect(2)
         colorbar_kwargs = get_2D_rgb_colobar_kwargs(**imshow_kwargs)
@@ -380,7 +384,7 @@ class GridPlots(object):
         ax.flat[1].set_ylabel('col nr') 
         ax.flat[1].title.set_text("Grid row / col indices")
         
-        X = _np_array([[len(self.grid.id_to_pt_ids[(row_id, col_id)]) if (row_id, col_id) in self.grid.id_to_pt_ids else 0 for col_id in self.grid.col_ids] for row_id in reversed(self.grid.row_ids)])
+        X = _np_array([[len(self.grid.id_to_pt_ids[(row_id, col_id)]) if (row_id, col_id) in self.grid.id_to_pt_ids else 0 for col_id in self.grid._search_col_ids] for row_id in reversed(self.grid._search_row_ids)])
         # p = ax.flat[2].pcolormesh(X, cmap='Reds')
         p = ax.flat[2].imshow(X=X, interpolation='none', extent=extent, cmap='Reds')
         _plt_colorbar(p, cax=add_color_bar_ax(fig,ax.flat[2]))

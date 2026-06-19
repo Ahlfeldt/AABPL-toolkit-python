@@ -159,10 +159,15 @@ def compute_spacing_breakpoints(max_offset: int = 4, silent: bool = True):
 # Candidate spacing ratios and nest-depth heuristic
 # ---------------------------------------------------------------------------
 
-CANDIDATE_SPACINGS_BREAKPOINTS = _np_array([
-    2**.5, 1.5, 2.5**.5, 2, 4.5**0.5, 5**0.5, 2.5, (13/2)**0.5, (17/2)**0.5,
+# Candidate values for the dimensionless ratio r / search_spacing (NOT the
+# user-facing output spacing). The chosen search spacing is r divided by one of
+# these; larger ratios mean finer (slower) search grids. These pick the internal
+# *search* grid only — the output grid resolution is set separately by the
+# `spacing` parameter (default r/3) and is not user-visible here.
+SPACINGS_BREAKPOINTS = _np_array([
+    2**.5, 1.5, 2.5**.5, 2, 4.5**0.5, 5**0.5, 2.5, (13/2)**0.5, (17/2)**0.5, 3
 ])
-CANDIDATE_DEPTHS = range(7)
+CANDIDATE_DEPTHS = range(8)
 
 def choose_nest_depth(r_over_s: float) -> int:
     """Heuristic nest_depth for a given r/spacing ratio."""
@@ -220,6 +225,17 @@ def predict_timing(
     log_ppc3 = log_ppc ** 3
     nd2      = nd ** 2
     nd3      = nd ** 3
+    tol = 1e-4
+    ros_1_4142 = int(abs(r_over_s - 2**0.5) < tol)
+    ros_1_5000 = int(abs(r_over_s - 1.5) < tol)
+    ros_1_5811 = int(abs(r_over_s - 2.5**0.5) < tol)
+    ros_2_0000 = int(abs(r_over_s - 2) < tol)
+    ros_2_1213 = int(abs(r_over_s - 4.5**0.5) < tol)
+    ros_2_2361 = int(abs(r_over_s - 5**0.5) < tol)
+    ros_2_5000 = int(abs(r_over_s - 2.5) < tol)
+    ros_2_5495 = int(abs(r_over_s - (13/2)**0.5) < tol)
+    ros_2_9155 = int(abs(r_over_s - (17/2)**0.5) < tol)
+    ros_3_0000 = int(abs(r_over_s - 3) < tol)
 
     # ── Geometry (absolute seconds, uncached only, topology features only) ──
     # geo: 55 rows (R²=0.732)
@@ -235,54 +251,94 @@ def predict_timing(
               + 0.018  * log_ros2 * nd2
               - 0.006  * log_ngc  * nd)
         geo_s = math.exp(min(lv, 50.0))
-
-    # ── Search (absolute seconds) — srch: 621 rows (R²=0.981) ──────────────
-    lv = (-10.0134
-          + 1.883  * log_ros
-          - 0.418  * log_ros3
-          + 0.564  * log_4nd
-          - 0.031  * log_ros2 * nd2
-          + 0.031  * log_4nd  * log_ros
-          + 0.459  * log_nts
-          - 0.002  * log_ntt2 * nd
-          - 0.007  * log_ntt2 * log_ros2
-          + 0.076  * log_nts  * log_ros
-          + 0.004  * log_nts  * nd2
-          + 0.033  * log_ntt  * log_nts
-          - 0.005  * log_ppc  * nd2
-          + 0.029  * log_ppc2
-          - 0.008  * log_ppc2 * log_ros
-          - 0.001  * log_ppc3 * nd
-          + 0.000  * log_ppc3 * nd2
-          + 0.002  * log_ppc2 * log_ntt
-          - 0.005  * log_ppc2 * log_nts
-          - 0.021  * log_skw  * nd2
-          - 0.039  * log_skw  * log_ppc
-          + 0.031  * log_skw  * log_ntt
-          - 0.003  * log_wc   * nd2
-          + 0.006  * log_wc   * log_ppc
-          - 0.002  * log_wc   * log_ppc2
-          + 0.089  * log_ppc  * log_ros * nd)
+    # ── Search (absolute seconds) — srch: (R²=0.965) ──────────────────────────
+    lv = (-8.7208
+          + 0.005  * nd3
+          - 0.157  * ros_1_5000
+          + 0.180  * ros_2_0000
+          + 0.020  * ros_2_9155
+          + 0.193  * ros_3_0000
+          + 0.224  * ros_2_2361 * nd
+          - 0.024  * ros_1_4142 * nd2
+          + 0.001  * ros_1_5000 * nd2
+          - 0.016  * ros_1_5811 * nd2
+          - 0.073  * ros_2_0000 * nd2
+          - 0.017  * ros_2_1213 * nd2
+          - 0.186  * ros_2_5000 * nd2
+          - 0.170  * ros_2_5495 * nd2
+          - 0.028  * ros_3_0000 * nd2
+          + 0.158  * log_ntt
+          + 0.762  * log_nts
+          + 0.067  * log_ppc
+          - 0.001  * log_ppc3 * log_ros2
+          - 0.000  * log_ppc3 * nd2
+          - 0.015  * (log_nts - log_ngc) * nd
+          + 0.009  * log_ppc * log_ros * nd
+          + 0.000  * log_ntt * ppc
+          - 0.008  * ros_1_5811 * log_ntt
+          + 0.039  * ros_2_5000 * log_ntt
+          + 0.019  * ros_2_5495 * log_ntt
+          + 0.014  * ros_1_4142 * log_ppc
+          - 0.003  * ros_1_5000 * log_ppc
+          - 0.018  * ros_2_0000 * log_ppc
+          - 0.006  * ros_2_2361 * log_ppc
+          + 0.033  * ros_2_9155 * log_ppc
+          - 0.020  * ros_1_4142 * nd * log_ppc
+          - 0.019  * ros_1_5000 * nd * log_ppc
+          - 0.005  * ros_1_5811 * nd * log_ppc
+          + 0.128  * ros_2_0000 * nd * log_ppc
+          - 0.005  * ros_2_2361 * nd * log_ppc
+          + 0.043  * ros_2_5000 * nd * log_ppc
+          + 0.014  * ros_2_5495 * nd * log_ppc
+          + 0.025  * ros_3_0000 * nd * log_ppc)
+          
     srch_s = math.exp(min(lv, 50.0))
 
-    # ── Aggregation (absolute seconds) — agg: 927 rows (R²=0.992) ──────────
-    lv = (-0.5476
-          + 0.278  * log_ros3
-          - 0.031  * log_ngc
-          - 0.776  * log_ntt
-          + 0.053  * log_ntt2
-          + 0.001  * log_ntt2 * log_ros2
-          + 0.000  * log_ntt2 * nd2
-          + 0.024  * log_ntt  * log_nts
-          + 0.005  * log_ppc  * nd2
-          - 0.032  * log_ppc2 * log_ros
-          - 0.007  * log_ppc2 * nd
-          - 0.000  * log_ppc3 * nd
-          + 0.005  * log_ppc2 * log_nts
-          - 0.129  * log_wc
-          + 0.003  * (log_nts - log_ngc) * nd
-          + 0.029  * log_ntt  * log_ros * nd)
+    # ── Aggregation (absolute seconds) — agg: (R²=0.945) ──────────────────────
+    lv = (-8.9848
+          - 0.021  * nd3
+          + 0.698  * log_ros * nd
+          - 0.595  * ros_1_4142
+          - 0.105  * ros_1_5811
+          + 0.153  * ros_2_0000
+          + 0.320  * ros_2_5000
+          + 0.075  * ros_2_5495
+          - 0.761  * ros_2_9155
+          + 0.113  * ros_1_5000 * nd2
+          + 0.133  * ros_1_5811 * nd2
+          + 0.320  * ros_2_0000 * nd2
+          + 0.036  * ros_2_1213 * nd2  
+          + 0.092  * ros_2_2361 * nd2
+          - 0.163  * ros_2_5000 * nd2
+          - 0.193  * ros_2_5495 * nd2
+          - 0.086  * ros_3_0000 * nd2
+          + 0.888  * log_ntt
+          + 0.004  * log_ntt2 * log_ros    
+          - 0.394  * log_ppc
+          - 0.001  * log_ppc3 * log_ros2   
+          - 0.000  * log_ppc3 * nd2
+          + 0.006  * log_skw
+          + 0.090  * log_ppc * log_ros * nd
+          + 0.000  * log_ntt * ppc          
+          - 0.007  * ros_2_1213 * log_ntt
+          + 0.049  * ros_1_4142 * log_ppc
+          - 0.042  * ros_1_5000 * log_ppc
+          + 0.014  * ros_2_1213 * log_ppc
+          - 0.018  * ros_2_2361 * log_ppc
+          - 0.037  * ros_2_5000 * log_ppc
+          - 0.007  * ros_2_5495 * log_ppc
+          + 0.216  * ros_2_9155 * log_ppc
+          + 0.055  * ros_1_4142 * nd * log_ntt
+          + 0.049  * ros_1_5000 * nd * log_ppc
+          + 0.005  * ros_1_5811 * nd * log_ppc
+          - 0.047  * ros_2_0000 * nd * log_ppc
+          + 0.001  * ros_2_2361 * nd * log_ppc
+          + 0.028  * ros_2_5000 * nd * log_ppc
+          + 0.011  * ros_2_5495 * nd * log_ppc
+          - 0.043  * ros_2_9155 * nd * log_ppc)
+          
     agg_s = math.exp(min(lv, 50.0))
+
 
     return geo_s, srch_s, agg_s
 
@@ -293,19 +349,25 @@ def choose_spacing_and_depth(
     nest_depth: int = None,
     n_pts_src: int = None,
     n_pts_tgt: int = None,
+    n_pts_src_extra: int = 0,
     pts_tgt_xy=None,
     silent: bool = True,
 ) -> tuple:
     """
     Choose the best (spacing, nest_depth) pair from *candidate_spacings* using
     the hard-coded timing model (geometry + search + aggregation).
+
+    ``n_pts_src_extra`` adds to the effective source count used for the timing
+    estimate. ``detect_cluster_pts`` passes the number of random null-distribution
+    points here, since those are searched over the same grid in addition to the
+    real source points. Defaults to 0, so a plain ``radius_search`` is unaffected.
     """
     from aabpl import config as _cfg
     from aabpl.utils import progress as _prog
-    candidate_spacings = CANDIDATE_SPACINGS_BREAKPOINTS if spacing_ratio is None else [spacing_ratio]
+    candidate_spacings = SPACINGS_BREAKPOINTS if spacing_ratio is None else [spacing_ratio]
     candidate_depths = CANDIDATE_DEPTHS if nest_depth is None else [nest_depth]
-    n_src = float(n_pts_src or 10_000)
-    n_tgt = float(n_pts_tgt or n_src)
+    n_src = float((n_pts_src or 10_000) + (n_pts_src_extra or 0))
+    n_tgt = float(n_pts_tgt or (n_pts_src or 10_000))
     skewness       = 10.0
     spatial_width  = r * 100.0   # fallback: pretend world is 100× radius
     spatial_height = r * 100.0
@@ -344,7 +406,7 @@ def choose_spacing_and_depth(
             r, spatial_width, spatial_height,
             skewness, geometry_cached=cached,
         )
-        total = geo_s + srch_s + agg_s
+        total = geo_s*(_cfg.GEO_AMORTIZATION_WEIGHT-max(0,min(_cfg.GEO_AMORTIZATION_WEIGHT-0.01,nd*0.05))) + srch_s + agg_s # slightly decrease the weight of geo_s as it might pay off when the user calls multiple times.
         if total < best_total:
             best_total = total
             best_pair  = (s, nd)

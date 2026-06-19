@@ -177,8 +177,6 @@ class DataFrameRelation(object):
                 )
             if force_same_columns:
                 raise ValueError(msg)
-            elif not silent:
-                print(msg)
         
         # drop duplicates to check if intersection includes all
         a_no_dup = a.drop_duplicates()

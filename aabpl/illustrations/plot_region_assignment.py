@@ -64,7 +64,7 @@ def illustrate_point_to_cell_region_assignment(
     example_trgl_region = example_cell_region//100
 
     # unpack vals
-    grid_spacing = grid.spacing
+    grid_spacing = grid._search_spacing
     cell_steps_max = -int(-r/grid_spacing)+1
     trgl_region_ids = _np_array([region_id//100 for region_id in region_ids])
     unique_region_ids = _np_unique([region_id for region_id in grid.search.region_id_to_cntd_cells])

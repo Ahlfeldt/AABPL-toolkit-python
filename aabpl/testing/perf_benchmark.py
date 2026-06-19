@@ -29,11 +29,15 @@ import socket
 import time as _time
 from typing import Optional
 
-import numpy as np
+import os
+import json
 import pandas as pd
+import aabpl.config as _cfg
+from typing import Optional, Dict, Any
+import numpy as np
 
 from aabpl.main import radius_search, Grid
-from aabpl.radius_search.spacing_topology import compute_spatial_stats, compute_spacing_breakpoints
+from aabpl.radius_search.spacing_topology import compute_spatial_stats, compute_spacing_breakpoints, choose_spacing_and_depth
 from aabpl import config as _aabpl_config
 from aabpl.testing.test_performance import (
     reset_perf_times,
@@ -158,6 +162,12 @@ def run_single_config(
     local_crs: str = "auto",
     dist_stats: Optional[dict] = None,
     silent: bool = True,
+    exclude_pt_itself=True,
+    use_int_cell_keys: Optional[bool] = None,
+    vectorized_search_loop: Optional[bool] = None,
+    batch_overlap: Optional[bool] = None,
+    batch_overlap_min_group: Optional[int] = None,
+    generation: Optional[str] = None,
 ) -> dict:
     """
     Run radius_search for one (radius, spacing, nest_depth) combination
@@ -194,27 +204,45 @@ def run_single_config(
     import aabpl.config as _cfg
     _cfg.FIXED_SPACING_RATIO = spacing_ratio
     _cfg.FIXED_NEST_DEPTH = nest_depth
+    # Enable per-function profiling only for this measured run (it is off by
+    # default in production — see config.PROFILE_FUNC_TIMES). Restored in finally.
+    _profile_was = _cfg.PROFILE_FUNC_TIMES
+    _cfg.PROFILE_FUNC_TIMES = True
+    # The search path is now fixed (int keys + vectorized + always-on overlap batch),
+    # so the old per-flag toggles are no-ops; the params are kept for backward
+    # compatibility and recorded as constants for result metadata.
+    eff_flags = {
+        "use_int_cell_keys": True,
+        "vectorized_search_loop": True,
+        "batch_overlap": True,
+        "batch_overlap_min_group": 1,
+    }
+    if generation is None:
+        generation = getattr(_cfg, "PERF_GENERATION", None)
     reset_perf_times()
     _cache_keys_before = set(_aabpl_config.disk_region_cache.keys())
     t_wall_start = _time.perf_counter()
-    grid_result = radius_search(
-        pts=pts_source,
-        crs=crs,
-        r=radius,
-        c=col,
-        exclude_pt_itself=True,
-        silent=silent,
-        trynew=1,
-        proj_crs=local_crs,
-        pts_target=pts_target,
-    )
-    _cfg.FIXED_SPACING_RATIO = None
-    _cfg.FIXED_NEST_DEPTH = None
+    try:
+        grid_result = radius_search(
+            pts=pts_source,
+            crs=crs,
+            r=radius,
+            c=col,
+            exclude_pt_itself=exclude_pt_itself,
+            silent=silent,
+            trynew=1,
+            proj_crs=local_crs,
+            pts_target=pts_target,
+        )
+    finally:
+        _cfg.FIXED_SPACING_RATIO = None
+        _cfg.FIXED_NEST_DEPTH = None
     t_wall = _time.perf_counter() - t_wall_start
     geometry_cached = set(_aabpl_config.disk_region_cache.keys()) == _cache_keys_before
 
     # -- collect timing ------------------------------------------------------
     perf = analyze_func_perf(plot=False)
+    _cfg.PROFILE_FUNC_TIMES = _profile_was
     total_cpu = _total_process_time(perf)
     func_times = _func_timing_summary(perf)
 
@@ -237,6 +265,7 @@ def run_single_config(
             "scenario_id": scenario_id,
             "timestamp": _time.strftime("%Y-%m-%dT%H:%M:%S"),
             "machine_id": machine["machine_id"],
+            "generation": generation,
         },
         "machine": machine,
         "config": {
@@ -248,6 +277,150 @@ def run_single_config(
             "n_source": len(pts_source),
             "n_target": len(pts_grid),
             "geometry_cached": geometry_cached,
+            **eff_flags,
+        },
+        "scenario_stats": dist_stats,
+        "micro_region_stats": micro_flat,
+        "timing": {
+            "total_cpu_s": total_cpu,
+            "total_wall_s": t_wall,   # wall time — unreliable under parallel load; use total_cpu_s
+            "search_cpu_s": func_times.pop("search_cpu_s", 0.0),
+            "aggregate_cpu_s": func_times.pop("aggregate_cpu_s", 0.0),
+            **{f"func_{k}": v for k, v in func_times.items()},
+        },
+    }
+    return result
+
+# ---------------------------------------------------------------------------
+# Single-run executor
+# ---------------------------------------------------------------------------
+
+def run_optimal_config(
+    pts_source: pd.DataFrame,
+    crs: str,
+    radius: float,
+    clear:bool=True,
+    *,
+    pts_target: Optional[pd.DataFrame] = None,
+    col: str = "employment",
+    local_crs: str = "auto",
+    dist_stats: Optional[dict] = None,
+    silent: bool = True,
+    generation: Optional[str] = None,
+) -> dict:
+    """
+    Run radius_search for one (radius, spacing, nest_depth) combination
+    and return a result dict containing all metrics needed for Phase-2 prediction.
+
+    Parameters
+    ----------
+    pts_source  : DataFrame of search origins (can be a sample for screening)
+    crs         : CRS string for pts
+    radius      : search radius (metres if CRS is metric)
+    spacing_ratio : r/spacing ratio
+    nest_depth  : Grid nest_depth (0–9)
+    pts_target  : DataFrame of points to aggregate over (defaults to pts_source).
+                  Pass the full dataset here when pts_source is a sample.
+    col         : column name to aggregate
+    local_crs   : projected CRS for internal computation
+    dist_stats  : pre-computed compute_spatial_stats result (saves time across calls)
+    silent      : suppress radius_search console output
+    """
+    pts_source = pts_source.copy()
+    pts_grid = pts_target if pts_target is not None else pts_source
+    
+    # -- scenario distribution stats (can be shared across configs) ----------
+    if dist_stats is None:
+        pts_xy = pts_grid[["lon", "lat"]].values if "lat" in pts_grid.columns else pts_grid.iloc[:, :2].values
+        dist_stats = compute_spatial_stats(
+            target_points=pts_xy,
+            search_radii=[radius],
+        )
+    import aabpl.config as _cfg
+    if clear:
+        _cfg.disk_region_cache.clear()
+    spacing_ratio, nest_depth = choose_spacing_and_depth(
+        r=radius, n_pts_src=len(pts_source), n_pts_tgt=len(pts_target), pts_tgt_xy=pts_target
+    )
+    scenario_id = _scenario_hash(dist_stats, radius)
+
+    # -- run -----------------------------------------------------------------
+    _cfg.FIXED_SPACING_RATIO = spacing_ratio
+    _cfg.FIXED_NEST_DEPTH = nest_depth
+    # Enable per-function profiling only for this measured run (it is off by
+    # default in production — see config.PROFILE_FUNC_TIMES). Restored in finally.
+    _profile_was = _cfg.PROFILE_FUNC_TIMES
+    _cfg.PROFILE_FUNC_TIMES = True
+    # The search path is now fixed (int keys + vectorized + always-on overlap batch),
+    # so the old per-flag toggles are no-ops; the params are kept for backward
+    # compatibility and recorded as constants for result metadata.
+    eff_flags = {
+        "use_int_cell_keys": True,
+        "vectorized_search_loop": True,
+        "batch_overlap": True,
+        "batch_overlap_min_group": 1,
+    }
+    if generation is None:
+        generation = getattr(_cfg, "PERF_GENERATION", None)
+    reset_perf_times()
+    _cache_keys_before = set(_aabpl_config.disk_region_cache.keys())
+    t_wall_start = _time.perf_counter()
+    try:
+        grid_result = radius_search(
+            pts=pts_source,
+            crs=crs,
+            r=radius,
+            c=col,
+            exclude_pt_itself=True,
+            silent=silent,
+            trynew=1,
+            proj_crs=local_crs,
+            pts_target=pts_target,
+        )
+    finally:
+        _cfg.FIXED_SPACING_RATIO = None
+        _cfg.FIXED_NEST_DEPTH = None
+    t_wall = _time.perf_counter() - t_wall_start
+    geometry_cached = set(_aabpl_config.disk_region_cache.keys()) == _cache_keys_before
+
+    # -- collect timing ------------------------------------------------------
+    perf = analyze_func_perf(plot=False)
+    _cfg.PROFILE_FUNC_TIMES = _profile_was
+    total_cpu = _total_process_time(perf)
+    func_times = _func_timing_summary(perf)
+
+
+    # -- micro-region stats --------------------------------------------------
+    try:
+        micro = grid_result.calc_micro_region_stats()
+        # flatten nested dict
+        micro_flat = {}
+        for outer_key, inner in micro.items():
+            for inner_key, val in inner.items():
+                micro_flat[f"micro_{outer_key}_{inner_key}"] = val
+    except Exception:
+        micro_flat = {}
+
+    # -- assemble result record ----------------------------------------------
+    machine = get_machine_info()
+    result = {
+        "meta": {
+            "scenario_id": scenario_id,
+            "timestamp": _time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "machine_id": machine["machine_id"],
+            "generation": generation,
+        },
+        "machine": machine,
+        "config": {
+            "radius": radius,
+            "spacing_ratio": spacing_ratio,
+            "radius_over_spacing": spacing_ratio,
+            "nest_depth": nest_depth,
+            "col": col,
+            "n_source": len(pts_source),
+            "n_target": len(pts_grid),
+            "geometry_cached": geometry_cached,
+            **eff_flags,
         },
         "scenario_stats": dist_stats,
         "micro_region_stats": micro_flat,
@@ -277,6 +450,19 @@ def save_run_result(result: dict, output_folder: str) -> str:
     cfg = result["config"]
     meta = result["meta"]
     s_str = str(round(cfg['spacing_ratio'], 2))
+    # flag tag: index I(nt)/T(uple), loop P(lain)/V(ectorized)/B(atch). Keeps
+    # different search-path variants in distinct files so they don't overwrite or
+    # falsely skip each other. Absent flags default to the historical scalar path.
+    _idx = "I" if cfg.get("use_int_cell_keys") else "T"
+    if cfg.get("batch_overlap"):
+        _loop = f"B{cfg.get('batch_overlap_min_group', 0)}"
+    elif cfg.get("vectorized_search_loop"):
+        _loop = "V"
+    else:
+        _loop = "P"
+    flag_tag = f"_x{_idx}{_loop}"
+    gen = meta.get("generation")
+    gen_tag = f"_g{gen}" if gen else ""
     stem = (
         f"run_{meta['scenario_id']}"
         f"_r{cfg['radius']}"
@@ -284,6 +470,7 @@ def save_run_result(result: dict, output_folder: str) -> str:
         f"_nd{cfg['nest_depth']}"
         f"_ns{cfg['n_source']}"
         f"_nt{cfg['n_target']}"
+        f"{flag_tag}{gen_tag}"
         f"_m{meta['machine_id']}_"
     )
     # remove any previous file for this exact config; return deleted names
@@ -302,7 +489,8 @@ def save_run_result(result: dict, output_folder: str) -> str:
     return fpath, deleted
 
 
-def load_results(output_folder: str) -> pd.DataFrame:
+def load_results(output_folder: str, only_new: bool = True,
+                 generation: Optional[str] = None) -> pd.DataFrame:
     """
     Load all JSON run files from output_folder into a flat DataFrame.
     Each row is one (radius, spacing, nest_depth) run.
@@ -310,6 +498,16 @@ def load_results(output_folder: str) -> pd.DataFrame:
     Results are cached in _cache.parquet inside output_folder. On subsequent
     calls only new JSON files (not yet in the cache) are read, making repeated
     loads fast regardless of how many files accumulate.
+
+    Generation filtering
+    --------------------
+    Each result carries a ``generation`` tag (meta.generation). To avoid mixing
+    results produced before a code change with the current ones:
+      - ``generation=<label>``  → return only that generation's rows.
+      - ``only_new=True`` (default) and no explicit generation → return only the
+        most recent generation present (max label). Rows without a generation tag
+        (legacy files) are treated as one group, so old folders behave as before.
+      - ``only_new=False`` → return every row across all generations.
     """
     cache_path = os.path.join(output_folder, "_cache.parquet")
 
@@ -324,29 +522,34 @@ def load_results(output_folder: str) -> pd.DataFrame:
         except Exception:
             cached_df = pd.DataFrame()
 
-    # read only JSON files not yet in the cache
-    new_rows = []
-    for fname in os.listdir(output_folder):
-        if not fname.endswith(".json") or fname in cached_files:
-            continue
-        with open(os.path.join(output_folder, fname)) as f:
-            try:
+    # read only JSON files not yet in the cache. Reading is network-latency bound
+    # (files live on a remote share), so do it with a thread pool — the GIL is
+    # released during file I/O, letting many round-trips overlap (≈10-30x faster
+    # than the serial loop for hundreds of small files).
+    def _parse_one(fname):
+        try:
+            with open(os.path.join(output_folder, fname)) as f:
                 d = json.load(f)
-            except Exception:
-                continue
+        except Exception:
+            return None
         row = {"_source_file": fname}
         row.update(d.get("meta", {}))
         for k, v in d.get("machine", {}).items():
             row[f"machine_{k}"] = v
         row.update(d.get("config", {}))
         for k, v in d.get("scenario_stats", {}).items():
-            if isinstance(v, list):
-                row[f"scen_{k}"] = v[0] if v else None
-            else:
-                row[f"scen_{k}"] = v
+            row[f"scen_{k}"] = (v[0] if v else None) if isinstance(v, list) else v
         row.update(d.get("micro_region_stats", {}))
         row.update(d.get("timing", {}))
-        new_rows.append(row)
+        return row
+
+    new_files = [f for f in os.listdir(output_folder)
+                 if f.endswith(".json") and f not in cached_files]
+    new_rows = []
+    if new_files:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=32) as _ex:
+            new_rows = [r for r in _ex.map(_parse_one, new_files) if r is not None]
 
     if new_rows:
         new_df = pd.DataFrame(new_rows)
@@ -360,6 +563,19 @@ def load_results(output_folder: str) -> pd.DataFrame:
 
     if df.empty:
         return pd.DataFrame()
+
+    # -- generation filtering -------------------------------------------------
+    if "generation" in df.columns:
+        if generation is not None:
+            df = df[df["generation"] == generation]
+        elif only_new:
+            _gens = df["generation"].dropna().unique()
+            if len(_gens) > 0:
+                _latest = max(_gens)
+                df = df[df["generation"] == _latest]
+        df = df.reset_index(drop=True)
+        if df.empty:
+            return df
 
     # Enrich with geometry cache stats (n_regions, mean_cntd_count, mean_ovlpd_count).
     # These depend only on (radius_over_spacing, nest_depth) so one cache lookup fills
@@ -704,6 +920,352 @@ def run_sweep(
         row.update(d.get("timing", {}))
         rows.append(row)
     return pd.DataFrame(rows)
+
+
+def run_direct_test(
+    pts_source: pd.DataFrame,
+    pts_target: pd.DataFrame,
+    crs: str,
+    radii: list,
+    spacing_ratios: list,
+    nest_depths: list,
+    cfg_updates: Dict[str, Any],
+    *,
+    col: str = "employment",
+    local_crs: str = "auto",
+    output_folder: str = "./perf_test",
+    silent: bool = True,
+    skip_existing: bool = True,
+    verbose: bool = True,
+) -> pd.DataFrame:
+    """
+    Runs a direct grid search over (radius, spacing, nest_depth) using fixed source 
+    and target datasets, applying custom configuration overwrites.
+    """
+    # 1. Dynamically update the configuration parameters
+    for key, value in cfg_updates.items():
+        if hasattr(_cfg, key):
+            setattr(_cfg, key, value)
+        else:
+            if verbose:
+                print(f"Warning: aabpl.config has no attribute '{key}'. Setting anyway.")
+            setattr(_cfg, key, value)
+
+    # 2. Project target points to local CRS for spatial statistics calculation
+    from aabpl.utils.crs_transformation import convert_pts_to_crs as _convert_pts_to_crs
+    _pts_proj = pts_target.copy()
+    _x_proj, _y_proj, _local_crs = _convert_pts_to_crs(
+        pts=_pts_proj,
+        x="lon" if "lon" in pts_target.columns else pts_target.columns[0],
+        y="lat" if "lat" in pts_target.columns else pts_target.columns[1],
+        initial_crs=crs,
+        target_crs=local_crs,
+        silent=True,
+    )
+    pts_xy = _pts_proj[[_x_proj, _y_proj]].values
+    dist_stats_cache = {r: compute_spatial_stats(target_points=pts_xy, search_radii=[r]) for r in radii}
+
+    # 3. Handle old-format output migration and build completion index
+    completed = set()
+    if skip_existing and os.path.isdir(output_folder):
+        for fname in os.listdir(output_folder):
+            if not fname.endswith(".json") or "_n" in fname:
+                continue
+            fpath = os.path.join(output_folder, fname)
+            try:
+                with open(fpath) as _f:
+                    _d = json.load(_f)
+                _n = _d.get("config", {}).get("n_source")
+                if _n is not None:
+                    stem = fname[:-5]
+                    new_fname = stem.replace("_m", f"_n{_n}_m", 1) + ".json"
+                    os.rename(fpath, os.path.join(output_folder, new_fname))
+            except Exception:
+                pass
+        completed = {f for f in os.listdir(output_folder) if f.endswith(".json")}
+
+    results = []
+    n_tgt = len(pts_target)
+
+    # 4. Iterate directly through the configurations
+    for sr in spacing_ratios:
+        for nd in nest_depths:
+            # Clear cache between groups to safely reuse geometry footprints
+            if hasattr(_cfg, 'disk_region_cache') and _cfg.disk_region_cache is not None:
+                _cfg.disk_region_cache.clear()
+            
+            for r in radii:
+                dist_stats = dist_stats_cache[r]
+                scenario_id = _scenario_hash(dist_stats, r)
+                
+                # Format string to match run_sweep's internal schema exactly
+                skip_pattern = f"run_{scenario_id}_r{r}_s{round(sr, 2)}_nd{nd}_ns{len(pts_source)}_nt{n_tgt}_"
+                label = f"r={r} sr={round(sr, 2)} nd={nd}"
+                
+                # Check for cached runs
+                if skip_existing and any(f.startswith(skip_pattern) for f in completed):
+                    match = next(f for f in completed if f.startswith(skip_pattern))
+                    if verbose:
+                        print(f"  load  {label} [direct-test]")
+                    try:
+                        with open(os.path.join(output_folder, match)) as _f:
+                            result = json.load(_f)
+                        results.append(result)
+                        continue
+                    except Exception:
+                        completed.discard(match)
+
+                if verbose:
+                    print(f"  run   {label} n={len(pts_source)} [direct-test] ... ", end="", flush=True)
+                
+                # Execute single run configuration
+                try:
+                    result = run_single_config(
+                        pts_source=pts_source, crs=crs, radius=r, spacing_ratio=sr,
+                        nest_depth=nd, col=col, pts_target=pts_target,
+                        local_crs=local_crs, dist_stats=dist_stats, silent=silent,
+                    )
+                    fpath, deleted = save_run_result(result, output_folder)
+                    for d in deleted:
+                        completed.discard(d)
+                    completed.add(os.path.basename(fpath))
+                    results.append(result)
+                    
+                    if verbose:
+                        cached_str = "cached" if result["config"]["geometry_cached"] else "UNCACHED"
+                        print(f"done  cpu={result['timing']['total_cpu_s']:.2f}s  geom={cached_str}")
+                        
+                except Exception as e:
+                    import traceback as _tb
+                    _cfg.FIXED_SPACING_RATIO = None
+                    _cfg.FIXED_NEST_DEPTH = None
+                    if verbose:
+                        print(f"ERROR: {e}")
+                        _tb.print_exc()
+
+    return pd.DataFrame(results)
+
+
+# ---------------------------------------------------------------------------
+# Testing generation: blank-start adaptive sweep
+# ---------------------------------------------------------------------------
+
+# Search-path variants to compare. Each is one (index, loop) combination passed
+# straight to run_single_config. Edit/extend as needed in the notebook.
+DEFAULT_FLAG_COMBOS = [
+    {"name": "int_batch",  "use_int_cell_keys": True,  "vectorized_search_loop": True,  "batch_overlap": True},
+    {"name": "int_plain",  "use_int_cell_keys": True,  "vectorized_search_loop": False, "batch_overlap": False},
+    {"name": "tuple_plain","use_int_cell_keys": False, "vectorized_search_loop": False, "batch_overlap": False},
+]
+
+
+def _flag_key(combo: dict) -> tuple:
+    return (bool(combo.get("use_int_cell_keys")),
+            bool(combo.get("vectorized_search_loop")),
+            bool(combo.get("batch_overlap")),
+            int(combo.get("batch_overlap_min_group", 0)) if combo.get("batch_overlap") else 0)
+
+
+def _row_flag_key(row) -> tuple:
+    return (bool(row.get("use_int_cell_keys")),
+            bool(row.get("vectorized_search_loop")),
+            bool(row.get("batch_overlap")),
+            int(row.get("batch_overlap_min_group", 0)) if row.get("batch_overlap") else 0)
+
+
+def run_generation(
+    pts: pd.DataFrame,
+    crs: str,
+    radii: list,
+    spacing_ratios: list,
+    nest_depths: list,
+    *,
+    generation: Optional[str] = None,
+    flag_combos: Optional[list] = None,
+    screen_size: int = 3000,
+    sample_sizes: Optional[list] = None,
+    col: str = "employment",
+    local_crs: str = "auto",
+    output_folder: str = "./perf_test_gen",
+    prior_folder: Optional[str] = None,
+    seed_top_k: int = 3,
+    max_rounds: int = 6,
+    time_budget_s: Optional[float] = None,
+    validate_top_k: int = 2,
+    silent: bool = True,
+    verbose: bool = True,
+) -> pd.DataFrame:
+    """
+    Blank-start, self-extending benchmark "generation".
+
+    Explores the (radius x spacing_ratio x nest_depth x flag_combo) space without
+    running it exhaustively: it seeds from prior results (``prior_folder``) when
+    available — otherwise a coarse grid — then *recursively* expands around the
+    best-so-far cell for each (radius, flag_combo), measuring grid neighbours until
+    no unmeasured neighbour of the optimum remains (a local-search / coordinate
+    expansion over the spacing x nest_depth grid). Finally the best ``validate_top_k``
+    configs per (radius, flag_combo) are re-run at each full ``sample_sizes``.
+
+    All runs are stamped with ``generation`` and saved immediately, so the run is
+    restartable (rerunning skips finished combos) and ``load_results(folder)`` —
+    which defaults to ``only_new=True`` — returns just this generation.
+
+    Parameters
+    ----------
+    generation     : label for this batch (default: timestamp ``gen<YYYYMMDDHHMMSS>``).
+    flag_combos    : list of search-path variants (see DEFAULT_FLAG_COMBOS).
+    screen_size    : source sample size used during exploration.
+    sample_sizes   : full sizes for the validation pass (default [len(pts)]).
+    prior_folder   : folder of older results used only to pick good seed cells.
+    time_budget_s  : stop starting new runs after this many seconds (None = no cap).
+    """
+    import time as _t
+    from aabpl.utils.crs_transformation import convert_pts_to_crs as _convert_pts_to_crs
+
+    if generation is None:
+        generation = "gen" + _time.strftime("%Y%m%d%H%M%S")
+    flag_combos = flag_combos or DEFAULT_FLAG_COMBOS
+    sample_sizes = sample_sizes or [len(pts)]
+    sr_grid = sorted(spacing_ratios)
+    nd_grid = sorted(nest_depths)
+    os.makedirs(output_folder, exist_ok=True)
+    _cfg.PERF_GENERATION = generation
+    t_start = _t.perf_counter()
+
+    if verbose:
+        print(f"=== generation {generation} ===")
+        print(f"  grid: {len(radii)} radii x {len(sr_grid)} spacing_ratios x "
+              f"{len(nd_grid)} nest_depths x {len(flag_combos)} flag_combos")
+        print(f"  output: {os.path.abspath(output_folder)}")
+
+    # -- project once for spatial stats --------------------------------------
+    _pp = pts.copy()
+    _xp, _yp, _lcrs = _convert_pts_to_crs(
+        pts=_pp, x="lon" if "lon" in pts.columns else pts.columns[0],
+        y="lat" if "lat" in pts.columns else pts.columns[1],
+        initial_crs=crs, target_crs=local_crs, silent=True)
+    pts_xy = _pp[[_xp, _yp]].values
+    dist_stats_cache = {r: compute_spatial_stats(target_points=pts_xy, search_radii=[r]) for r in radii}
+
+    # -- resume: which (r, sr, nd, n, flag) are already measured this gen -----
+    measured: dict = {}   # (r, fkey) -> {(si, ni): cpu}  at screen_size
+    done: set = set()     # (round(r), round(sr,4), nd, n, fkey)
+    existing = load_results(output_folder, generation=generation)
+    if not existing.empty:
+        for _, row in existing.iterrows():
+            fk = _row_flag_key(row)
+            key = (round(float(row["radius"]), 4), round(float(row["spacing_ratio"]), 4),
+                   int(row["nest_depth"]), int(row["n_source"]), fk)
+            done.add(key)
+            if int(row["n_source"]) == screen_size:
+                try:
+                    si = sr_grid.index(min(sr_grid, key=lambda s: abs(s - row["spacing_ratio"])))
+                    ni = nd_grid.index(int(row["nest_depth"]))
+                    measured.setdefault((round(float(row["radius"]), 4), fk), {})[(si, ni)] = float(row["total_cpu_s"])
+                except ValueError:
+                    pass
+
+    # -- seed cells (indices into sr_grid x nd_grid) per (r, flag) -----------
+    def _coarse_seed():
+        sis = sorted({0, len(sr_grid)//2, len(sr_grid)-1})
+        nis = sorted({0, len(nd_grid)//2, len(nd_grid)-1})
+        return [(si, ni) for si in sis for ni in nis]
+
+    prior_df = None
+    if prior_folder and os.path.isdir(prior_folder):
+        prior_df = load_results(prior_folder, only_new=False)
+
+    def _prior_seed(r, fk):
+        if prior_df is None or prior_df.empty or "total_cpu_s" not in prior_df.columns:
+            return []
+        sub = prior_df[(prior_df["radius"].round(4) == round(r, 4))]
+        if sub.empty:
+            return []
+        cells = []
+        for _, row in sub.sort_values("total_cpu_s").head(seed_top_k).iterrows():
+            try:
+                si = sr_grid.index(min(sr_grid, key=lambda s: abs(s - row["spacing_ratio"])))
+                ni = nd_grid.index(min(nd_grid, key=lambda n: abs(n - int(row["nest_depth"]))))
+                cells.append((si, ni))
+            except ValueError:
+                pass
+        return cells
+
+    sample_screen = pts.sample(min(screen_size, len(pts)), random_state=0)
+    n_tgt = len(pts)
+    results: list = []
+
+    def _do(si, ni, r, fk_combo, n_source, pts_source, tag):
+        sr = sr_grid[si]; nd = nd_grid[ni]; fk = _flag_key(fk_combo)
+        key = (round(float(r), 4), round(float(sr), 4), int(nd), int(n_source), fk)
+        if key in done:
+            return measured.get((round(float(r), 4), fk), {}).get((si, ni))
+        if time_budget_s is not None and (_t.perf_counter() - t_start) > time_budget_s:
+            return None
+        if verbose:
+            print(f"  [{tag}] r={r} sr={round(sr,3)} nd={nd} n={n_source} {fk_combo['name']} ...",
+                  end=" ", flush=True)
+        try:
+            res = run_single_config(
+                pts_source=pts_source, crs=crs, radius=r, spacing_ratio=sr, nest_depth=nd,
+                col=col, pts_target=pts, local_crs=local_crs,
+                dist_stats=dist_stats_cache[r], silent=silent, generation=generation,
+                batch_overlap_min_group=fk_combo.get("batch_overlap_min_group"),
+                **{k: fk_combo[k] for k in
+                   ("use_int_cell_keys", "vectorized_search_loop", "batch_overlap") if k in fk_combo},
+            )
+            save_run_result(res, output_folder)
+            results.append(res)
+            done.add(key)
+            cpu = res["timing"]["total_cpu_s"]
+            if n_source == screen_size:
+                measured.setdefault((round(float(r), 4), fk), {})[(si, ni)] = cpu
+            if verbose:
+                print(f"{cpu:.2f}s")
+            return cpu
+        except Exception as e:
+            import traceback as _tb
+            _cfg.FIXED_SPACING_RATIO = None; _cfg.FIXED_NEST_DEPTH = None
+            if verbose:
+                print(f"ERROR: {e}")
+                _tb.print_exc()
+            return None
+
+    # -- exploration: seed then expand around best per (r, flag) -------------
+    for r in radii:
+        for combo in flag_combos:
+            fk = _flag_key(combo)
+            queue = list(dict.fromkeys(_prior_seed(r, fk) + _coarse_seed()))
+            rounds = 0
+            while queue and rounds < max_rounds:
+                rounds += 1
+                for (si, ni) in queue:
+                    if 0 <= si < len(sr_grid) and 0 <= ni < len(nd_grid):
+                        _do(si, ni, r, combo, screen_size, sample_screen, "screen")
+                if time_budget_s is not None and (_t.perf_counter() - t_start) > time_budget_s:
+                    break
+                cells = measured.get((round(float(r), 4), fk), {})
+                if not cells:
+                    break
+                (bsi, bni) = min(cells, key=cells.get)
+                neighbours = [(bsi-1, bni), (bsi+1, bni), (bsi, bni-1), (bsi, bni+1)]
+                queue = [(s, n) for (s, n) in neighbours
+                         if 0 <= s < len(sr_grid) and 0 <= n < len(nd_grid) and (s, n) not in cells]
+
+    # -- validation: best configs per (r, flag) at full sample sizes ---------
+    for r in radii:
+        for combo in flag_combos:
+            fk = _flag_key(combo)
+            cells = measured.get((round(float(r), 4), fk), {})
+            for (si, ni) in sorted(cells, key=cells.get)[:validate_top_k]:
+                for n_source in sample_sizes:
+                    full = pts.sample(min(n_source, len(pts)), random_state=0)
+                    _do(si, ni, r, combo, len(full), full, "validate")
+
+    if verbose:
+        print(f"\ngeneration {generation} complete: {len(results)} new runs "
+              f"in {(_t.perf_counter()-t_start)/60:.1f} min")
+    return load_results(output_folder, generation=generation)
 
 
 # ---------------------------------------------------------------------------

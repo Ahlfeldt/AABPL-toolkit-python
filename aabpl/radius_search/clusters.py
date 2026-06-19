@@ -162,11 +162,11 @@ class Clustering(object):
                 clusters_for_column.drop_small_cluster(largest_cluster * min_cluster_share_after_contingency)
             clusters_for_column.clusters_pre_merge = 0
             if not centroid_dist_threshold is None and not border_dist_threshold is None:
-                clusters_for_column.merge_clusters(check_if_merge=merge_condition_distance_based(max_centroid_dist, max_border_dist, self.grid.spacing))
+                clusters_for_column.merge_clusters(check_if_merge=merge_condition_distance_based(max_centroid_dist, max_border_dist, self.grid._search_spacing))
             elif not centroid_dist_threshold is None:
                 clusters_for_column.merge_clusters(check_if_merge=merge_condition_centroid_distance(centroid_dist_threshold))
             elif not border_dist_threshold is None:
-                clusters_for_column.merge_clusters(check_if_merge=merge_condition_border_distance(max_border_dist, self.grid.spacing))
+                clusters_for_column.merge_clusters(check_if_merge=merge_condition_border_distance(max_border_dist, self.grid._search_spacing))
             if min_cluster_share_after_centroid_dist > 0:
                 clusters_for_column.drop_small_cluster(largest_cluster * min_cluster_share_after_centroid_dist)
             if make_convex:
@@ -188,7 +188,7 @@ class Clustering(object):
         id_to_sums = self.grid.id_to_sums
         grid_xmin = self.grid.grid_xmin
         grid_ymin = self.grid.grid_ymin
-        spacing = self.grid.spacing
+        spacing = self.grid._search_spacing
         for (cluster_column, clusters) in self.by_column.items():
             all_clustered_cells = set()
             for cluster in clusters['prime_locs']:
@@ -389,7 +389,7 @@ class Clustering(object):
             id_to_sums = self.grid.id_to_sums    
             grid_xmin = self.grid.total_bounds.xmin
             grid_ymin = self.grid.total_bounds.ymin
-            spacing = self.grid.spacing
+            spacing = self.grid._search_spacing
             get_cell_centroid = grid.get_cell_centroid
             self.clusters = [Clustering.Cluster(
                 id=i,
@@ -463,7 +463,7 @@ class Clustering(object):
             
             grid_xmin = self.grid.total_bounds.xmin
             grid_ymin = self.grid.total_bounds.ymin
-            spacing = self.grid.spacing
+            spacing = self.grid._search_spacing
             
             for cluster in self.clusters:
                 cells = cluster.cells
@@ -516,13 +516,13 @@ class Clustering(object):
         def add_geom_to_clusters(self):
             grid_xmin = self.grid.total_bounds.xmin
             grid_ymin = self.grid.total_bounds.ymin
-            spacing = self.grid.spacing
+            spacing = self.grid._search_spacing
             for cluster in self.clusters:
                 cluster.add_geometry(grid_xmin, grid_ymin, spacing)
             
         def add_area_to_clusters(self):
             for cluster in self.clusters:
-                cluster.add_area(spacing=self.grid.spacing)
+                cluster.add_area(spacing=self.grid._search_spacing)
         #
 
         def add_cluster_id_to_pts(self, column, cluster_column):

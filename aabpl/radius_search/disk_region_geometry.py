@@ -1206,17 +1206,13 @@ def extract_shared_cells(
     reg_0 = regions[0]
 
     shared_cntd_cells = set(reg_0.nested_cntd_cells)
-    shared_cntd_cells_ref_lvl = set(reg_0.cntd_cells)
     # print("shared_cntd_cells",len(shared_cntd_cells))
-    # print("shared_cntd_cells_ref_lvl",len(shared_cntd_cells_ref_lvl))
     i = 1
     while i  < len(id_to_offset_regions) and len(shared_cntd_cells)>0:
         shared_cntd_cells.intersection_update(set(regions[i].nested_cntd_cells))
-        shared_cntd_cells_ref_lvl.intersection_update(set(regions[i].cntd_cells))
         i += 1
     #
 
-    # print("shared_cntd_cells_ref_lvl",(shared_cntd_cells_ref_lvl))
     n_cntd_ovlpd_cells = []
     for region in id_to_offset_regions.values():
         region.distinct_cntd_cells = [
@@ -1231,7 +1227,7 @@ def extract_shared_cells(
     for region in id_to_offset_regions.values():
         region.distinct_ovlpd_cells = list(region.nested_ovlpd_cells)
 
-    return shared_cntd_cells, shared_cntd_cells_ref_lvl
+    return shared_cntd_cells
 
 # TODO ensure that row,col x,y is not mixed up
 
@@ -2272,6 +2268,9 @@ def build_disk_region_lookups(
     if _cache_key in _config.disk_region_cache and plot_offset_checks is None and plot_offset_regions is None and plot_offset_raster is None:
         if not silent and _outer_progress.get() is None:
             print("Reusing cached disk region lookups for r/spacing="+str(round(r/grid_spacing, 6))+" nest_depth="+str(nest_depth))
+        # LRU: mark this entry most-recently-used so eviction (popitem(last=False))
+        # drops the genuinely least-recently-used config, not the oldest-inserted.
+        _config.disk_region_cache.move_to_end(_cache_key)
         return {**_config.disk_region_cache[_cache_key], 'id_to_offset_regions': {}}
 
     _prog = _DiskRegionProgress(silent=silent, r_over_spacing=r/grid_spacing, nest_depth=nest_depth)
@@ -2322,8 +2321,7 @@ def build_disk_region_lookups(
      translate_reg_nr_to_reg_id,
      contain_region_mult
     ) = expand_regions_to_all_sectors(trgl_regions=trgl_regions, r=r, nest_depth=nest_depth)
-    (shared_cntd_cells,
-     shared_cntd_cells_ref_lvl) = extract_shared_cells(id_to_offset_regions)
+    shared_cntd_cells = extract_shared_cells(id_to_offset_regions)
     
     # print("_4", sum([r.calc_area() for r in id_to_offset_regions.values()]), all([r.is_closed for r in id_to_offset_regions.values()]))
     if False:
@@ -2428,7 +2426,33 @@ def build_disk_region_lookups(
     }
     _cached = {k: v for k, v in _result.items() if k != 'id_to_offset_regions'}
     _config.disk_region_cache[_cache_key] = _cached
-    while len(_config.disk_region_cache) > _config.DISK_REGION_CACHE_MAXSIZE:
-        _config.disk_region_cache.popitem(last=False)  # evict oldest
+    _evict_disk_region_cache()
     return _result
+
+
+def _evict_disk_region_cache():
+    """Trim disk_region_cache to DISK_REGION_CACHE_MAXSIZE.
+
+    Eviction is LRU, but protects the deepest entry per (spacing_ratio,
+    include_boundary): for each such group the entry with the largest nest_depth
+    is kept as long as possible (it is the one a shallower nest_depth can be
+    derived from cheaply). Only when every remaining entry is the deepest of its
+    group do we fall back to evicting the plain least-recently-used one.
+    """
+    cache = _config.disk_region_cache
+    while len(cache) > _config.DISK_REGION_CACHE_MAXSIZE:
+        # deepest nest_depth per (spacing_ratio, include_boundary) -> protected keys
+        deepest = {}
+        for (ratio, nd, incl) in cache:
+            grp = (ratio, incl)
+            if grp not in deepest or nd > deepest[grp][1]:
+                deepest[grp] = (ratio, nd, incl)
+        protected = set(deepest.values())
+        # evict the least-recently-used unprotected entry; if all are protected,
+        # evict the plain LRU (oldest) so we never loop forever.
+        victim = next((k for k in cache if k not in protected), None)
+        if victim is None:
+            cache.popitem(last=False)
+        else:
+            del cache[victim]
 

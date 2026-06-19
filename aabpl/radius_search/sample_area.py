@@ -191,47 +191,47 @@ def intersect_polygon_with_grid(
         rel_tol = 0.00000,
 
 ):
-    grid.sample_col_min = sample_col_min = int((grid.sample_area.bounds[0] - grid.total_bounds.xmin) // grid.spacing)
-    grid.sample_row_min = sample_row_min = int((grid.sample_area.bounds[1] - grid.total_bounds.ymin) // grid.spacing)
-    grid.sample_col_max = sample_col_max = int((grid.sample_area.bounds[2] - grid.total_bounds.xmin) // grid.spacing)
-    grid.sample_row_max = sample_row_max = int((grid.sample_area.bounds[3] - grid.total_bounds.ymin) // grid.spacing)
+    grid.sample_col_min = sample_col_min = int((grid.sample_area.bounds[0] - grid.total_bounds.xmin) // grid._search_spacing)
+    grid.sample_row_min = sample_row_min = int((grid.sample_area.bounds[1] - grid.total_bounds.ymin) // grid._search_spacing)
+    grid.sample_col_max = sample_col_max = int((grid.sample_area.bounds[2] - grid.total_bounds.xmin) // grid._search_spacing)
+    grid.sample_row_max = sample_row_max = int((grid.sample_area.bounds[3] - grid.total_bounds.ymin) // grid._search_spacing)
     
-    col_min = min(grid.col_ids)
-    row_min = min(grid.row_ids)
-    col_max = max(grid.col_ids)
-    row_max = max(grid.row_ids)
+    col_min = min(grid._search_col_ids)
+    row_min = min(grid._search_row_ids)
+    col_max = max(grid._search_col_ids)
+    row_max = max(grid._search_row_ids)
     grid.sample_x_steps = _np_array(
-        [grid.total_bounds.xmin + pad*grid.spacing for pad in range(grid.sample_col_min-min(grid.col_ids), 0)] +  
-        list(grid.x_steps) + 
-        [grid.total_bounds.xmax + pad*grid.spacing for pad in range(1, grid.sample_col_max - max(grid.col_ids) + 1)]
+        [grid.total_bounds.xmin + pad*grid._search_spacing for pad in range(grid.sample_col_min-min(grid._search_col_ids), 0)] +  
+        list(grid._search_x_steps) + 
+        [grid.total_bounds.xmax + pad*grid._search_spacing for pad in range(1, grid.sample_col_max - max(grid._search_col_ids) + 1)]
     )
     grid.sample_y_steps = _np_array(
-        [grid.total_bounds.ymin + pad*grid.spacing for pad in range(grid.sample_row_min-min(grid.row_ids), 0)] +  
-        list(grid.y_steps) + 
-        [grid.total_bounds.ymax + pad*grid.spacing for pad in range(1, grid.sample_row_max - max(grid.row_ids) + 1)]
+        [grid.total_bounds.ymin + pad*grid._search_spacing for pad in range(grid.sample_row_min-min(grid._search_row_ids), 0)] +  
+        list(grid._search_y_steps) + 
+        [grid.total_bounds.ymax + pad*grid._search_spacing for pad in range(1, grid.sample_row_max - max(grid._search_row_ids) + 1)]
     )
     # grid.sample_x_steps = _np_array(
-    #     [grid.total_bounds.xmin - (col_min-col)*grid.spacing for col in range(sample_col_min, col_min)] +  
-    #     list(grid.x_steps) + 
-    #     [grid.total_bounds.xmax + (col-col_max)*grid.spacing for col in range(max(grid.col_ids),col_max+1)]
+    #     [grid.total_bounds.xmin - (col_min-col)*grid._search_spacing for col in range(sample_col_min, col_min)] +  
+    #     list(grid._search_x_steps) + 
+    #     [grid.total_bounds.xmax + (col-col_max)*grid._search_spacing for col in range(max(grid._search_col_ids),col_max+1)]
     # )
     # grid.sample_y_steps = _np_array(
-    #     [grid.total_bounds.ymin - (row_min-row)*grid.spacing for row in range(sample_row_min, row_min)] +  
-    #     list(grid.y_steps) + 
-    #     [grid.total_bounds.ymax + (row-row_max)*grid.spacing for row in range(max(grid.row_ids),row_max+1)]
+    #     [grid.total_bounds.ymin - (row_min-row)*grid._search_spacing for row in range(sample_row_min, row_min)] +  
+    #     list(grid._search_y_steps) + 
+    #     [grid.total_bounds.ymax + (row-row_max)*grid._search_spacing for row in range(max(grid._search_row_ids),row_max+1)]
     # )
     grid.sample_col_ids = range(col_min,col_max+1)
     grid.sample_row_ids = range(row_min,row_max+1)
     grid.sample_grid_bounds = [
-        grid.total_bounds.xmin + sample_col_min * grid.spacing,
-        grid.total_bounds.ymin + sample_row_min * grid.spacing,
-        grid.total_bounds.xmin + (sample_col_max+1) * grid.spacing,
-        grid.total_bounds.ymin + (sample_row_max+1) * grid.spacing,
+        grid.total_bounds.xmin + sample_col_min * grid._search_spacing,
+        grid.total_bounds.ymin + sample_row_min * grid._search_spacing,
+        grid.total_bounds.xmin + (sample_col_max+1) * grid._search_spacing,
+        grid.total_bounds.ymin + (sample_row_max+1) * grid._search_spacing,
     ]
     
     
 
-    lvls_to_store = True or set([0,grid.ref_lvl])
+    lvls_to_store = True
 
     cell_to_poly = clip_polygon_to_grid(
         poly=grid.sample_area,
@@ -251,7 +251,7 @@ def intersect_polygon_with_grid(
     used_poly_lvls = sorted(set([lvl for lvl,(row,col) in cell_to_poly if lvls_to_store==True or lvl in lvls_to_store]))
     min_lvl = int(min(used_poly_lvls))
     max_lvl = int(max(used_poly_lvls))
-    abs_tol = rel_tol * (grid.spacing*2**-max_lvl)**2
+    abs_tol = rel_tol * (grid._search_spacing*2**-max_lvl)**2
     # method to obtain poky for fully valid cells from lvl, row, col
     def get_fully_valid_poly(
             lvl:int,
@@ -281,12 +281,12 @@ def intersect_polygon_with_grid(
         (lvl, (row,col)) for (lvl, (row,col)), poly in cell_to_poly.items() 
         if lvl in used_poly_lvls and (
         (type(poly) is bool and poly is True) or
-        poly.area >= (grid.spacing*2**-lvl)**2 - abs_tol
+        poly.area >= (grid._search_spacing*2**-lvl)**2 - abs_tol
         )}
     cells_partly_valid_max_lvl = {
         (lvl, (row,col)) for (lvl, (row,col)), poly in cell_to_poly.items() 
         if lvl == max_lvl and not type(poly) is bool and
-        (grid.spacing*2**-lvl)**2 - abs_tol > poly.area > abs_tol
+        (grid._search_spacing*2**-lvl)**2 - abs_tol > poly.area > abs_tol
         } 
     #
 
@@ -497,17 +497,17 @@ def infer_sample_area_from_pts(
             
             # THIS SECTION IS REDUNDANT BECAUSE IT IS HANDLED IN intersect_polygon_with_grid
             # (cntd_cells, ovlpd_cells
-            # ) = get_cells_by_lvl_ovlpd_by_cell_buffer(grid_spacing=grid.spacing, r=buffer, nest_depth=grid.ref_lvl)
+            # ) = get_cells_by_lvl_ovlpd_by_cell_buffer(grid_spacing=grid._search_spacing, r=buffer, nest_depth=0)
             # cells_fully_valid = set(grid.get_all_ids())
             # cells_partly_valid = set()
 
             # cntd_cells = set([(lvl,(abs(row),abs(col))) for lvl,(row,col) in cntd_cells])
             # ovlpd_cells = set([(lvl,(abs(row),abs(col))) for lvl,(row,col) in ovlpd_cells])
-            # min_row_id = min(grid.row_ids)
-            # max_row_id = max(grid.row_ids)
-            # min_col_id = min(grid.col_ids)
-            # max_col_id = max(grid.col_ids)
-            # for row_i in grid.row_ids:
+            # min_row_id = min(grid._search_row_ids)
+            # max_row_id = max(grid._search_row_ids)
+            # min_col_id = min(grid._search_col_ids)
+            # max_col_id = max(grid._search_col_ids)
+            # for row_i in grid._search_row_ids:
             #     for lvl,(row_j, col_j) in cntd_cells:
             #         cells_fully_valid.add((lvl,(row_i-row_j,min_col_id-col_j)))
             #         cells_fully_valid.add((lvl,(row_i-row_j,max_col_id+col_j)))
@@ -519,7 +519,7 @@ def infer_sample_area_from_pts(
             #         cells_partly_valid.add((lvl,(row_i+row_j,min_col_id-col_j)))
             #         cells_partly_valid.add((lvl,(row_i+row_j,max_col_id+col_j)))
             
-            # for col_i in grid.col_ids:
+            # for col_i in grid._search_col_ids:
             #     for lvl,(row_j, col_j) in cntd_cells:
             #         cells_fully_valid.add((lvl,(min_row_id-row_j,col_i-col_j)))
             #         cells_fully_valid.add((lvl,(min_row_id-row_j,col_i+col_j)))
@@ -541,27 +541,37 @@ def infer_sample_area_from_pts(
                 if min_pts_to_sample_cell != 1:
                     print("sample_area hull_type 'buff_non_empty_cells' used together with min_pts_to_sample_cell != 1. min_pts_to_sample_cell will be set = 1. Use 'buff_cells_min_pts' to specify different value.")
                 min_pts_to_sample_cell = 1
-            if grid.ref_lvl == 0:
-                id_to_pt_ids = [id for id, val in grid.id_to_pt_ids.items() if len(val)>=min_pts_to_sample_cell]
-                spacing = grid.spacing
-                # print("rc__",min(grid.row_ids), max(grid.row_ids), min(grid.col_ids), max(grid.col_ids))
-                # print("xy__",min([x for x,y in id_to_pt_ids]), max([x for x,y in id_to_pt_ids]), min([y for x,y in id_to_pt_ids]), max([y for x,y in id_to_pt_ids]))
-                
-            elif grid.ref_lvl > 0:#TODO this will cause error because of lvl, (row,col)
-                spacing = spacing / (2**grid.ref_lvl)
-                id_to_pt_ids = [id for id, val in grid.id_to_pt_ids_by_lvl[grid.ref_lvl].items() if len(val)>=min_pts_to_sample_cell]
-                pass
-            else:
-                spacing = spacing * (2**(-1*grid.ref_lvl))
-                id_to_pt_ids = [id for id, val in grid.id_to_pt_ids_by_lvl[grid.ref_lvl].items() if len(val)>=min_pts_to_sample_cell]
-                pass
-            polygons = [[grid.get_cell_poly(row,col)] for row,col in id_to_pt_ids]
+            # Build the valid-area footprint from non-empty *output* grid cells
+            # (cell size = grid.output_spacing), so the buffered sample area depends
+            # on the user-facing output spacing rather than the internal search grid.
+            from numpy import floor as _np_floor
+            from collections import Counter as _Counter
+            sx = grid.output_spacing
+            sy = grid.output_spacing_y
+            # output_x_steps[0] == total_bounds.xmin, but the output arrays are built
+            # lazily (update_spacing) and the sample area is constructed during the
+            # search, before that — so read the origin from total_bounds directly.
+            ox = grid.total_bounds.xmin
+            oy = grid.total_bounds.ymin
+            _cols = _np_floor((pts[x].values - ox) / sx).astype(int)
+            _rows = _np_floor((pts[y].values - oy) / sy).astype(int)
+            _counts = _Counter(zip(_rows.tolist(), _cols.tolist()))
+            _cells = [rc for rc, n in _counts.items() if n >= min_pts_to_sample_cell]
+
+            def _out_cell_poly(row, col, ox=ox, oy=oy, sx=sx, sy=sy):
+                # Return the bare 4-corner ring (matching grid.get_cell_poly), NOT
+                # wrapped in a list — the outer [ ... ] is added by the caller below.
+                x0 = ox + col * sx; x1 = x0 + sx
+                y0 = oy + row * sy; y1 = y0 + sy
+                return ((x0, y0), (x1, y0), (x1, y1), (x0, y1))
+
+            polygons = [[_out_cell_poly(row, col)] for row, col in _cells]
             
             # THIS SECTION IS REDUNDANT BECAUSE IT IS HANDLED IN intersect_polygon_with_grid
             # buffer/spacing
             # maybe create one np array arround with coords of buffered cell around (0,0) and then add centroids to it 
             # (cntd_cells, ovlpd_cells
-            # ) = get_cells_by_lvl_ovlpd_by_cell_buffer(grid_spacing=grid.spacing, r=buffer, nest_depth=grid.ref_lvl)
+            # ) = get_cells_by_lvl_ovlpd_by_cell_buffer(grid_spacing=grid._search_spacing, r=buffer, nest_depth=0)
             # cells_fully_valid = set([(0,(row,col)) for row,col in id_to_pt_ids])
             
             # cells_partly_valid = set()
@@ -654,7 +664,7 @@ def compute_disk_cell_overlap(
 
     """
     
-    (xmin,ymin),(xmax,ymax) = (row_col[0]-.5)*grid_spacing, (row_col[1]-.5)*grid_spacing, (row_col[0]+.5)*grid_spacing, (row_col[1]+.5)*grid_spacing
+    (xmin,ymin),(xmax,ymax) = ((row_col[1]-.5)*grid_spacing, (row_col[0]-.5)*grid_spacing), ((row_col[1]+.5)*grid_spacing, (row_col[0]+.5)*grid_spacing)
     if grid_spacing is None:
         rectangle_area = (abs(xmax-xmin)*abs(ymax-ymin))
     else:
@@ -699,7 +709,7 @@ def compute_disk_cell_overlap(
             pt1=segment1[0],
             pt2=segment1[1],
             full_line=False,
-            precision=precision,
+            decimals=precision,
         )
         if len(itx_pts)<2:
             if return_n_itx:
@@ -721,7 +731,7 @@ def compute_disk_cell_overlap(
             pt1=segment1[0],
             pt2=segment1[1],
             full_line=False,
-            precision=precision,
+            decimals=precision,
         )
         itx_pt2 = circle_line_segment_intersection(
             circle_center=disk_center_pt,
@@ -729,7 +739,7 @@ def compute_disk_cell_overlap(
             pt1=segment2[0],
             pt2=segment2[1],
             full_line=False,
-            precision=precision,
+            decimals=precision,
         )
         if len(itx_pt1) != 1 or len(itx_pt2) != 1:
             raise ValueError("Unexpected number of intersections",itx_pt1, itx_pt2)
@@ -749,7 +759,7 @@ def compute_disk_cell_overlap(
             pt1=segment1[0],
             pt2=segment1[1],
             full_line=False,
-            precision=precision,
+            decimals=precision,
         )
         itx_pt2 = circle_line_segment_intersection(
             circle_center=disk_center_pt,
@@ -757,7 +767,7 @@ def compute_disk_cell_overlap(
             pt1=segment2[0],
             pt2=segment2[1],
             full_line=False,
-            precision=precision,
+            decimals=precision,
         )
         if len(itx_pt1) != 1 or len(itx_pt2) != 1:
             raise ValueError("Unexpected number of intersections",itx_pt1, itx_pt2)
@@ -815,7 +825,7 @@ def compute_disk_cell_overlap(
             pt1=segment1[0],
             pt2=segment1[1],
             full_line=False,
-            precision=precision,
+            decimals=precision,
         )
         itx_pt2 = circle_line_segment_intersection(
             circle_center=disk_center_pt,
@@ -823,7 +833,7 @@ def compute_disk_cell_overlap(
             pt1=segment2[0],
             pt2=segment2[1],
             full_line=False,
-            precision=precision,
+            decimals=precision,
         )
         itx_pt1, itx_pt2 = itx_pt1[0], itx_pt2[0]
         triangle = 1/2 * abs(itx_pt1[0]-itx_pt2[0])*abs(itx_pt1[1]-itx_pt2[1])

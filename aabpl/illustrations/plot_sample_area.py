@@ -107,10 +107,10 @@ def plot_sample_area(
     # ADD DISTRIUBTION PLOT
     # grey out cells that are not used for sampling
     cells_rndm_sample = grid.cells_rndm_sample
-    col_min = int(round((grid.sample_grid_bounds[0]-grid.total_bounds.xmin)/grid.spacing,0))
-    row_min = int(round((grid.sample_grid_bounds[1]-grid.total_bounds.ymin)/grid.spacing,0))
-    col_max = int(round((grid.sample_grid_bounds[2]-grid.total_bounds.xmin)/grid.spacing-1,0))
-    row_max = int(round((grid.sample_grid_bounds[3]-grid.total_bounds.ymin)/grid.spacing-1,0))
+    col_min = int(round((grid.sample_grid_bounds[0]-grid.total_bounds.xmin)/grid._search_spacing,0))
+    row_min = int(round((grid.sample_grid_bounds[1]-grid.total_bounds.ymin)/grid._search_spacing,0))
+    col_max = int(round((grid.sample_grid_bounds[2]-grid.total_bounds.xmin)/grid._search_spacing-1,0))
+    row_max = int(round((grid.sample_grid_bounds[3]-grid.total_bounds.ymin)/grid._search_spacing-1,0))
     n_rows = row_max - row_min + 1
     n_cols = col_max - col_min + 1
     if type(cells_rndm_sample) == bool:

@@ -16,7 +16,7 @@ def illustrate_nested_grid(
     Illustrate method
     """
     # unpack vals
-    grid_spacing = grid.spacing
+    grid_spacing = grid._search_spacing
     nested_grid = grid['nested']
 
     # filter pts to be inside bounds:
@@ -67,8 +67,8 @@ def illustrate_nested_grid(
         ax.add_patch(patchToAdd)
 
     ax.scatter(x=pts_lat_lon[:,1], y=pts_lat_lon[:,0], s=0.2,color='black')
-    x_steps = grid.x_steps
-    y_steps = grid.y_steps
+    x_steps = grid._search_x_steps
+    y_steps = grid._search_y_steps
     ax.set_xticks(x_steps)
     ax.set_yticks(y_steps)
     ax.set_xlim(left=x_min, right=x_max)

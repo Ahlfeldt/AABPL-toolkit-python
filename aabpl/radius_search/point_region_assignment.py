@@ -136,8 +136,8 @@ def get_pt_to_cell_centroid_triangle_offset(
     """    
     # unpack values from Grid dictionary
     # get vectors of row columns boundary values
-    y_steps=grid.y_steps
-    x_steps=grid.x_steps
+    y_steps=grid._search_y_steps
+    x_steps=grid._search_x_steps
     
     # each point is cntd in grid cell. Calculate the offset of each point to the centroid of its grid cell.
     # TODO cut may contain repeated expensive operation - thus already assigned cell vectors could be used to just query cell centroid by cell_id from dict 
@@ -146,8 +146,8 @@ def get_pt_to_cell_centroid_triangle_offset(
     @time_func_perf
     def new_way2(n):
         for i in range(n):
-            pts['offset_x2'] = pts[x]%grid.spacing-grid.spacing/2
-            pts['offset_y2'] = pts[y]%grid.spacing-grid.spacing/2
+            pts['offset_x2'] = pts[x]%grid._search_spacing-grid._search_spacing/2
+            pts['offset_y2'] = pts[y]%grid._search_spacing-grid._search_spacing/2
     
     @time_func_perf
     def old_way2(n):
@@ -326,7 +326,7 @@ def assign_points_to_cell_regions(
     disks_by_cells_overlaps = _np_zeros((n_pts, grid.search.weak_order_tree.n_checks_if_ovlpd),dtype=bool)
     
     # apply recursive checks on cells (defined in family_tree_flat) on whether disks around pts fully or partially contain them 
-    scaled_to_grid_cntrd_trngl_offset_xy = cntrd_trngl_offset_xy / grid.spacing
+    scaled_to_grid_cntrd_trngl_offset_xy = cntrd_trngl_offset_xy / grid._search_spacing
     pts['scaled_cntrd_trngl_offset_x']=scaled_to_grid_cntrd_trngl_offset_xy[:,0]
     pts['scaled_cntrd_trngl_offset_y']=scaled_to_grid_cntrd_trngl_offset_xy[:,1]
     recursive_cell_region_inference(
@@ -336,7 +336,7 @@ def assign_points_to_cell_regions(
         disks_by_cells_contains=disks_by_cells_contains,
         disks_by_cells_overlaps=disks_by_cells_overlaps,
         family_tree_pos=grid.search.weak_order_tree.root,
-        grid_spacing=grid.spacing,
+        grid_spacing=grid._search_spacing,
         r=r,
         include_boundary=include_boundary,
     )
@@ -447,7 +447,7 @@ def assign_points_to_cell_regions(
             '/'
             
             
-            +str(grid.n_cells)+' cells ' +
+            +str(grid._search_n_cells)+' cells ' +
             'with '+ str(len(pts[cell_region_name].unique())) +' regions resulting in '+
             str(len(_np_unique(pts[[row_name, col_name,cell_region_name]].values,axis=0))) +' unique cell region combinations.'
             
@@ -496,15 +496,15 @@ def assign_points_to_mirco_regions(
     #     off_x = find_column_name('offset_x'+str(i), existing_columns=pts.columns)
     #     off_y = find_column_name('offset_y'+str(i), existing_columns=pts.columns)
     #     if i == 0:
-    #         pts[off_x] = (((pts[x]-grid.total_bounds.xmin)%grid.spacing)-grid.spacing/2) / grid.spacing
-    #         pts[off_y] = (((pts[y]-grid.total_bounds.ymin)%grid.spacing)-grid.spacing/2) / grid.spacing
+    #         pts[off_x] = (((pts[x]-grid.total_bounds.xmin)%grid._search_spacing)-grid._search_spacing/2) / grid._search_spacing
+    #         pts[off_y] = (((pts[y]-grid.total_bounds.ymin)%grid._search_spacing)-grid._search_spacing/2) / grid._search_spacing
     #     else:
-    #         pts[off_x] = (((pts[last_offset_x])%grid.spacing)-grid.spacing/2) / grid.spacing
-    #         pts[off_y] = (((pts[y]-grid.total_bounds.ymin)%grid.spacing)-grid.spacing/2) / grid.spacing
+    #         pts[off_x] = (((pts[last_offset_x])%grid._search_spacing)-grid._search_spacing/2) / grid._search_spacing
+    #         pts[off_y] = (((pts[y]-grid.total_bounds.ymin)%grid._search_spacing)-grid._search_spacing/2) / grid._search_spacing
     #     last_offset_x,last_offset_y = off_x, off_y
-    pts[off_x] = (((pts[x]-grid.total_bounds.xmin)%grid.spacing)-grid.spacing/2) / grid.spacing
+    pts[off_x] = (((pts[x]-grid.total_bounds.xmin)%grid._search_spacing)-grid._search_spacing/2) / grid._search_spacing
     # lat/y offset
-    pts[off_y] = (((pts[y]-grid.total_bounds.ymin)%grid.spacing)-grid.spacing/2) / grid.spacing
+    pts[off_y] = (((pts[y]-grid.total_bounds.ymin)%grid._search_spacing)-grid._search_spacing/2) / grid._search_spacing
 
     # classify which of the 8 triangles each point falls in (needed for per-triangle nested cell lookup)
     pts['triangle_id'] = classify_point_triangle(x=pts[off_x], y=pts[off_y])
@@ -512,7 +512,7 @@ def assign_points_to_mirco_regions(
     _lookups = build_disk_region_lookups(
         grid=grid,
         grid_spacing=1,
-        r=r/grid.spacing,
+        r=r/grid._search_spacing,
         include_boundary=include_boundary,
         nest_depth=nest_depth,
         plot_offset_checks=plot_offset_checks,
@@ -590,10 +590,8 @@ def assign_points_to_mirco_regions(
         pts[cell_region_name].astype('int64') * _REGION_AND_TRGL_MULT
         + pts['triangle_id'].astype('int64')
     )
-    
 
-    # shared_cntd_cells_ref_lvl,
-    # shared_ovlpd_cells_ref_lvl,
+
     if 'testing' != 'testing':
         print('Mean cntd:', sum([len(v) for v in grid.search.region_id_to_cntd_cells.values()])/len(grid.search.region_id_to_cntd_cells))
         print('Mean ovlpd:', sum([len(v) for v in grid.search.region_id_to_ovlpd_cells.values()])/len(grid.search.region_id_to_ovlpd_cells))

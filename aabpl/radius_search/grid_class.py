@@ -134,6 +134,7 @@ class Grid(object):
         local_crs:str='auto',
         n_pts_src:int=None,
         n_pts_tgt:int=None,
+        n_pts_src_extra:int=0,
         pts_tgt_xy=None,
         data_crs:str=None,
         output_spacing:float=None,
@@ -142,9 +143,21 @@ class Grid(object):
     ):
         """
         Returns an object of Grid class used to enhance point search and bundle results/methods.
-        Spacing and nest_depth are chosen automatically via timing models, or overridden via
-        config.FIXED_SPACING_RATIO / config.FIXED_NEST_DEPTH before calling.
+
+        Two grids are tracked:
+
+        - **Search grid** (``_search_spacing`` and the ``_search_*`` step/id arrays): the cell
+          size used internally for the radius search. Chosen automatically via timing models for
+          speed (typically ~0.35r-0.71r), or overridden via ``config.FIXED_SPACING_RATIO`` /
+          ``config.FIXED_NEST_DEPTH`` before calling. Not meant for user consumption.
+        - **Output grid** (``output_spacing`` / ``output_spacing_y`` and ``output_x_steps`` /
+          ``output_y_steps``): the user-facing cell size for exports and plots. Defaults to
+          ``r/3`` when ``output_spacing`` is None. Per-point aggregates are exact regardless of
+          the search cell size, so the output grid may be finer than the search grid.
+
+        ``nest_depth`` belongs to the search grid only.
         """
+        self._silent = silent
         # if local crs should be found automatically or
         if local_crs == 'auto' or initial_crs != local_crs:
             local_crs, (xmin,xmax,ymin,ymax) = convert_bounds_to_local_crs(
@@ -167,17 +180,23 @@ class Grid(object):
             nest_depth=_cfg.FIXED_NEST_DEPTH,
             n_pts_src=n_pts_src,
             n_pts_tgt=n_pts_tgt,
+            n_pts_src_extra=n_pts_src_extra,
             pts_tgt_xy=pts_tgt_xy,
             silent=silent,
         )
 
         self.spacing = spacing
+        # Internal search-grid spacing. Alias introduced for the output_spacing
+        # refactor (see roadmap): consumers that mean the *search* grid should read
+        # `_search_spacing`; user-facing output cell size lives in `output_spacing`.
+        # Kept as an alias (not a rename) so existing `grid.spacing` readers are
+        # unaffected during the gradual migration.
+        self._search_spacing = spacing
         self.nest_depth = nest_depth
-        
+
         self.nest_height = 0
         self.levels = [0]
-        self.ref_lvl = 0
-        
+
         self.clustering = Clustering(self)
         self.plot = GridPlots(self)
         # TODO total_bounds should also contain excluded area if not cntd 
@@ -196,21 +215,46 @@ class Grid(object):
         self.row_ids = _np_arange(n_ysteps-1)#[::-1]
         self.col_ids = _np_arange(n_xsteps-1)
         self.n_cells = len(self.row_ids)*len(self.col_ids)
+        # Search-grid aliases (see _search_spacing note above). Additive only.
+        self._search_x_steps = x_steps
+        self._search_y_steps = y_steps
+        self._search_row_ids = self.row_ids
+        self._search_col_ids = self.col_ids
+        self._search_n_cells = self.n_cells
 
+        # Integer cell-key codec: packs (lvl, row, col) into one int64 so the
+        # cell-sum aggregation and the per-search offset templates share the same
+        # packing and a template translates to a point with one vector add. Sized
+        # from the search-grid extent. Always built — the search loop relies on it.
+        from aabpl.utils.cell_keys import CellKeyCodec
+        self.cell_codec = CellKeyCodec(
+            nest_depth=nest_depth,
+            row_lo=int(self.row_ids.min()), row_hi=int(self.row_ids.max()),
+            col_lo=int(self.col_ids.min()), col_hi=int(self.col_ids.max()),
+            offset_margin=16,
+        ) 
+       
         # Output grid — user-facing cell size for exports and plots.
-        # Defaults to internal spacing when not specified.
-        self.output_spacing = output_spacing if output_spacing is not None else spacing
+        # When unset, defaults to r/3: the search grid is chosen for speed (a coarser
+        # cell, typically ~0.35r-0.71r), but the output raster should be fine enough to
+        # render results crisply. Per-point aggregates are exact regardless of the
+        # search cell size, so a finer output grid is well-defined.
+        # Output spacing (the user-facing cell size) is fixed at construction, default r/3.
+        # The output grid itself (arrays, public-attribute flip, cell aggregates) is built
+        # LAZILY by update_spacing() — radius_search alone skips it to avoid the per-point
+        # aggregation overhead when no output grid is needed. self.spacing is set to the
+        # output spacing immediately so it is truthful right away; the heavier arrays stay
+        # on the search grid until update_spacing() runs.
+        self.output_spacing = output_spacing if output_spacing is not None else r / 3
         self.output_spacing_y = output_spacing_y if output_spacing_y is not None else self.output_spacing
-        if self.output_spacing == spacing and self.output_spacing_y == spacing:
-            self.output_x_steps = x_steps
-            self.output_y_steps = y_steps
-        else:
-            n_out_xsteps = -int((xmin - xmax) / self.output_spacing) + 2
-            n_out_ysteps = -int((ymin - ymax) / self.output_spacing_y) + 2
-            self.output_x_steps = _np_linspace(total_bounds.xmin, total_bounds.xmax, n_out_xsteps)
-            self.output_y_steps = _np_linspace(total_bounds.ymin, total_bounds.ymax, n_out_ysteps)
+        self.spacing = self.output_spacing
+        self.spacing_y = self.output_spacing_y
+        self.output_x_steps = None
+        self.output_y_steps = None
         self.output_id_to_sums = {}
         self._output_val_cols = []
+        self._spacing_computed = False
+        self._raw_bounds = (xmin, xmax, ymin, ymax)
 
         self.sample_area = None
         self.sample_grid_bounds = None
@@ -314,8 +358,9 @@ class Grid(object):
             next((i for i,n in enumerate(range(max(20,nest_depth+1))) if row%.5%(2**-(n+1))==0),max(21,nest_depth+2)) # UPDATE if max_nest_level > 20
             )]][0]
 
-        if not silent:
-            print('Create grid with '+str(n_ysteps-1)+'*'+str(n_xsteps-1)+'='+str((n_ysteps-1)*(n_xsteps-1))+" with spacing "+str(spacing))
+        # NOTE: no grid-creation print here. The internal search grid is not
+        # user-facing; the informative print happens in update_spacing() when the
+        # OUTPUT grid is actually (re)built, so it fires once per spacing value.
         #
     #
     # add functions
@@ -398,7 +443,8 @@ class Grid(object):
         columns ``'out_{row_name}'`` / ``'out_{col_name}'`` are added to pts.
         """
         from numpy import floor as _np_floor
-        if self.output_spacing == self.spacing and self.output_spacing_y == self.spacing:
+        # row/col columns are assigned on the search grid, so compare against it.
+        if self.output_spacing == self._search_spacing and self.output_spacing_y == self._search_spacing:
             self.output_row_name = row_name
             self.output_col_name = col_name
             return
@@ -469,6 +515,79 @@ class Grid(object):
         self.output_id_to_sums = {rc: row.values for rc, row in agg_df.iterrows()}
         self._output_val_cols = val_cols
         return self.output_id_to_sums
+
+    def update_spacing(self, spacing: float = None, spacing_y: float = None, recompute: bool = False):
+        """
+        (Re)build the output grid and its cached cell aggregates.
+
+        This is intentionally LAZY: it is NOT run when the grid is created, and
+        ``radius_search`` does not call it — computing the output grid means a
+        per-point aggregation that is wasted overhead if the caller only wants the
+        radius search. It IS called by every consumer that needs the output grid:
+        ``detect_cluster_pts`` / ``detect_cluster_cells`` (always), and the plot /
+        export methods (``cell_aggregates``, ``clusters``, ``save_*``).
+
+        What it (re)computes:
+          - output grid arrays ``output_x_steps`` / ``output_y_steps``;
+          - the public grid attributes ``spacing`` / ``x_steps`` / ``y_steps`` /
+            ``row_ids`` / ``col_ids`` / ``n_cells`` (re-pointed to the output grid);
+          - the cached per-output-cell aggregate of the raw indicator columns in
+            ``output_id_to_sums`` (read by ``cell_aggregates`` / ``clusters``);
+          - the ``out_*`` cell-id columns on the target points.
+
+        Parameters
+        ----------
+        spacing : float, optional
+            New output cell size. If given and different, the output grid is rebuilt
+            for it. Defaults to keeping the current ``output_spacing`` (r/3 unless set
+            at construction).
+        spacing_y : float, optional
+            Output cell height; defaults to ``spacing``.
+        recompute : bool
+            Force recomputation even if already current.
+        """
+        changed = False
+        if spacing is not None:
+            new_y = spacing_y if spacing_y is not None else spacing
+            if spacing != self.output_spacing or new_y != self.output_spacing_y:
+                self.output_spacing = spacing
+                self.output_spacing_y = new_y
+                changed = True
+        if self._spacing_computed and not changed and not recompute:
+            return self
+
+        xmin, xmax, ymin, ymax = self._raw_bounds
+        tb = self.total_bounds
+        n_out_xsteps = -int((xmin - xmax) / self.output_spacing) + 2
+        n_out_ysteps = -int((ymin - ymax) / self.output_spacing_y) + 2
+        self.output_x_steps = _np_linspace(tb.xmin, tb.xmax, n_out_xsteps)
+        self.output_y_steps = _np_linspace(tb.ymin, tb.ymax, n_out_ysteps)
+        # Re-point public grid attributes to the output grid. Search internals read
+        # grid._search_*; the get_cell_* lambdas captured the search arrays at init.
+        self.spacing = self.output_spacing
+        self.spacing_y = self.output_spacing_y
+        self.x_steps = self.output_x_steps
+        self.y_steps = self.output_y_steps
+        self.row_ids = _np_arange(len(self.output_y_steps) - 1)
+        self.col_ids = _np_arange(len(self.output_x_steps) - 1)
+        self.n_cells = len(self.row_ids) * len(self.col_ids)
+        self.row_col_to_centroid = None  # centroid cache depends on the grid
+        self.centroids = None
+
+        # Cache per-output-cell aggregate of the RAW indicator columns (what
+        # cell_aggregates / clusters display) and assign out_* cell ids.
+        search = getattr(self, 'search', None)
+        tgt = getattr(search, 'target', None) if search is not None else None
+        if tgt is not None and len(getattr(tgt, 'c', [])):
+            self.aggregate_pts_to_output_cells(tgt.pts, val_cols=list(tgt.c), x=tgt.x, y=tgt.y, agg='sum')
+            self.assign_output_cell_ids(tgt.pts, x=tgt.x, y=tgt.y, row_name=tgt.row_name, col_name=tgt.col_name)
+        self._spacing_computed = True
+        if not self._silent:
+            from aabpl.utils.progress import progress_print
+            nr, nc = len(self.row_ids), len(self.col_ids)
+            progress_print('Built output grid: ' + str(nr) + '*' + str(nc) + '=' + str(nr * nc) +
+                           ' cells with spacing ' + str(self.output_spacing))
+        return self
 
     @time_func_perf
     def calc_micro_region_stats(self):
@@ -551,7 +670,7 @@ class Grid(object):
         #    reusable across different point clouds with the same geometry.
         from math import pi as _pi
         r = self.search.r
-        spacing = self.spacing
+        spacing = self._search_spacing
         circle_area_in_spacing_units = _pi * (r / spacing) ** 2
         totals["area_share"] = {}
         for state in ["cntd", "ovlpd"]:
@@ -610,6 +729,7 @@ class Grid(object):
         df (geopandas.GeoDataFrame):
             with entry for each grid cell
         """
+        self.update_spacing()  # ensure the output grid is materialised
         c_ids = _np_zeros((self.n_cells, len(self.clustering.by_column)),int)#-1
         sums = _np_zeros((self.n_cells, len(self.clustering.by_column)),int)
         polys = []
@@ -670,7 +790,7 @@ class Grid(object):
         df (geopandas.GeoDataFrame):
             with entry for each grid cell
         """
-        
+        self.update_spacing()  # ensure the output grid + aggregates are materialised
         id_to_sums = self.output_id_to_sums
         x_steps = self.output_x_steps
         y_steps = self.output_y_steps

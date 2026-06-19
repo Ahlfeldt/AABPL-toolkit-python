@@ -76,8 +76,8 @@ def draw_random_points_in_sample_area(
     # row_min = grid.sample_row_min
     # col_max = grid.sample_col_max
     # row_max = grid.sample_row_max
-    # centroid_left_x = grid.total_bounds.xmin + grid.spacing / 2 
-    # centroid_bottom_y = grid.total_bounds.ymin + grid.spacing / 2
+    # centroid_left_x = grid.total_bounds.xmin + grid._search_spacing / 2 
+    # centroid_bottom_y = grid.total_bounds.ymin + grid._search_spacing / 2
     # centroid_left_x = grid.total_bounds.xmin
     # centroid_bottom_y = grid.total_bounds.ymin
     # grid.sample_grid_bounds = [
@@ -86,15 +86,14 @@ def draw_random_points_in_sample_area(
     #     grid.total_bounds.xmin + (col_max+1) * cell_width,
     #     grid.total_bounds.ymin + (row_max+1) * cell_height,
     # ]
-    
-    # TODO ref_lvl option?
-    
+
+
 
     max_cells_fully_covered = max([
             sum([2**-(2*lvl) for lvl,(row, col) in cells_fully_valid_ref if lvl==lvl_i])
             for lvl_i in set([lvl for lvl, (row, col) in cells_fully_valid_ref])
         ])
-    all_cells_eligible = sample_area is None or max_cells_fully_covered >= grid.n_cells 
+    all_cells_eligible = sample_area is None or max_cells_fully_covered >= grid._search_n_cells 
     
 
     # update cells_rndm_sample with grid cells outside the grid
@@ -192,7 +191,7 @@ def draw_random_points_in_sample_area(
         rand_ints = rand_int_transformer(_np_randint(0, rand_int_stop, n_rndm_points_to_create))
         rndm_cells = sample_cells_arr[rand_ints]
         # _np_array([sample_bounds_xmin, sample_bounds_ymin]) 
-        new_random_point_coordinates = _np_array([grid.total_bounds.xmin, grid.total_bounds.ymin]) + grid.spacing * (
+        new_random_point_coordinates = _np_array([grid.total_bounds.xmin, grid.total_bounds.ymin]) + grid._search_spacing * (
             _np_random((n_rndm_points_to_create,2)) * 
             (2**-rndm_cells[:,0].reshape(-1,1)) +
             rndm_cells[:,1:][:,::-1] # TOOD this part might not put the points into the right postion if lvl>0
@@ -286,16 +285,15 @@ def compute_null_distribution(
             'Values for k_th_percentile must be >0 and <100. Provided values do not fullfill that condition',
             set([k_th_percentile for k_th_percentile in k_th_percentiles if k_th_percentile >= 100 or k_th_percentile <= 0])
         )
-    # TODO ref_lvl option?
     grid.cells_rndm_sample = True if min_pts_to_sample_cell == 0 else set([(row,col) for (row,col),pts in grid.id_to_pt_ids.items() if len(pts)>=min_pts_to_sample_cell])
     grid.sample_area = sample_area
 
     random_point_coords = draw_random_points_in_sample_area(
         grid=grid,
-        cell_width=grid.spacing,
+        cell_width=grid._search_spacing,
         n_random_points=n_random_points,
         random_seed=random_seed,
-        cell_height=grid.spacing,
+        cell_height=grid._search_spacing,
     )
 
     rndm_pts = _pd_DataFrame(

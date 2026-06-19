@@ -35,6 +35,10 @@ def _validate_kwargs(
         y_tgt:str=None,
         row_name_tgt:str=None,
         col_name_tgt:str=None,
+        output_spacing:float=None,
+        output_spacing_y:float=None,
+        build_grid_obj:bool=True,
+        n_pts_src_extra:int=0,
         trynew:int=0,
         proj_crs:str='auto',
         silent:bool=None,
@@ -113,20 +117,29 @@ def _validate_kwargs(
         else:
             x_tgt,y_tgt = x,y
     
-    grid = build_grid(
-        pts_source=pts,
-        initial_crs=local_crs,
-        local_crs=local_crs,
-        data_crs=crs,
-        r=r,
-        x=x,
-        y=y,
-        pts_target=pts_target,
-        x_tgt=x_tgt,
-        y_tgt=y_tgt,
-        silent=silent,
-    )
-    grid.trynew = trynew
+    if build_grid_obj:
+        grid = build_grid(
+            pts_source=pts,
+            initial_crs=local_crs,
+            local_crs=local_crs,
+            data_crs=crs,
+            r=r,
+            x=x,
+            y=y,
+            pts_target=pts_target,
+            x_tgt=x_tgt,
+            y_tgt=y_tgt,
+            output_spacing=output_spacing,
+            output_spacing_y=output_spacing_y,
+            n_pts_src_extra=n_pts_src_extra,
+            silent=silent,
+        )
+        grid.trynew = trynew
+    else:
+        # Caller (detect_cluster_cells) only needs the validated/reprojected kwargs;
+        # the grid is built by the detect_cluster_pts it delegates to. Skip the
+        # throwaway build here.
+        grid = None
 
     return (pts, local_crs,  sample_area_crs, c, x, y, sum_suffix, pts_target, x_tgt, y_tgt, row_name_tgt, col_name_tgt, grid, agg)
 #
@@ -192,6 +205,9 @@ def build_grid(
     pts_target:_pd_DataFrame=None,
     x_tgt:str=None,
     y_tgt:str=None,
+    output_spacing:float=None,
+    output_spacing_y:float=None,
+    n_pts_src_extra:int=0,
     silent:bool=None,
 ):
     """
@@ -233,6 +249,9 @@ def build_grid(
         n_pts_tgt=len(_pts_tgt),
         pts_tgt_xy=_pts_tgt[[_x_tgt, _y_tgt]].values,
         data_crs=data_crs,
+        output_spacing=output_spacing,
+        output_spacing_y=output_spacing_y,
+        n_pts_src_extra=n_pts_src_extra,
         silent=silent,
     )
 #
@@ -275,12 +294,13 @@ def radius_search(
     y:str='lat',
     row_name:str='id_y',
     col_name:str='id_x',
-    sum_suffix:str='_r_sum', 
+    sum_suffix:str='_r_sum',
     pts_target:_pd_DataFrame=None,
     x_tgt:str=None,
     y_tgt:str=None,
     row_name_tgt:str=None,
     col_name_tgt:str=None,
+    spacing:float=None,
     trynew:int=0,
     proj_crs:str='auto',
     keep_cols:bool=False,
@@ -334,6 +354,12 @@ def radius_search(
         Name for the grid row-index column appended to ``pts`` (default=``'id_y'``).
     col_name (str):
         Name for the grid column-index column appended to ``pts`` (default=``'id_x'``).
+    spacing (float):
+        Output cell size, in the same unit as ``r`` (metres after reprojection). Controls the
+        resolution of the output grid used for exports and plots — NOT the internal search grid,
+        whose cell size is chosen automatically for speed. Per-point aggregates are exact
+        regardless of this value, so a finer output grid is well-defined. When None, defaults to
+        ``r/3`` (default=None).
     sum_suffix (str):
         Suffix appended to each column name in ``c`` to form the result column names.
         When None, defaults to ``'_{r}m'`` (e.g. ``'_750m'`` for ``r=750``) (default=None).
@@ -391,6 +417,7 @@ def radius_search(
             pts=pts, crs=crs, sample_area_crs=sample_area_crs, r=r, c=c, x=x, y=y, row_name=row_name,
             col_name=col_name, sum_suffix=sum_suffix, pts_target=pts_target, x_tgt=x_tgt, y_tgt=y_tgt,
             row_name_tgt=row_name_tgt, col_name_tgt=col_name_tgt,
+            output_spacing=spacing,
             trynew=trynew, proj_crs=proj_crs, silent=silent,
     )
     # TODO: replace with the actual output column names once spacing/nesting
@@ -472,20 +499,24 @@ def radius_search(
                 pts[s_name][pts[radius_count_col]==0] = _np_nan
         pts.drop(columns=[count_helper_col], inplace=True)
 
-    # Assign output grid cell indices — needed by clustering when output_spacing
-    # differs from internal spacing. No-op (alias only) when spacings match.
-    grid.assign_output_cell_ids(pts, x=x, y=y, row_name=row_name, col_name=col_name)
-
+    # NOTE: the output grid (cell ids + aggregates) is built lazily via
+    # grid.update_spacing(), called by the plots/exports and by
+    # detect_cluster_pts/detect_cluster_cells. radius_search deliberately skips it
+    # so a search-only call does not pay the per-point output-aggregation cost.
     _suffixes = [sum_suffix] if isinstance(sum_suffix, str) else list(sum_suffix)
-    _result_cols = [c for c in pts.columns if c not in _cols_before and any(c.endswith(s) for s in _suffixes)]
-    if _result_cols:
-        grid.aggregate_pts_to_output_cells(pts, val_cols=_result_cols, x=x, y=y, agg='sum')
 
     pts.sort_values(init_sort, inplace=True)
     pts.drop(columns=[init_sort], inplace=True)
 
     if not keep_cols:
         _keep_extra = {grid.output_row_name, grid.output_col_name}
+        # Preserve the (possibly reprojected) coordinate columns the search uses
+        # as its x/y — plots scatter points in this metric space to align with the
+        # metric sample-area polygon. Dropping them breaks grid.plot.* after a CRS
+        # reprojection (the columns are e.g. 'proj_x'/'proj_y').
+        _src = getattr(grid, 'search', None)
+        if _src is not None and getattr(_src, 'source', None) is not None:
+            _keep_extra |= {_src.source.x, _src.source.y}
         _to_drop = [
             c for c in pts.columns
             if c not in _cols_before and c not in _keep_extra and not any(c.endswith(s) for s in _suffixes)
@@ -515,7 +546,7 @@ def detect_cluster_pts(
     c:list=[],
     agg:str=['sum','count','mean'][0],
     exclude_pt_itself:bool=True,
-    sample_area='buffered_cells',
+    sample_area='buff_cells_min_pts',
     sample_area_crs:str=None,
     min_pts_to_sample_cell:int=0,
     weight_valid_area:str=None,
@@ -535,6 +566,7 @@ def detect_cluster_pts(
     y_tgt:str=None,
     row_name_tgt:str=None,
     col_name_tgt:str=None,
+    spacing:float=None,
     plot_distribution:dict=None,
     plot_cluster_points:dict=None,
     _dev:dict=None,
@@ -554,6 +586,10 @@ def detect_cluster_pts(
             pts=pts, crs=crs, sample_area_crs=sample_area_crs, r=r, c=c, agg=agg,
             x=x, y=y, row_name=row_name, col_name=col_name, sum_suffix=sum_suffix,
             pts_target=pts_target, x_tgt=x_tgt, y_tgt=y_tgt, row_name_tgt=row_name_tgt, col_name_tgt=col_name_tgt,
+            output_spacing=spacing,
+            # the null distribution searches n_random_points extra sources over the
+            # same grid, so include them in the spacing/timing estimate.
+            n_pts_src_extra=n_random_points,
             proj_crs=proj_crs, silent=silent,
     )
     if type(k_th_percentile) not in [list,_np_array, tuple]:
@@ -613,7 +649,7 @@ def detect_cluster_pts(
 
     if not silent:
         for (colname, threshold_value, k_th_p) in zip(c, cluster_threshold_values,k_th_percentile):
-            print("Threshold value for "+str(k_th_p)+"th-percentile is "+str(threshold_value)+" for "+str(colname)+" within "+str(r)+" meters.")
+            progress_print("Threshold value for "+str(k_th_p)+"th-percentile is "+str(threshold_value)+" for "+str(colname)+" within "+str(r)+" meters.")
 
     _prog.step("assigning source")
     _d = _dev or {}
@@ -696,6 +732,9 @@ def detect_cluster_pts(
         )
     grid.plot.cluster_pts = plot_cluster_pts
 
+    # Cluster detection always materialises the output grid (cell aggregates etc.).
+    grid.update_spacing()
+
     if plot_cluster_points is not None:
         grid.plot.cluster_pts(**plot_cluster_points)
     pts.sort_values(init_sort, inplace=True)
@@ -713,7 +752,7 @@ def detect_cluster_cells(
     c:list=[],
     agg:str=['sum','count','mean'][0],
     exclude_pt_itself:bool=True,
-    sample_area='buffered_cells',
+    sample_area='buff_cells_min_pts',
     sample_area_crs:str=None,
     min_pts_to_sample_cell:int=0,
     weight_valid_area:str=None,
@@ -741,6 +780,7 @@ def detect_cluster_cells(
     y_tgt:str=None,
     row_name_tgt:str=None,
     col_name_tgt:str=None,
+    spacing:float=None,
     plot_distribution:dict=None,
     plot_cluster_points:dict=None,
     _dev:dict=None,
@@ -850,6 +890,7 @@ def detect_cluster_cells(
             pts=pts, crs=crs, sample_area_crs=sample_area_crs, r=r, c=c, agg=agg,
             x=x, y=y, row_name=row_name, col_name=col_name, sum_suffix=sum_suffix, pts_target=pts_target, x_tgt=x_tgt, y_tgt=y_tgt,
             row_name_tgt=row_name_tgt, col_name_tgt=col_name_tgt,
+            build_grid_obj=False,  # grid is built by the detect_cluster_pts call below
             proj_crs=proj_crs, silent=silent,
     )
     if centroid_dist_threshold is None:
@@ -882,6 +923,7 @@ def detect_cluster_cells(
         y_tgt=y_tgt,
         row_name_tgt=row_name_tgt,
         col_name_tgt=col_name_tgt,
+        spacing=spacing,
         include_boundary=include_boundary,
         plot_distribution=plot_distribution,
         plot_cluster_points=plot_cluster_points,
@@ -904,8 +946,11 @@ def detect_cluster_cells(
         min_cluster_share_after_centroid_dist=min_cluster_share_after_centroid_dist,
         min_cluster_share_after_convex=min_cluster_share_after_convex,
         make_convex=make_convex,
-        row_name=grid.output_row_name,
-        col_name=grid.output_col_name,
+        # Cluster on the SEARCH grid: clusters.py looks cell totals up in
+        # grid.id_to_sums, which is keyed by the search-cell ids (id_y/id_x). The
+        # output grid (out_id_*) is for display/export only.
+        row_name=row_name,
+        col_name=col_name,
         cluster_suffix=cluster_suffix,
         )
     

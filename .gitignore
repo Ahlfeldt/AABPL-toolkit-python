@@ -25,4 +25,9 @@ output_data/*
 output_gis/*
 output_maps/*
 temp/*
+perf_test
 perf_test/*
+perf_test_gen
+perf_test_gen/*
+
+Test*.ipynb

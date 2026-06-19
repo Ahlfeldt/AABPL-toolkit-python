@@ -34,14 +34,14 @@ def assign_points_to_cells(
     """
     # to do change to cut
     # for each row select relevant points, then refine selection with columns to obtain cells
-    pts[row_name] = ((pts[y]-grid.total_bounds.ymin) // grid.spacing).astype(int)
-    pts[col_name] = ((pts[x]-grid.total_bounds.xmin) // grid.spacing).astype(int)
+    pts[row_name] = ((pts[y]-grid.total_bounds.ymin) // grid._search_spacing).astype(int)
+    pts[col_name] = ((pts[x]-grid.total_bounds.xmin) // grid._search_spacing).astype(int)
     
     # nest_height = 4
     # for i in range(1,nest_height+1):
     #     for j in range(i*2):
-    #         pts[find_column_name(row_name+'_'+str(i)+'_'+str(j), pts.columns)] = ((pts[y]-grid.total_bounds.ymin+j*grid.spacing) // (i*grid.spacing)).astype(int)
-    #         pts[find_column_name(col_name+'_'+str(i)+'_'+str(j), pts.columns)] = ((pts[x]-grid.total_bounds.xmin+j*grid.spacing) // (i*grid.spacing)).astype(int)
+    #         pts[find_column_name(row_name+'_'+str(i)+'_'+str(j), pts.columns)] = ((pts[y]-grid.total_bounds.ymin+j*grid._search_spacing) // (i*grid._search_spacing)).astype(int)
+    #         pts[find_column_name(col_name+'_'+str(i)+'_'+str(j), pts.columns)] = ((pts[x]-grid.total_bounds.xmin+j*grid._search_spacing) // (i*grid._search_spacing)).astype(int)
     
     return pts[[row_name, col_name]]
 
@@ -86,8 +86,8 @@ def aggregate_point_data_to_cells(
     
     if nest_depth > 0:
         # offsets normalized to 0-1
-        offset_x = 0.5 + ((pts[x]-grid.total_bounds.xmin)%grid.spacing - grid.spacing/2) / grid.spacing
-        offset_y = 0.5 + ((pts[y]-grid.total_bounds.ymin)%grid.spacing - grid.spacing/2) / grid.spacing
+        offset_x = 0.5 + ((pts[x]-grid.total_bounds.xmin)%grid._search_spacing - grid._search_spacing/2) / grid._search_spacing
+        offset_y = 0.5 + ((pts[y]-grid.total_bounds.ymin)%grid._search_spacing - grid._search_spacing/2) / grid._search_spacing
         pts[subcell_nr] = 0
 
         # loop through nest levels starting from the broadest/most aggregate end with smallest/most narrow
@@ -126,6 +126,19 @@ def aggregate_point_data_to_cells(
     id_to_pt_ids_by_lvl = {}#{i: {} for i in range(1, nest_depth+1)}
     id_to_sums_by_lvl = {}#{i: {} for i in range(1, nest_depth+1)}
     id_to_vals_xy_by_lvl = {}#{i: {} for i in range(1, nest_depth+1)}
+
+    # Key builder for the *_by_lvl dicts: packed int64 when the integer-key codec
+    # is active (config.USE_INT_CELL_KEYS), else the original (lvl,(row,col)) tuple.
+    # The level-0 (row,col) dicts above keep tuple keys (clusters/plots/exports).
+    _codec = getattr(grid, 'cell_codec', None)
+    if _codec is not None:
+        # print("codec not none")
+        def _k(lvl, rc):
+            return int(_codec.key(lvl, rc[0], rc[1]))
+    else:
+        # print("codec none")
+        def _k(lvl, rc):
+            return (lvl, rc)
     
     # TODO: remove next line after testing
     tot = {"0":sum(pts_vals), **{i:0 for i in range(1, nest_depth+1) }}
@@ -161,9 +174,10 @@ def aggregate_point_data_to_cells(
             row_c = row + cur_quad_nr//2 * 1/(2**lvl)
             col_c = col + cur_quad_nr%2 * 1/(2**lvl)
             row_col_centroids = (row_c+2**-(lvl+1),col_c+2**-(lvl+1))
-            id_to_sums_by_lvl[(lvl,row_col_centroids)] = pts_vals[pos_min:pos_next].sum(axis=0)
-            id_to_pt_ids_by_lvl[(lvl,row_col_centroids)] = pts_ids[pos_min:pos_next]
-            id_to_vals_xy_by_lvl[(lvl,row_col_centroids)] = pts_vals_xy[pos_min:pos_next]
+            _kc = _k(lvl, row_col_centroids)
+            id_to_sums_by_lvl[_kc] = pts_vals[pos_min:pos_next].sum(axis=0)
+            id_to_pt_ids_by_lvl[_kc] = pts_ids[pos_min:pos_next]
+            id_to_vals_xy_by_lvl[_kc] = pts_vals_xy[pos_min:pos_next]
             if lvl+1 <= nest_depth:
                 nest_next_lvl(
                     pos_min=pos_min,
@@ -195,11 +209,12 @@ def aggregate_point_data_to_cells(
             # store point coords
             id_to_vals_xy[(cur_row,cur_col)] = pts_vals_xy[cur_col_i:next_col_i]
 
-            id_to_sums_by_lvl[(0,(cur_row,cur_col))] = pts_vals[cur_col_i:next_col_i].sum(axis=0)
-            # TODO the next two are not needed as no cell will be counted as ovlpd 
+            _k0 = _k(0, (cur_row, cur_col))
+            id_to_sums_by_lvl[_k0] = pts_vals[cur_col_i:next_col_i].sum(axis=0)
+            # TODO the next two are not needed as no cell will be counted as ovlpd
             # if nest_depth > 0:
-            id_to_pt_ids_by_lvl[(0,(cur_row,cur_col))] = pts_ids[cur_col_i:next_col_i]
-            id_to_vals_xy_by_lvl[(0,(cur_row,cur_col))] = pts_vals_xy[cur_col_i:next_col_i]
+            id_to_pt_ids_by_lvl[_k0] = pts_ids[cur_col_i:next_col_i]
+            id_to_vals_xy_by_lvl[_k0] = pts_vals_xy[cur_col_i:next_col_i]
             # now create subcells and aggregate data within it
             if nest_depth > 0:
                 nest_next_lvl(
@@ -211,38 +226,11 @@ def aggregate_point_data_to_cells(
             cur_col_i, cur_col = next_col_i, next_col
         #
     #
-    id_to_n_pts_by_lvl={}
-    ref_lvl = grid.ref_lvl
-    if ref_lvl < 0:
-        ref_lvl_factor = 2**abs(grid.ref_lvl)
-        id_to_pt_ids_by_ref_lvl = {}
-        id_to_n_pts_by_ref_lvl = {}
-        id_to_sums_by_ref_lvl = {}
-        id_to_pt_vals_xy_by_ref_lvl = {}
-        for ((row,col), pt_ids), sums, pt_vals_xy in zip(id_to_pt_ids.items(), id_to_sums.values(), id_to_vals_xy.values()):
-            ref_cell = (row%ref_lvl_factor, col%ref_lvl_factor)
-            if ref_cell in id_to_pt_ids_by_ref_lvl:
-                id_to_sums_by_lvl[(ref_lvl,ref_cell)] += sums
-                id_to_pt_ids_by_lvl[(ref_lvl, ref_cell)] += list(pt_ids)
-                id_to_vals_xy_by_lvl[((ref_lvl, ref_cell))] += list(pt_vals_xy)
-                id_to_n_pts_by_lvl[(ref_lvl,ref_cell)] += len(pt_ids)
-
-            else:
-                # ensure to create a copy of each data type
-                id_to_sums_by_lvl[(ref_lvl,ref_cell)] = sums*1
-                id_to_pt_ids_by_lvl[(ref_lvl,ref_cell)] = list(pt_ids)
-                id_to_n_pts_by_lvl[(ref_lvl,ref_cell)] = len(pt_ids)
-                id_to_vals_xy_by_lvl[(ref_lvl,ref_cell)] = list(pt_vals_xy)
-        
-        grid.id_to_sums_by_lvl[grid.ref_lvl] = id_to_sums_by_ref_lvl
-        grid.id_to_pt_ids_by_lvl[grid.ref_lvl] = {k:_np_array(v,int) for k,v in id_to_pt_ids_by_ref_lvl.items()}
-        grid.id_to_pt_vals_xy_by_lvl[grid.ref_lvl] = {k:_np_array(v,float) for k,v in id_to_pt_vals_xy_by_ref_lvl.items()}
-    
     # TODO dictionaries that are no longer needed
     grid.id_to_sums = id_to_sums
     grid.id_to_pt_ids = id_to_pt_ids
     grid.id_to_vals_xy = id_to_vals_xy
-
+    # print("id_to_sums_by_lvl[:10]",list(id_to_sums_by_lvl.items())[:10])
     grid.id_to_pt_ids_by_lvl = id_to_pt_ids_by_lvl
     grid.id_to_sums_by_lvl = id_to_sums_by_lvl
     grid.id_to_vals_xy_by_lvl = id_to_vals_xy_by_lvl

@@ -53,6 +53,11 @@ def illustrate_point_disk(
     pt_id = plot_kwargs.pop('pt_id')
     sums_within_disk = plot_kwargs.pop('sums_within_disk', None)
     display_cell_region_id = plot_kwargs.pop('cell_region_id', region_id)
+    # optional output path (accepts savevig / savefig / filename); popped so it
+    # does not leak into the scatter/patch kwargs below.
+    save_path = (plot_kwargs.pop('savevig', None) or plot_kwargs.pop('savefig', None)
+                 or plot_kwargs.pop('filename', None))
+    plot_kwargs.pop('nest_depth', None)
     # print("row:",pts_source.loc[pt_id])
     pt_x, pt_y = pts_source.loc[pt_id,[x,y]]
     # home_cell = grid.pt_id_to_row_col[pt_id]
@@ -69,7 +74,7 @@ def illustrate_point_disk(
     ################################################################################################################
     ax = axs#[0]
     # print("(pt_x, pt_y)",(pt_x, pt_y))
-    # print("cells", [ ((c-.5)*grid.spacing+grid.total_bounds.xmin, (row-.5)*grid.spacing+grid.total_bounds.ymin) for row,c in cells_cntd_by_pt_cell])
+    # print("cells", [ ((c-.5)*grid._search_spacing+grid.total_bounds.xmin, (row-.5)*grid._search_spacing+grid.total_bounds.ymin) for row,c in cells_cntd_by_pt_cell])
     # print(
     #     [[(grid.get_cell_centroid(row,col), color) for lvl,(row,col) in cells] for cells,color in zip(
     #     [cells_cntd_by_pt_cell, cells_cntd_by_pt_region, cells_ovlpd_by_pt_region],
@@ -87,8 +92,8 @@ def illustrate_point_disk(
         #        the stored fractional coord is also 0.5 below the true centre;
         #        adding 0.5 corrects this for all nesting levels uniformly.
         return (
-            grid.total_bounds.xmin + (col + 0.5) * grid.spacing,
-            grid.total_bounds.ymin + (row + 0.5) * grid.spacing,
+            grid.total_bounds.xmin + (col + 0.5) * grid._search_spacing,
+            grid.total_bounds.ymin + (row + 0.5) * grid._search_spacing,
         )
 
     for (lvl,(cntrd_x,cntrd_y)), color, hatch in flatten_list(
@@ -96,9 +101,9 @@ def illustrate_point_disk(
         [shared_cntd_cells, distinct_cntd_cells, shared_ovlpd_cells,distinct_ovlpd_cells],
         colors, range(4))]):
         # print("cntrd",cntrd)
-        # print("grid.spacing",grid.spacing)
-        # print("cntrd -( .5) * grid.spacing",(cntrd[0] -( .5) * grid.spacing, cntrd[1] -( .5) * grid.spacing))
-        xy = (cntrd_x-2**(-lvl-1)*grid.spacing, cntrd_y-2**(-lvl-1)*grid.spacing)
+        # print("grid._search_spacing",grid._search_spacing)
+        # print("cntrd -( .5) * grid._search_spacing",(cntrd[0] -( .5) * grid._search_spacing, cntrd[1] -( .5) * grid._search_spacing))
+        xy = (cntrd_x-2**(-lvl-1)*grid._search_spacing, cntrd_y-2**(-lvl-1)*grid._search_spacing)
         # print("+xy",xy)
         # hatches = ['*', '\\', '-', '/', '+', 'x', 'o', 'O', '.', '*']
         hatches = ['', '\\', '/', 'o', '.', 'x', '*']
@@ -107,18 +112,18 @@ def illustrate_point_disk(
         ax.add_patch(_plt_Rectangle(
             xy = xy, 
             hatch=hatches[(hatch*0+1*lvl)%len(hatches)],
-            width=2**(-lvl)*grid.spacing, height=2**(-lvl)*grid.spacing, 
+            width=2**(-lvl)*grid._search_spacing, height=2**(-lvl)*grid._search_spacing, 
             linewidth=.7, facecolor=color, edgecolor=color, alpha=0.3
         ))
         ax.add_patch(_plt_Rectangle(
             xy = xy, 
-            width=2**(-lvl)*grid.spacing, height=2**(-lvl)*grid.spacing, 
+            width=2**(-lvl)*grid._search_spacing, height=2**(-lvl)*grid._search_spacing, 
             linewidth=.7, facecolor='None', edgecolor=color, alpha=0.8
         ))
         # if lvl==1:
         #     ax.annotate(text=str((
-        #     float(round((cntrd_x-grid.total_bounds.xmin)/grid.spacing-home_cell[1],5)),
-        #     float(round((cntrd_y-grid.total_bounds.ymin)/grid.spacing-home_cell[0],5)),
+        #     float(round((cntrd_x-grid.total_bounds.xmin)/grid._search_spacing-home_cell[1],5)),
+        #     float(round((cntrd_y-grid.total_bounds.ymin)/grid._search_spacing-home_cell[0],5)),
         #     )), xy=xy, 
         #         horizontalalignment='center',
         #         backgroundcolor="#ffffff88",)
@@ -145,30 +150,32 @@ def illustrate_point_disk(
     # add_grid_cell_rectangles_by_color(
     #     [cells_cntd_by_pt_cell, cells_cntd_by_pt_region, cells_ovlpd_by_pt_region],
     #     ['blue','green', 'red'],
-    #     ax=ax, grid_spacing=grid.spacing,
-    #     x_off=grid.total_bounds.xmin+grid.spacing/2,
-    #     y_off=grid.total_bounds.ymin+grid.spacing/2,
+    #     ax=ax, grid_spacing=grid._search_spacing,
+    #     x_off=grid.total_bounds.xmin+grid._search_spacing/2,
+    #     y_off=grid.total_bounds.ymin+grid._search_spacing/2,
     # )
-    offset_region = grid.id_to_offset_regions[region_id]
-    
-    region_coords = offset_region.get_plot_coords()
-    for region_x, region_y in region_coords:
-        ax.add_patch(
-            _plt_Circle(
-                xy=(region_x*grid.spacing+hc_x, region_y*grid.spacing + hc_y), radius=r,
-                facecolor="#000000"+(str(int(60/len(region_coords))) if int(60/len(region_coords))>=10 else '0'+str(int(60/len(region_coords)))),
-                edgecolor='#0006', linewidth=0.25))
-    ax.add_patch(_plt_Polygon(
-        [(region_x*grid.spacing+hc_x, region_y*grid.spacing + hc_y) for region_x, region_y in region_coords], 
-        facecolor="#000000",))
+    # Offset-region overlay (the family of disk centres for the point's region).
+    # region_id is keyed differently from cell_region; draw it only when available.
+    offset_region = grid.id_to_offset_regions.get(region_id) if region_id is not None else None
+    if offset_region is not None:
+        region_coords = offset_region.get_plot_coords()
+        for region_x, region_y in region_coords:
+            ax.add_patch(
+                _plt_Circle(
+                    xy=(region_x*grid._search_spacing+hc_x, region_y*grid._search_spacing + hc_y), radius=r,
+                    facecolor="#000000"+(str(int(60/len(region_coords))) if int(60/len(region_coords))>=10 else '0'+str(int(60/len(region_coords)))),
+                    edgecolor='#0006', linewidth=0.25))
+        ax.add_patch(_plt_Polygon(
+            [(region_x*grid._search_spacing+hc_x, region_y*grid._search_spacing + hc_y) for region_x, region_y in region_coords],
+            facecolor="#000000",))
     ax.add_patch(_plt_Circle(xy=(pt_x, pt_y), radius=r, facecolor="#0000ff16",edgecolor='#00f',linewidth=2,))
     ax.add_patch(_plt_Circle(xy=(pt_x, pt_y), radius=r/40, alpha=0.6))
-    # ax.add_patch(create_buffered_square_patch(side_length=grid.spacing, r=r, x_off=hc_x, y_off=hc_y))
-    # ax.add_patch(create_debuffered_square_patch(side_length=grid.spacing, r=r, linewidth=2, x_off=hc_x, y_off=hc_y ))
+    # ax.add_patch(create_buffered_square_patch(side_length=grid._search_spacing, r=r, x_off=hc_x, y_off=hc_y))
+    # ax.add_patch(create_debuffered_square_patch(side_length=grid._search_spacing, r=r, linewidth=2, x_off=hc_x, y_off=hc_y ))
     
-    # ax.add_patch(create_trgl1_patch(side_length=grid.spacing/2, linewidth=2, x_off=hc_x, y_off=hc_y ))
-    # ax.add_patch(create_buffered_trgl1_patch(side_length=grid.spacing/2, linewidth=2, x_off=hc_x, y_off=hc_y ))
-    # ax.add_patch(create_debuffered_trgl1_patch(side_length=grid.spacing/2, linewidth=2, x_off=hc_x, y_off=hc_y ))
+    # ax.add_patch(create_trgl1_patch(side_length=grid._search_spacing/2, linewidth=2, x_off=hc_x, y_off=hc_y ))
+    # ax.add_patch(create_buffered_trgl1_patch(side_length=grid._search_spacing/2, linewidth=2, x_off=hc_x, y_off=hc_y ))
+    # ax.add_patch(create_debuffered_trgl1_patch(side_length=grid._search_spacing/2, linewidth=2, x_off=hc_x, y_off=hc_y ))
     # print('+++++', [(cells,color) for cells,color in zip(
     #     [cells_cntd_by_pt_cell, cells_cntd_by_pt_region, cells_ovlpd_by_pt_region],
     #     ['blue','green', 'red'])])
@@ -223,5 +230,9 @@ def illustrate_point_disk(
         pad=18,
         loc='left',
     )
+    if save_path:
+        if not str(save_path).lower().endswith(('.png', '.jpg', '.jpeg', '.pdf', '.svg')):
+            save_path = str(save_path) + '.png'
+        fig.savefig(save_path, dpi=150, bbox_inches='tight')
     #
 #

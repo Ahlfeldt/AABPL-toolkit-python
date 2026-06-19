@@ -3,6 +3,7 @@ from pandas import DataFrame as _pd_DataFrame, concat as _pd_concat
 import matplotlib.pyplot as plt
 from numpy import (array as _np_array, arange as _np_arange, linspace as _np_linspace)
 from functools import wraps
+import aabpl.config as _cfg   # leaf module (stdlib only) — safe to import here
 
 func_timer_dict = {
     'times': [],
@@ -13,6 +14,11 @@ func_timer_dict = {
 def time_func_perf(func, function_name_alias=None):
     @wraps(func)
     def wrapper(*args,**kwargs):
+        # Zero-overhead passthrough unless profiling is explicitly enabled. Some
+        # decorated functions run once per search point, so the timing/dict-append
+        # below is a real cost in the hot loop — see config.PROFILE_FUNC_TIMES.
+        if not _cfg.PROFILE_FUNC_TIMES:
+            return func(*args,**kwargs)
         start_time = process_time()
         pos = len(func_timer_dict['times'])
         func_timer_dict['times'].append({'func_name':func.__name__ if func.__name__ != '__init__' else func.__qualname__, 'start_time':start_time})

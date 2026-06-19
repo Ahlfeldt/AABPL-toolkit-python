@@ -6,7 +6,9 @@ from .region_tree import gen_weak_order_rel_to_convex_set
 from .point_grid_assignment import assign_points_to_cells, aggregate_point_data_to_cells
 from .point_region_assignment import assign_points_to_mirco_regions
 from .disk_aggregation import search_and_aggregate
+from aabpl.radius_search.old_disk_aggregation_utf8 import search_and_aggregate_old
 from aabpl.testing.test_performance import time_func_perf
+from aabpl import config as _cfg
 
 
 ################ DiskSearchSource ######################################################################################
@@ -209,14 +211,14 @@ class DiskSearch(object):
         self.cells_maybe_overlapping_a_disk, 
         self.cells_maybe_overlapping_a_trgl_disk
         ) = classify_disk_cells(
-                grid_spacing=grid.spacing,
+                grid_spacing=grid._search_spacing,
                 r=r,
                 include_boundary=include_boundary,
         )
         # hierarchically order all cells with respect to any point in triangle. 
         # Some cells are at least as far away as others 
         # e.g. (2,2) is weakly closer than (-2,-2) as any pt in triangle is P(x>=0,y>=0)
-        # e.g. (2,3) is weakly closer than (?,?) as any pt in triangle is P(x,y<=0.5*grid.spacing)
+        # e.g. (2,3) is weakly closer than (?,?) as any pt in triangle is P(x,y<=0.5*grid._search_spacing)
         triangle_1_vertices = _np_array([[0,0],[0.5,0],[0.5,0.5]])
         vertices_is_inside_triangle_1 = _np_array([True,True,False],dtype=bool)
         # TODO r,grid_spacing, include_boundary could be removed from weak_order_tree generation
@@ -226,7 +228,7 @@ class DiskSearch(object):
                 convex_set_vertices = triangle_1_vertices,
                 vertex_is_inside_convex_set = vertices_is_inside_triangle_1,
                 r=r,
-                grid_spacing=grid.spacing,
+                grid_spacing=grid._search_spacing,
                 include_boundary=include_boundary,
         )
         
@@ -400,7 +402,6 @@ class DiskSearch(object):
             plot_pt_disk:dict=None,
             silent:bool=False,
     ):
-        
         return search_and_aggregate(
             grid=self.grid,
             pts_source=self.source.pts,

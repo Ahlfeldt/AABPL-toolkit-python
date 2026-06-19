@@ -62,7 +62,8 @@ def convert_coords_to_local_crs(
     transformer = _pyproj_Transformer.from_crs(crs_from=initial_crs, crs_to=local_crs, always_xy=True)
     pts[proj_x],pts[proj_y] = transformer.transform(pts[x], pts[y])
     if initial_crs != local_crs and (silent==False or tgt_was_auto):
-        print("Reproject from " +str(initial_crs)+' to '+local_crs)
+        from aabpl.utils.progress import progress_print
+        progress_print("Reproject from " +str(initial_crs)+' to '+local_crs)
     return local_crs
 #
 

@@ -200,11 +200,11 @@ def aggregate_point_data_to_nested_cells(
     pts_df.sort_values([y_coord_name, x_coord_name], inplace=True)
 
     # . 
-    row_ids = grid.row_ids
-    col_ids = grid.col_ids
+    row_ids = grid._search_row_ids
+    col_ids = grid._search_col_ids
     # get vectors of row columns boundary values
-    y_steps=grid.y_steps
-    x_steps=grid.x_steps
+    y_steps=grid._search_y_steps
+    x_steps=grid._search_x_steps
     # store len and digits for index
     id_y_mult = grid.id_y_mult
     len_pts_df = len(pts_df)
@@ -444,7 +444,7 @@ def aggreagate_point_data_to_disks_vectorized_nested(
     
     """
     # unpack grid_data 
-    grid_spacing = grid.spacing
+    grid_spacing = grid._search_spacing
     # grid_id_to_sums = grid.id_to_sums
     pt_id_to_grid_xy = grid.pt_id_to_row_col
     region_id_to_cntd_cells = grid.search.region_id_to_cntd_cells
