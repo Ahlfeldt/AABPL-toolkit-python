@@ -19,23 +19,15 @@ os.makedirs(temp_folder, exist_ok=True)
 
 ### Import packages
 from pandas import read_csv
-from aabpl import radius_search, detect_cluster_pts, detect_cluster_cells, infer_sample_area_from_pts
+from aabpl import (
+    radius_search, radius_sum, radius_count, radius_mean,
+    detect_cluster_pts, detect_cluster_cells
+)
 
 path_to_your_csv = 'input_data/hist_New_York.txt'
 crs_of_your_csv =  "EPSG:4326"
 pts = read_csv(path_to_your_csv, sep=",", header=None)
 pts.columns = ["eid", "employment", "industry", "lat","lon","moved"]
-
-sample_area = infer_sample_area_from_pts(
-    pts=pts,
-    x='lon',
-    y='lat',
-    hull_type='concave',
-    concavity=0.2,
-    buffer=750,
-    tolerance=750,
-    plot_sample_area=True,
-)
 
 grid = detect_cluster_cells(
     pts=pts,
@@ -43,8 +35,8 @@ grid = detect_cluster_cells(
     r=750,
     c='employment', # Name of the column or list of columns for which values shall be aggregated within search radius 
     exclude_pt_itself=True, # False
-    sample_area=sample_area, # 'concave', 'convex', 'buffer', 'bounding_box', 'grid' or None
-    min_pts_to_sample_cell=0, # 1, 10
+    sample_area='buff_cells_min_pts', # 'concave', 'convex', 'buffer', 'bounding_box', 'grid' or None
+    min_pts_to_sample_cell=1, # 0, 10
     weight_valid_area=None, # 'estimate', 'precise'
     k_th_percentile=99.5,
     n_random_points=100000,
@@ -53,6 +45,7 @@ grid = detect_cluster_cells(
     centroid_dist_threshold=2500,
     border_dist_threshold=1000,
     min_cluster_share_after_contingency=0.05,
+    spacing=250, # sets the cell width and height, if None defaults to r/3 
     make_convex=True, # False
 )
 

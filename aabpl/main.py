@@ -149,7 +149,7 @@ def _validate_kwargs(
 def resolve_sample_area(
     pts:_pd_DataFrame,
     r:float,
-    sample_area='buffered_cells',
+    sample_area='buf_non_empty_cells',
     sample_area_crs=None, 
     local_crs:str=None,
     x:str='lon',
@@ -332,7 +332,8 @@ def radius_search(
         (MSE ≈ 5 % of cell area); ``'precise'`` is exact but slow. ``None`` disables weighting (default=None).
     sample_area (shapely.Polygon | shapely.MultiPolygon | str):
         Area used for valid-area weighting. Accepted string values:
-            - ``'buffered_cells'``: non-empty grid cells plus a radius-sized buffer (default)
+            - ``'buff_non_empty_cells'``: non-empty grid cells plus a radius-sized buffer (default)
+            - ``'buf_cells_min_pts'``: grid cells with at least 'min_pts_to_sample_cell' plus a radius-sized buffer (default)
             - ``'concave'``: concave hull around points
             - ``'convex'``: convex hull around points
             - ``'buffer'``: buffer around individual points (slow for large datasets)
@@ -808,14 +809,15 @@ def detect_cluster_cells(
         if set to 'estimate' or 'precise' the radius aggregate will be weighted inversely by the share of area of valid cells within search radius. 'precise' is very slow, 'estimate' has MSE of 5% of cell area. (default=None)
     sample_area (shapely.Polygon | shapely.MultiPolygon | str):
         Area used for drawing random comparison points. Accepted string values:
-            - ``'buffered_cells'``: non-empty grid cells plus a radius-sized buffer (default)
+            - ``'buff_non_empty_cells'``: non-empty grid cells plus a radius-sized buffer (default)
+            - ``'buf_cells_min_pts'``: grid cells with at least 'min_pts_to_sample_cell' plus a radius-sized buffer (default)
             - ``'concave'``: concave hull around points
             - ``'convex'``: convex hull around points
             - ``'buffer'``: buffer around individual points (slow for large datasets)
             - ``'bounding_box'``: axis-aligned bounding box
             - ``'grid'`` or ``None``: full grid extent
         Alternatively pass a Shapely geometry directly (must already be in the metric projection).
-        See ``infer_sample_area_from_pts`` for finer control (default='buffered_cells').
+        See ``infer_sample_area_from_pts`` for finer control (default='buff_non_empty_cells').
     sample_area_crs (str):
         CRS of the ``sample_area`` polygon. Ignored when ``sample_area`` is a string.
         Defaults to ``crs`` when None (default=None).

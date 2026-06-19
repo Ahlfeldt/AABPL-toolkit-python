@@ -16,5 +16,5 @@ from .utils.grid_aggregate import aggregate_to_grid
 
 __version__ = version('aabpl')
 if not getattr(_builtins, '_aabpl_imported', False):
-    print(f"aabpl v{__version__} is under active development.")
+    print(f"aabpl v{__version__}.")
     _builtins._aabpl_imported = True
