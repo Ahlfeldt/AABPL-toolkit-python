@@ -52,7 +52,10 @@ Or if you prefer alternatively import the function and testdata explicitly:
 ```python
 # imports 
 from pandas import read_csv
-from aabpl.main import radius_search, detect_cluster_pts, detect_cluster_cells
+from aabpl import (
+    radius_search, radius_sum, radius_count, radius_mean,
+    detect_cluster_pts, detect_cluster_cells
+)
 ```
 
 ### Program syntax
@@ -61,14 +64,6 @@ Explain the syntax with its arguments here
 
 ### Examples
 #### Example 1:
-```python
-### Import packages
-from pandas import read_csv
-from aabpl import (
-    radius_search, radius_sum, radius_count, radius_mean,
-    detect_cluster_pts, detect_cluster_cells
-)
-
 path_to_your_csv = 'input_data/hist_New_York.txt'
 crs_of_your_csv =  "EPSG:4326"
 pts = read_csv(path_to_your_csv, sep=",", header=None)

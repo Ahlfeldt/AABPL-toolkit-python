@@ -31,3 +31,5 @@ perf_test_gen
 perf_test_gen/*
 
 Test*.ipynb
+Test.ipynb
+README.diverged.md
