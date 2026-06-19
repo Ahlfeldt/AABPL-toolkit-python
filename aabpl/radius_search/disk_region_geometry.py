@@ -302,7 +302,7 @@ def split_regions_by_checks(
     if not plot_offset_checks is None and 'savefig' in plot_offset_checks:
         if type(plot_offset_checks['savefig'])==dict:
             plot_offset_checks['savefig'] = {}
-        savefig_kwargs = {'fname':'plots/splits_r_'+str(int(r))+"_"+str(r%1)[2:]+".png", 'dpi':100, 'bbox_inches':"tight", **plot_offset_checks['savefig']}
+        savefig_kwargs = {'fname':''+str(int(r))+"_"+str(r%1)[2:]+".png", 'dpi':100, 'bbox_inches':"tight", **plot_offset_checks['savefig']}
         fig.savefig(**savefig_kwargs)
         _plt_close(fig)
     

@@ -62,8 +62,14 @@ Explain the syntax with its arguments here
 ### Examples
 #### Example 1:
 ```python
+### Import packages
+from pandas import read_csv
+from aabpl import (
+    radius_search, radius_sum, radius_count, radius_mean,
+    detect_cluster_pts, detect_cluster_cells
+)
 
-path_to_your_csv = 'input_data/plants.txt'
+path_to_your_csv = 'input_data/hist_New_York.txt'
 crs_of_your_csv =  "EPSG:4326"
 pts = read_csv(path_to_your_csv, sep=",", header=None)
 pts.columns = ["eid", "employment", "industry", "lat","lon","moved"]
@@ -72,14 +78,20 @@ grid = detect_cluster_cells(
     pts=pts,
     crs=crs_of_your_csv,
     r=750,
-    columns=['employment'],
-    exclude_pt_itself=True,
-    distance_thresholds=2500,
-    k_th_percentiles=[99.5],
-    n_random_points=int(1e5),
-    make_convex=True,
+    c='employment', # Name of the column or list of columns for which values shall be aggregated within search radius 
+    exclude_pt_itself=True, # False
+    sample_area='buff_cells_min_pts', # 'concave', 'convex', 'buffer', 'bounding_box', 'grid' or None
+    min_pts_to_sample_cell=1, # 0, 10
+    weight_valid_area=None, # 'estimate', 'precise'
+    k_th_percentile=99.5,
+    n_random_points=100000,
     random_seed=0,
-    silent = True,
+    queen_contingency=1, # 0, 2
+    centroid_dist_threshold=2500,
+    border_dist_threshold=1000,
+    min_cluster_share_after_contingency=0.05,
+    spacing=250, # sets the cell width and height, if None defaults to r/3 
+    make_convex=True, # False
 )
 
 ## Save DataFrames with radius sums and clusters
@@ -89,24 +101,33 @@ grid = detect_cluster_cells(
 
 # save files as needed
 # save only only clusters including their geometry, aggregate values, area and id
-grid.save_cell_clusters(filename=output_gis_folder+'clusters', file_format='shp')
-grid.save_cell_clusters(filename=output_data_folder+'clusters', file_format='csv')
+df_clusters = grid.save_cell_clusters(filename=output_gis_folder+'clusters', file_format='shp')
+df_clusters = grid.save_cell_clusters(filename=output_data_folder+'clusters', file_format='csv')
 
 # save sparse grid including cells only those cells that at least contain one point
-grid.save_sparse_grid(filename=output_gis_folder+'sparse_grid', file_format='shp')
-grid.save_sparse_grid(filename=output_data_folder+'sparse_grid', file_format='csv')
+df_sparse_grid = grid.save_sparse_grid(filename=output_gis_folder+'sparse_grid', file_format='shp')
+df_sparse_grid = grid.save_sparse_grid(filename=output_data_folder+'sparse_grid', file_format='csv')
 
 # save full grid including cells that have no points in them (through many empty cells this will occuppy unecessary disk space)
-# grid.save_full_grid(filename=output_gis_folder+'full_grid', file_format='shp')
-# grid.save_full_grid(filename=output_data_folder+'full_grid', file_format='csv')
+# df_full_grid = grid.save_full_grid(filename=output_gis_folder+'full_grid', file_format='shp')
+# df_full_grid = grid.save_full_grid(filename=output_data_folder+'full_grid', file_format='csv')
 
-pts.to_csv(filename=output_data_folder+'pts_df_w_clusters.csv')
+pts.to_csv(output_data_folder+'pts_df_w_clusters.csv')
 
 # CREATE PLOTS
-grid.plot.clusters(filename=output_maps_folder+'clusters_employment_750m_995th')
-grid.plot.vars(filename=output_maps_folder+'employment_vars')
-grid.plot.cluster_pts(filename=output_maps_folder+'employment_cluster_pts')
-grid.plot.rand_dist(filename=output_maps_folder+'rand_dist_employment')
+fig = grid.plot.clusters(output_maps_folder+'clusters_employment_750m_995th')
+fig = grid.plot.vars(filename=output_maps_folder+'employment_vars')
+fig = grid.plot.cluster_pts(filename=output_maps_folder+'employment_cluster_pts')
+fig = grid.plot.rand_dist(filename=output_maps_folder+'rand_dist_employment')
+
+# Alternatively if you are only interested in calculating the sums within disk around pts you may use this
+grid = radius_sum(
+    pts=pts,
+    crs=crs_of_your_csv,
+    r=750,
+    c='employment', # Name of the column or list of columns for which values shall be aggregated within search radius 
+    exclude_pt_itself=True
+)
 
 ```
 

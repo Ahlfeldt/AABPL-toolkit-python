@@ -2,8 +2,7 @@
 # pip install ABRSQOL
 # or install it from this script:
 import subprocess, sys
-subprocess.check_call([sys.executable, "-m", "pip", "install", 'aabpl', "--upgrade"])
-
+subprocess.check_call([sys.executable, "-m", "pip", "install", "aabpl", "--upgrade", "--no-cache-dir"])
 ### set up working directory and folders
 import os
 # Create output folders if they don't exist
@@ -74,6 +73,15 @@ fig = grid.plot.clusters(output_maps_folder+'clusters_employment_750m_995th')
 fig = grid.plot.vars(filename=output_maps_folder+'employment_vars')
 fig = grid.plot.cluster_pts(filename=output_maps_folder+'employment_cluster_pts')
 fig = grid.plot.rand_dist(filename=output_maps_folder+'rand_dist_employment')
+
+# Alternatively if you are only interested in calculating the sums within disk around pts you may use this
+grid = radius_sum(
+    pts=pts,
+    crs=crs_of_your_csv,
+    r=750,
+    c='employment', # Name of the column or list of columns for which values shall be aggregated within search radius 
+    exclude_pt_itself=True
+)
 
 print("Successfully executed Example.py")
 

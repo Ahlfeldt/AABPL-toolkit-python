@@ -33,7 +33,7 @@ USE_VEC_VERTEX_CHECKS: bool = True
 # analyze_func_perf() yourself.
 # TEMPORARILY True while collecting benchmark data — set back to False after
 # testing (the production default should be False). See roadmap.md.
-PROFILE_FUNC_TIMES: bool = True
+PROFILE_FUNC_TIMES: bool = False
 
 # Note: the search loop now always uses the integer cell-key codec, the vectorized
 # group masks, and the always-on (group x candidates) overlap batch — these were
