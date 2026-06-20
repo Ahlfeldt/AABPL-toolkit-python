@@ -1,6 +1,10 @@
 import numpy as np
-from numpy import array as np_array, zeros as np_zeros, exp as np_exp
+from numpy import (
+    array as _np_array, ndarray as _np_ndarray, zeros as _np_zeros, exp as np_exp, ones as _np_ones,
+    flatnonzero as _np_flatnonzero, append as _np_append, concatenate as _np_concatenate, sum as _np_sum,
+    ceil as _np_ceil, log2 as _np_log2, full as _np_full, vstack as _np_vstack)
 from numpy.linalg import norm as np_norm
+from numpy import add as _np_add
 from aabpl.utils.misc import flatten_list
 from aabpl.utils.progress import SearchProgress
 from aabpl.illustrations.plot_disk import illustrate_point_disk
@@ -29,7 +33,7 @@ def search_and_aggregate(
     row_name='id_y',
     col_name='id_x',
     cell_region_name='cell_region',
-    sum_suffix=None,
+    suffix=None,
     exclude_pt_itself=True,
     weight_valid_area=None,
     plot_pt_disk=None,
@@ -60,6 +64,13 @@ def search_and_aggregate(
     if pts_target is None:
         pts_target = pts_source
 
+    # NOTE (future min/max/range support): this routine aggregates by SUMMING
+    # per-cell totals (sums_by_lvl) for fully-contained cells and summing matched
+    # points for overlapped cells. min/max/range are NOT additive, so they cannot
+    # reuse this path: they will need a per-cell MIN/MAX lookup (analogous to
+    # sums_by_lvl, produced by point_grid_assignment.aggregate_point_data_to_cells)
+    # combined as min-of-mins / max-of-maxes over contained cells, while overlapped
+    # cells are still reduced point-by-point. Not implemented yet — see main.py.
     codec = grid.cell_codec
     sums_by_lvl = grid.id_to_sums_by_lvl
     vals_xy_by_lvl = grid.id_to_vals_xy_by_lvl
@@ -79,7 +90,7 @@ def search_and_aggregate(
     n_cols = len(c)
     r2 = r * r
     full_disk_area = math_pi * r2
-    zero_sum = np_zeros(n_cols, dtype=int) if n_cols > 1 else 0
+    zero_sum = _np_zeros(n_cols, dtype=int) if n_cols > 1 else 0
 
     # ---- edge weighting: which level-0 cells are NOT in the sampling grid ------
     cells_rndm_sample = grid.cells_rndm_sample
@@ -114,15 +125,149 @@ def search_and_aggregate(
     # Set to True to run the optimized workflow
 
     if _cfg.USE_OPTIMIZED_METHOD:
-        # ---- Build NumPy Sparse-to-Dense Hash Structures -------------------------
-        unique_keys = np_array(sorted(sums_by_lvl.keys()), dtype=int)
+        # untested only a experimental draft. move the numba function definition outside.
+        import numpy as np
+        import numba as nb
+
+
+        @nb.njit(parallel=True, fastmath=True)
+        def numba_contain_kernel(
+            contain_starts, contain_ends, home_key, region_and_trgl, cell_changed,
+            shared_cntd_offset, cntd_offset_flat, cntd_offset_pointers,
+            hash_keys, hash_dense_indices, hash_mask, fast_sums, n_pts, n_cols
+        ):
+            sums = _np_zeros((n_pts, n_cols))
+            
+            # Vorab-Allokation eines Buffers pro Thread für n_cols > 1 Summierungen
+            # prange verteilt die Gruppen parallel auf alle CPU-Kerne
+            for idx in nb.prange(len(contain_starts)):
+                start = contain_starts[idx]
+                end = contain_ends[idx]
+                
+                hk = home_key[start]
+                reg_id = region_and_trgl[start]
+                
+                # 1. Shared Contained Summe (nur berechnen, wenn sich die Home-Zelle geändert hat)
+                shared_sum = _np_zeros(n_cols)
+                if cell_changed[start]:
+                    for o in shared_cntd_offset:
+                        abs_key = o + hk
+                        h = int(abs_key) & hash_mask
+                        while True:
+                            hk_val = hash_keys[h]
+                            if hk_val == abs_key:
+                                dense_idx = hash_dense_indices[h]
+                                shared_sum += fast_sums[dense_idx]
+                                break
+                            if hk_val == -1:
+                                break
+                            h = (h + 1) & hash_mask
+                            
+                # 2. Region-Specific Contained Summe
+                region_sum = _np_zeros(n_cols)
+                off_start, off_end = cntd_offset_pointers[reg_id]
+                for o_idx in range(off_start, off_end):
+                    abs_key = cntd_offset_flat[o_idx] + hk
+                    h = int(abs_key) & hash_mask
+                    while True:
+                        hk_val = hash_keys[h]
+                        if hk_val == abs_key:
+                            dense_idx = hash_dense_indices[h]
+                            region_sum += fast_sums[dense_idx]
+                            break
+                        if hk_val == -1:
+                            break
+                        h = (h + 1) & hash_mask
+                        
+                # Broadcast auf das Gruppen-Slice
+                total_group_sum = shared_sum + region_sum
+                for i in range(start, end):
+                    sums[i] = total_group_sum
+                    
+            return sums
+
+
+        @nb.njit(parallel=True, fastmath=True)
+        def numba_overlap_kernel(
+            point_xy, overlap_starts, overlap_ends, home_key, region_and_trgl,
+            ovlpd_offset_flat, ovlpd_offset_pointers,
+            hash_keys, hash_dense_indices, hash_mask, 
+            fast_vals_pointers, fast_vals_buffer,
+            r2, n_cols, OVERLAP_BLOCK, max_candidates, n_pts
+        ):
+            sums = _np_zeros((n_pts, n_cols))
+            
+            for idx in nb.prange(len(overlap_starts)):
+                start = overlap_starts[idx]
+                end = overlap_ends[idx]
+                
+                hk = home_key[start]
+                reg_id = region_and_trgl[start]
+                
+                # Lokaler Kandidaten-Buffer pro Thread
+                candidate_buffer = _np_zeros((max_candidates, n_cols + 2))
+                n_candidates = 0
+                
+                # 1. Kandidaten aus den überlagerten Zellen einsammeln
+                off_start, off_end = ovlpd_offset_pointers[reg_id]
+                for o_idx in range(off_start, off_end):
+                    abs_key = ovlpd_offset_flat[o_idx] + hk
+                    
+                    h = int(abs_key) & hash_mask
+                    dense_idx = -1
+                    while True:
+                        hk_val = hash_keys[h]
+                        if hk_val == abs_key:
+                            dense_idx = hash_dense_indices[h]
+                            break
+                        if hk_val == -1:
+                            break
+                        h = (h + 1) & hash_mask
+                        
+                    if dense_idx != -1:
+                        v_start, v_end = fast_vals_pointers[dense_idx]
+                        length = v_end - v_start
+                        if length > 0:
+                            candidate_buffer[n_candidates : n_candidates + length] = fast_vals_buffer[v_start:v_end]
+                            n_candidates += length
+                            
+                # 2. Distanzberechnung und Multiplikation
+                if n_candidates > 0:
+                    candidate_xy = candidate_buffer[:n_candidates, -2:]
+                    candidate_vals = candidate_buffer[:n_candidates, :-2]
+                    
+                    for block_start in range(start, end, OVERLAP_BLOCK):
+                        block_end = min(block_start + OVERLAP_BLOCK, end)
+                        block_xy = point_xy[block_start:block_end]
+                        n_block = block_end - block_start
+                        
+                        # Explizite, cache-effiziente Schleifen auf C-Ebene
+                        for b in range(n_block):
+                            p_x = block_xy[b, 0]
+                            p_y = block_xy[b, 1]
+                            
+                            for c_idx in range(n_candidates):
+                                dx = p_x - candidate_xy[c_idx, 0]
+                                dy = p_y - candidate_xy[c_idx, 1]
+                                
+                                if (dx * dx + dy * dy) <= r2:
+                                    for col in range(n_cols):
+                                        sums[block_start + b, col] += candidate_vals[c_idx, col]
+                                        
+            return sums
+
+        # ==========================================================================
+        # NUMBA OPTIMIZED DATA STRUCTURES (Replaces original USE_OPTIMIZED_METHOD)
+        # ==========================================================================
+        unique_keys = _np_array(sorted(sums_by_lvl.keys()), dtype=int)
         n_cells = len(unique_keys)
 
-        hash_table_size = int(2 ** np.ceil(np.log2(n_cells * 2))) if n_cells > 0 else 1
+        # 1. NumPy Sparse-to-Dense Hash Strukturen aufbauen
+        hash_table_size = int(2 ** _np_ceil(_np_log2(n_cells * 2))) if n_cells > 0 else 1
         hash_mask = hash_table_size - 1
 
-        hash_keys = np.full(hash_table_size, -1, dtype=int)
-        hash_dense_indices = np.full(hash_table_size, -1, dtype=int)
+        hash_keys = _np_full(hash_table_size, -1, dtype=int)
+        hash_dense_indices = _np_full(hash_table_size, -1, dtype=int)
 
         for dense_idx, k in enumerate(unique_keys):
             h = int(k) & hash_mask
@@ -131,103 +276,157 @@ def search_and_aggregate(
             hash_keys[h] = k
             hash_dense_indices[h] = dense_idx
 
-        first_sum_val = next(iter(sums_by_lvl.values())) if sums_by_lvl else 0
-        if isinstance(first_sum_val, np.ndarray):
+        first_sum_val = next(iter(sums_by_lvl.values())) if sums_by_lvl else zero_sum
+        if isinstance(first_sum_val, _np_ndarray):
             sum_shape = (n_cells, *first_sum_val.shape)
             sum_dtype = first_sum_val.dtype
         else:
-            sum_shape = (n_cells,)
-            sum_dtype = type(first_sum_val)
+            # Sicherstellen, dass fast_sums immer mindestens 2D ist für n_cols Logik
+            sum_shape = (n_cells, 1) if n_cols == 1 else (n_cells, n_cols)
+            sum_dtype = float
 
-        fast_sums = np.zeros(sum_shape, dtype=sum_dtype)
-        fast_vals_pointers = np.zeros((n_cells, 2), dtype=int)
+        fast_sums = _np_zeros(sum_shape, dtype=sum_dtype)
+        fast_vals_pointers = _np_zeros((n_cells, 2), dtype=int)
         flat_vals_list = []
 
         current_idx = 0
         for dense_idx, k in enumerate(unique_keys):
-            fast_sums[dense_idx] = sums_by_lvl[k]
+            val_entry = sums_by_lvl[k]
+            if n_cols == 1 and not hasattr(val_entry, 'shape'):
+                fast_sums[dense_idx, 0] = val_entry
+            else:
+                fast_sums[dense_idx] = val_entry
+                
             arr = vals_xy_by_lvl[k]
             n_pts_in_cell = arr.shape[0] if hasattr(arr, 'shape') else len(arr)
             flat_vals_list.append(arr)
             fast_vals_pointers[dense_idx] = [current_idx, current_idx + n_pts_in_cell]
             current_idx += n_pts_in_cell
 
-        fast_vals_buffer = np.vstack(flat_vals_list) if flat_vals_list else np.zeros((0, n_cols + 2))
+        fast_vals_buffer = _np_vstack(flat_vals_list) if flat_vals_list else _np_zeros((0, n_cols + 2))
 
-        def get_dense_indices(keys):
-            indices = np.full(len(keys), -1, dtype=int)
-            for i, k in enumerate(keys):
-                h = int(k) & hash_mask
-                while True:
-                    hk = hash_keys[h]
-                    if hk == k:
-                        indices[i] = hash_dense_indices[h]
-                        break
-                    if hk == -1:
-                        break
-                    h = (h + 1) & hash_mask
-            return indices
+        # 2. Dictionaries der Offset-Templates für Numba flachlegen (CSR-Format)
+        def flatten_offset_dict(offset_dict):
+            if not offset_dict:
+                return _np_zeros(0, dtype=int), _np_zeros((1, 2), dtype=int)
+            max_id = max(offset_dict.keys())
+            pointers = _np_zeros((max_id + 1, 2), dtype=int)
+            flat_list = []
+            curr = 0
+            for rid in range(max_id + 1):
+                if rid in offset_dict:
+                    offs = _np_array(offset_dict[rid], dtype=int)
+                    flat_list.append(offs)
+                    pointers[rid] = [curr, curr + len(offs)]
+                    curr += len(offs)
+                else:
+                    pointers[rid] = [curr, curr]
+            flat_array = _np_concatenate(flat_list) if flat_list else _np_zeros(0, dtype=int)
+            return flat_array, pointers
 
-        def covered_cell_dense_indices(offset_template, home_key):
-            abs_keys = offset_template + home_key
-            dense_idxs = get_dense_indices(abs_keys)
-            return dense_idxs[dense_idxs != -1]
+        cntd_offset_flat, cntd_offset_pointers = flatten_offset_dict(cntd_offset_by_region)
+        ovlpd_offset_flat, ovlpd_offset_pointers = flatten_offset_dict(ovlpd_offset_by_region)
 
-        def covered_cell_keys(offset_template, home_key):
-            """Non-empty grid keys covered by ``offset_template`` placed at ``home_key``."""
-            abs_keys = offset_template + home_key
-            return [int(k) for k in abs_keys if k in nonempty_cell_keys]
+        max_cells_per_region = max(len(cells) for cells in ovlpd_cells_by_cell_region.values()) if ovlpd_cells_by_cell_region else 0
+        max_candidates = sum(sorted(len(v) for v in grid.id_to_vals_xy.values())[-max_cells_per_region:]) if grid.id_to_vals_xy else 0
 
-        def sum_over_cells(cell_keys):
-            if not cell_keys:
-                return zero_sum
-            dense_idxs = get_dense_indices(np_array(cell_keys, dtype=int))
-            dense_idxs = dense_idxs[dense_idxs != -1]
-            if len(dense_idxs) == 0:
-                return zero_sum
-            if n_cols > 1:
-                return fast_sums[dense_idxs].sum(axis=0)
-            return fast_sums[dense_idxs].sum()
+        # ==========================================================================
+        # DATEN-VORBEREITUNG (SORTIERUNG & HIERARCHIE-STRUKTUREN)
+        # ==========================================================================
+        if suffix is None:
+            suffix = '_' + str(r)
+        sum_radius_names = [cname + suffix for cname in c]
+        pts_source[sum_radius_names] = 0
 
-        max_cells_per_region = max(len(cells) for cells in ovlpd_cells_by_cell_region.values())
-        max_candidates = sum(sorted(len(v) for v in grid.id_to_vals_xy.values())[-max_cells_per_region:])
-        candidate_buffer = np_zeros((max_candidates, n_cols + 2), dtype=float)
+        pts_source.sort_values([row_name, col_name, 'region_and_trgl_id'], inplace=True)
+        point_xy = pts_source[[x, y]].values
+        rows = pts_source[row_name].values.astype(int)
+        cols = pts_source[col_name].values.astype(int)
+        cell_region = pts_source[cell_region_name].values
+        region_and_trgl = pts_source['region_and_trgl_id'].values
 
-        def gather_overlap_candidates(home_key, region_id):
-            n = 0
-            dense_idxs = covered_cell_dense_indices(ovlpd_offset_by_region[region_id], home_key)
-            for idx in dense_idxs:
-                start, end = fast_vals_pointers[idx]
-                length = end - start
-                if length > 0:
-                    candidate_buffer[n:n + length] = fast_vals_buffer[start:end]
-                    n += length
-            return candidate_buffer[:n]
+        home_key = (rows * codec.scale - codec._rlo) * codec.row_stride + (cols * codec.scale - codec._clo)
+
+        cell_changed = _np_ones(n_pts, dtype=bool)
+        contain_changed = _np_ones(n_pts, dtype=bool)
+        overlap_changed = _np_ones(n_pts, dtype=bool)
+        if n_pts > 1:
+            cell_changed[1:] = home_key[1:] != home_key[:-1]
+            rt_changed = region_and_trgl[1:] != region_and_trgl[:-1]
+            contain_changed[1:] = (cell_changed[1:]
+                                | (cell_region[1:] // contain_region_mult != cell_region[:-1] // contain_region_mult)
+                                | rt_changed)
+            overlap_changed[1:] = (cell_changed[1:]
+                                | (cell_region[1:] % contain_region_mult != cell_region[:-1] % contain_region_mult)
+                                | rt_changed)
+
+        contain_starts = _np_flatnonzero(contain_changed)
+        contain_ends = _np_append(contain_starts[1:], n_pts)
+        
+        overlap_starts = _np_flatnonzero(overlap_changed)
+        overlap_ends = _np_append(overlap_starts[1:], n_pts)
+
+        # ==========================================================================
+        # NUMBA RECHeNKERN-AUSFÜHRUNG (Ersetzt die Python-Schleifen)
+        # ==========================================================================
+        # 1. Ausführen des Contain-Kerns
+        sums_within_disks = numba_contain_kernel(
+            contain_starts, contain_ends, home_key, region_and_trgl, cell_changed,
+            shared_cntd_offset, cntd_offset_flat, cntd_offset_pointers,
+            hash_keys, hash_dense_indices, hash_mask, fast_sums, n_pts, n_cols
+        )
+
+        # 2. Ausführen des Overlap-Kerns
+        sums_within_disks += numba_overlap_kernel(
+            point_xy, overlap_starts, overlap_ends, home_key, region_and_trgl,
+            ovlpd_offset_flat, ovlpd_offset_pointers,
+            hash_keys, hash_dense_indices, hash_mask, 
+            fast_vals_pointers, fast_vals_buffer,
+            r2, n_cols, OVERLAP_BLOCK, max_candidates, n_pts
+        )
+
 
     else:
         # ORIGINAL BASELINE WORKFLOW
         def covered_cell_keys(offset_template, home_key):
-            """Non-empty grid keys covered by ``offset_template`` placed at ``home_key``."""
-            abs_keys = offset_template + home_key
-            return [int(k) for k in abs_keys if k in nonempty_cell_keys]
+            # Lokale Referenzen für den schnellen LOAD_FAST Zugriff
+            _nonempty = nonempty_cell_keys
+            return [k for k in (offset_template + home_key) if k in _nonempty]
 
         def sum_over_cells(cell_keys):
+            if not cell_keys:
+                return zero_sum
+                
+            _sums = sums_by_lvl  # Lokaler Verweis für schnellen Zugriff
+            
             if n_cols > 1:
-                return np_array([sums_by_lvl[k] for k in cell_keys]).sum(axis=0) if cell_keys else zero_sum
-            return sum(sums_by_lvl[k] for k in cell_keys)
+                # np.vstack konvertiert die extrahierten Arrays hocheffizient auf C-Ebene 
+                # in eine Matrix und summiert sie entlang der Achse 0.
+                return _np_sum([_sums[k] for k in cell_keys], axis=0) if len(cell_keys) > 1 else _sums[cell_keys[0]]
+                
+            return sum(_sums[k] for k in cell_keys)
+
 
         # reusable buffer to gather a region's overlap-candidate rows ([vals..., x, y])
         max_cells_per_region = max(len(cells) for cells in ovlpd_cells_by_cell_region.values())
         max_candidates = sum(sorted(len(v) for v in grid.id_to_vals_xy.values())[-max_cells_per_region:])
-        candidate_buffer = np_zeros((max_candidates, n_cols + 2), dtype=float)
-
+        candidate_buffer = _np_zeros((max_candidates, n_cols + 2), dtype=float)
+        
         def gather_overlap_candidates(home_key, region_id):
+            _vals = vals_xy_by_lvl
+            _buffer = candidate_buffer
+            
             n = 0
             for k in covered_cell_keys(ovlpd_offset_by_region[region_id], home_key):
-                rows_xy = vals_xy_by_lvl[k]
-                candidate_buffer[n:n + len(rows_xy)] = rows_xy
-                n += len(rows_xy)
-            return candidate_buffer[:n]
+                # 1. Sicherer, einmaliger Dictionary-Lookup
+                cell_array = _vals[k]
+                length = len(cell_array)
+                
+                # 2. Direktes Slicing und Zuweisen über die lokalen Variablen
+                _buffer[n : n + length] = cell_array
+                n += length
+                
+            return _buffer[:n]
 
     # ---- valid-area term (per point; only built when weighting) ----------------
     if weight_valid_area:
@@ -262,14 +461,14 @@ def search_and_aggregate(
             def overlap_invalid_area(point_offset, point_xy, point_row, point_col, cells):
                 if not cells:
                     return 0.0
-                centroids = np_array([get_cell_centroid(int(rr), int(cc)) for rr, cc in cells])
+                centroids = _np_array([get_cell_centroid(int(rr), int(cc)) for rr, cc in cells])
                 share = 1 - 1 / (1.0 + logit_Q * np_exp(-logit_B * (np_norm(point_xy - centroids, axis=1) / r - 1)))
                 return share.sum() * grid_spacing ** 2
 
     # ---- sort points and pull the columns we loop over into arrays -------------
-    if sum_suffix is None:
-        sum_suffix = '_' + str(r)
-    sum_radius_names = [cname + sum_suffix for cname in c]
+    if suffix is None:
+        suffix = '_' + str(r)
+    sum_radius_names = [cname + suffix for cname in c]
     pts_source[sum_radius_names] = 0
     column_dtypes = pts_target[c].dtypes
 
@@ -286,9 +485,9 @@ def search_and_aggregate(
 
     # group boundaries: a new group starts wherever the relevant key changes.
     # contain/overlap groups both nest under cell groups but cross-cut each other.
-    cell_changed = np.ones(n_pts, dtype=bool)
-    contain_changed = np.ones(n_pts, dtype=bool)
-    overlap_changed = np.ones(n_pts, dtype=bool)
+    cell_changed = _np_ones(n_pts, dtype=bool)
+    contain_changed = _np_ones(n_pts, dtype=bool)
+    overlap_changed = _np_ones(n_pts, dtype=bool)
     if n_pts > 1:
         cell_changed[1:] = home_key[1:] != home_key[:-1]
         rt_changed = region_and_trgl[1:] != region_and_trgl[:-1]
@@ -299,15 +498,15 @@ def search_and_aggregate(
                                | (cell_region[1:] % contain_region_mult != cell_region[:-1] % contain_region_mult)
                                | rt_changed)
 
-    sums_within_disks = np_zeros((n_pts, n_cols))
-    invalid_area = np_zeros(n_pts) if weight_valid_area else None
+    sums_within_disks = _np_zeros((n_pts, n_cols))
+    invalid_area = _np_zeros(n_pts) if weight_valid_area else None
     progress = SearchProgress(silent=silent, n_pts=n_pts)
     progress.start()
     next_threshold = progress.next_threshold
 
     # ---- contained sums: constant within a contain group, broadcast to its slice
-    contain_starts = np.flatnonzero(contain_changed)
-    contain_ends = np.append(contain_starts[1:], n_pts)
+    contain_starts = _np_flatnonzero(contain_changed)
+    contain_ends = _np_append(contain_starts[1:], n_pts)
     cell_sum = zero_sum
     for start, end in zip(contain_starts, contain_ends):
         hk = int(home_key[start])
@@ -318,8 +517,8 @@ def search_and_aggregate(
             invalid_area[start:end] += invalid_cntd_area(cell_region[start], hk)
 
     # ---- overlap sums: one (group x candidates) distance matrix per overlap group
-    overlap_starts = np.flatnonzero(overlap_changed)
-    overlap_ends = np.append(overlap_starts[1:], n_pts)
+    overlap_starts = _np_flatnonzero(overlap_changed)
+    overlap_ends = _np_append(overlap_starts[1:], n_pts)
     for start, end in zip(overlap_starts, overlap_ends):
         hk = int(home_key[start])
         candidates = gather_overlap_candidates(hk, region_and_trgl[start])
@@ -366,9 +565,9 @@ def search_and_aggregate(
             cntd_abs = [decode(int(k)) for k in (cntd_offset_by_region[region_id] + hk)]
             ovlpd_abs = [decode(int(k)) for k in (ovlpd_offset_by_region[region_id] + hk)]
             cntd_keys = covered_cell_keys(
-                np.concatenate([shared_cntd_offset, cntd_offset_by_region[region_id]]), hk)
-            pts_xy_in_cntd = (np_array(flatten_list([vals_xy_by_lvl[k] for k in cntd_keys]))[:, -2:]
-                              if cntd_keys else np_zeros((0, 2)))
+                _np_concatenate([shared_cntd_offset, cntd_offset_by_region[region_id]]), hk)
+            pts_xy_in_cntd = (_np_array(flatten_list([vals_xy_by_lvl[k] for k in cntd_keys]))[:, -2:]
+                              if cntd_keys else _np_zeros((0, 2)))
             # The offset-region overlay needs the point's offset-region id, which is
             # keyed differently from cell_region; pass it only when it is a real key,
             # otherwise let illustrate_point_disk skip that one overlay rather than
@@ -402,14 +601,14 @@ def search_and_aggregate(
             pts_source[sum_name] = pts_source[sum_name].values - pts_source[value_col]
 
     if weight_valid_area:
-        share_name = 'valid_area_share' + sum_suffix
+        share_name = 'valid_area_share' + suffix
         pts_source[share_name] = valid_area_shares
         for sum_name in sum_radius_names:
             pts_source[sum_name] = pts_source[sum_name].values / pts_source[share_name].values
         if not silent:
             print("Appended radius sum" + ("" if n_cols <= 1 else "s") + " (r=" + str(r) + ") for "
                   + ', '.join(f"'{cname}' as '{sname}'" for cname, sname in zip(c, sum_radius_names))
-                  + " to pts DataFrame. (Sum names can be controlled by setting sum_suffix='...')")
+                  + " to pts DataFrame. (Sum names can be controlled by setting suffix='...')")
             print("Appended valid area share as '" + share_name + "' to pts DataFrame.")
 
     if not validate and not _cfg.VALIDATE:
@@ -441,7 +640,7 @@ def search_and_aggregate(
             else:
                 # Use c[0] and explicitly wrap it as a flat numpy array
                 val_scalar = float(pts_target.loc[rep_idx, c[0]])
-                own_vals = np.array([val_scalar])
+                own_vals = _np_array([val_scalar])
             
             # Ensure brute_sums and own_vals are flat shapes matching axis format
             brute_sums = brute_sums.flatten() - own_vals.flatten()
@@ -462,7 +661,7 @@ def search_and_aggregate(
         print(f"VALIDATION OK: all {len(rep_indices)} cell_region(s) correct.")
 
 
-    def plot_vars(self=grid, colnames=np_array([c, sum_radius_names]), filename='', **plot_kwargs):
+    def plot_vars(self=grid, colnames=_np_array([c, sum_radius_names]), filename='', **plot_kwargs):
         return create_plots_for_vars(grid=self, colnames=colnames, filename=filename, plot_kwargs=plot_kwargs)
     grid.plot.vars = plot_vars
 

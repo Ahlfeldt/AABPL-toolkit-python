@@ -435,7 +435,7 @@ def aggreagate_point_data_to_disks_vectorized_nested(
     row_name:str='id_y',
     col_name:str='id_x',
     cell_name:str='cell_id',
-    sum_suffix:str='_750m',
+    suffix:str='_750m',
     exclude_pt_itself:bool=True,
     reset_sum_cols_to_zero:bool=True,
     silent = False,
@@ -456,7 +456,7 @@ def aggreagate_point_data_to_disks_vectorized_nested(
     # prepare dicts for fast lookup of values for point ids
  
     # initialize columns and/or reset to zero unless specified differently
-    sum_radius_names = [(cname+sum_suffix) for cname in sum_names]
+    sum_radius_names = [(cname+suffix) for cname in sum_names]
     pts_df[[cname for cname in sum_radius_names if reset_sum_cols_to_zero or not cname in pts_df.columns]] = 0
     
     # sort according to grid cell

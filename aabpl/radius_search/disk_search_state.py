@@ -31,7 +31,7 @@ class DiskSearchBase(object):
 
 ################ DiskSearchSource ######################################################################################
 class DiskSearchSource(DiskSearchBase):
-    @time_func_perf
+    # @time_func_perf
     def __init__(
         self,
         grid,
@@ -41,7 +41,7 @@ class DiskSearchSource(DiskSearchBase):
         x:str='lon',
         row_name:str='id_y',
         col_name:str='id_x',
-        sum_suffix:str='_750m',
+        suffix:str='_750m',
     ):
         self.grid = grid 
         self.pts = pts
@@ -53,8 +53,8 @@ class DiskSearchSource(DiskSearchBase):
         self.off_x = find_column_name('offset_x', existing_columns=pts.columns)
         self.off_y = find_column_name('offset_y', existing_columns=pts.columns)
         
-        self.sum_suffix = sum_suffix
-        self.aggregate_columns = [str(column)+sum_suffix for column in c]
+        self.suffix = suffix
+        self.aggregate_columns = [str(column)+suffix for column in c]
 
     #next(('helper_col'+i for i in (['']+list(range(len(pts_target.columns))))))
 
@@ -141,7 +141,7 @@ class DiskSearchTarget(DiskSearchBase):
 
 ################ DiskSearch ######################################################################################
 class DiskSearch(object):
-    @time_func_perf
+    # @time_func_perf
     def __init__(
         self,
         grid,
@@ -296,7 +296,7 @@ class DiskSearch(object):
         x:str='lon',
         row_name:str='id_y',
         col_name:str='id_x',
-        sum_suffix:str='_750m',
+        suffix:str='_750m',
         plot_cell_reg_assign:dict=None,
         plot_offset_checks:dict=None,
         plot_offset_regions:dict=None,
@@ -320,7 +320,7 @@ class DiskSearch(object):
             x=x,
             row_name=row_name,
             col_name=col_name,
-            sum_suffix=sum_suffix,
+            suffix=suffix,
         )
         
         self.tgt_df_contains_src_df = self.check_if_tgt_df_contains_src_df(silent=silent)
@@ -393,6 +393,13 @@ class DiskSearch(object):
             self.target.aggregate_pt_data_to_cells(silent=silent,)
         #
 
+        # Snapshot the projected coords + raw value columns the lazy output grid
+        # (Grid.update_spacing) needs, so it still works after radius_search drops
+        # the temporary proj_x/proj_y columns from the user's pts during cleanup.
+        # Indexed by pts.index so out_* cell ids can be written back by label.
+        _snap_cols = [x, y] + [col for col in c if col in pts.columns]
+        self.grid._output_snapshot = pts[_snap_cols].copy()
+
     #
 
     @time_func_perf
@@ -414,7 +421,7 @@ class DiskSearch(object):
             row_name=self.source.row_name,
             col_name=self.source.col_name,
             cell_region_name=self.source.cell_region_name,
-            sum_suffix=self.source.sum_suffix,
+            suffix=self.source.suffix,
             exclude_pt_itself=self.exclude_pt_itself,
             weight_valid_area=self.weight_valid_area,
             plot_pt_disk=plot_pt_disk,

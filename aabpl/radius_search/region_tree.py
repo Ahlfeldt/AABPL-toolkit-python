@@ -60,7 +60,7 @@ def document_ancestry(
      return children
 #
 
-@time_func_perf
+# @time_func_perf
 def create_bilateral_comp_mx_smaller_than(
         sort_vars:_np_array,
 ):
@@ -265,7 +265,7 @@ class WeakOrderTree(object):
         _visualize(self.root)
     #
 
-    @time_func_perf
+    # @time_func_perf
     def add_attributes_to_tree(
         self, 
         cells,

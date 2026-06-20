@@ -579,8 +579,17 @@ class Grid(object):
         search = getattr(self, 'search', None)
         tgt = getattr(search, 'target', None) if search is not None else None
         if tgt is not None and len(getattr(tgt, 'c', [])):
-            self.aggregate_pts_to_output_cells(tgt.pts, val_cols=list(tgt.c), x=tgt.x, y=tgt.y, agg='sum')
-            self.assign_output_cell_ids(tgt.pts, x=tgt.x, y=tgt.y, row_name=tgt.row_name, col_name=tgt.col_name)
+            # Use the projected-coords snapshot taken at set_target so this works
+            # even after radius_search dropped proj_x/proj_y from the user's pts.
+            snap = getattr(self, '_output_snapshot', None)
+            out_pts = snap if snap is not None else tgt.pts
+            self.aggregate_pts_to_output_cells(out_pts, val_cols=list(tgt.c), x=tgt.x, y=tgt.y, agg='sum')
+            self.assign_output_cell_ids(out_pts, x=tgt.x, y=tgt.y, row_name=tgt.row_name, col_name=tgt.col_name)
+            # propagate the out_* cell ids back onto the user's target pts (by index)
+            if snap is not None and str(self.output_row_name).startswith('out_'):
+                for _oc in (self.output_row_name, self.output_col_name):
+                    if _oc in snap.columns:
+                        tgt.pts[_oc] = snap[_oc].reindex(tgt.pts.index)
         self._spacing_computed = True
         if not self._silent:
             from aabpl.utils.progress import progress_print
@@ -674,8 +683,8 @@ class Grid(object):
         circle_area_in_spacing_units = _pi * (r / spacing) ** 2
         totals["area_share"] = {}
         for state in ["cntd", "ovlpd"]:
-            for suffix in ["", "_weighted"]:
-                key = state + suffix
+            for sfx in ["", "_weighted"]:
+                key = state + sfx
                 totals["area_share"][key] = (
                     totals["area"][key] / circle_area_in_spacing_units
                     if circle_area_in_spacing_units > 0 else 0.0

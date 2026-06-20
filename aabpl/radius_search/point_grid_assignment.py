@@ -1,7 +1,10 @@
 from numpy import (
     array as _np_array,
     zeros as _np_zeros,
-    linspace as _np_linspace
+    linspace as _np_linspace,
+    diff as _np_diff,
+    where as _np_where,
+    searchsorted as _np_searchsorted,
 )
 from pandas import (DataFrame as _pd_DataFrame, cut as _pd_cut, concat as _pd_concat) 
 from aabpl.utils.misc import find_column_name,arr_to_tpls
@@ -20,29 +23,35 @@ def assign_points_to_cells(
     col_name:str='id_x',
     silent:bool=False,
 ) -> _pd_DataFrame:
-    """
-    # TODO Move to class and Properly describe.
-    # TODO it modifies pts AND grid?
-    Modifies input pandas.DataFrame grid and pts: 
-    sorts by 1) y coordinate and 2) by x coordinate
+    """Compute integer grid-cell indices for every point and write them into `pts`.
+
+    Each point is assigned to the search cell whose south-west corner is at
+    ``(grid.total_bounds.ymin + row * spacing, grid.total_bounds.xmin + col * spacing)``.
+    The assignment is a simple floor-division of the point's coordinate offset by
+    ``grid._search_spacing``, so it runs in O(N) with no loops.
 
     Args:
-    <y>
-    
+        grid: Grid object with attributes ``total_bounds.ymin``, ``total_bounds.xmin``,
+            and ``_search_spacing`` (cell side length in the projected CRS units).
+        pts: Point DataFrame.  Two integer columns are added **in-place**:
+            ``row_name`` (row index, north-south) and ``col_name`` (column index,
+            east-west).  Points outside the grid bounds receive negative or
+            out-of-range indices and are handled by the caller.
+        y: Column in ``pts`` holding the northing / latitude coordinate.
+        x: Column in ``pts`` holding the easting / longitude coordinate.
+        row_name: Name for the new row-index column written into ``pts``.
+        col_name: Name for the new column-index column written into ``pts``.
+        silent: Unused; reserved for future progress logging.
+
     Returns:
-    gridcell_id_name: name to be appended in pts to indicate gridcell. If False then information will not be stored in pts 
+        DataFrame slice ``pts[[row_name, col_name]]`` — the two index columns only.
+        The full ``pts`` DataFrame is also modified in-place.
     """
     # to do change to cut
     # for each row select relevant points, then refine selection with columns to obtain cells
     pts[row_name] = ((pts[y]-grid.total_bounds.ymin) // grid._search_spacing).astype(int)
     pts[col_name] = ((pts[x]-grid.total_bounds.xmin) // grid._search_spacing).astype(int)
-    
-    # nest_height = 4
-    # for i in range(1,nest_height+1):
-    #     for j in range(i*2):
-    #         pts[find_column_name(row_name+'_'+str(i)+'_'+str(j), pts.columns)] = ((pts[y]-grid.total_bounds.ymin+j*grid._search_spacing) // (i*grid._search_spacing)).astype(int)
-    #         pts[find_column_name(col_name+'_'+str(i)+'_'+str(j), pts.columns)] = ((pts[x]-grid.total_bounds.xmin+j*grid._search_spacing) // (i*grid._search_spacing)).astype(int)
-    
+        
     return pts[[row_name, col_name]]
 
 def translate_subcell_row_col_to_value(row_nr, col_nr, lvl, nest_depth):
@@ -68,11 +77,59 @@ def aggregate_point_data_to_cells(
     row_name:str='id_y',
     col_name:str='id_x',
     nest_depth:int=5,
-    nest_height:int=5,
     silent:bool=False,
 ) -> _pd_DataFrame:
-    """
-    TODO
+    """Sort points into grid cells and build per-cell (and per-quadtree-subcell) lookup dicts.
+
+    The function sorts ``pts`` by ``(row_name, col_name, subcell_nr)`` and then
+    scans the sorted array once to aggregate the value columns ``c`` for every
+    non-empty cell and every non-empty quadtree subcell up to ``nest_depth`` levels
+    deep.  All per-cell and per-subcell data are written directly onto ``grid``.
+
+    **Quadtree encoding** (``nest_depth > 0``): each cell is recursively split into
+    four quadrants (NW/NE/SW/SE) up to ``nest_depth`` times.  A scalar ``subcell_nr``
+    encodes the full path from the root: at each level *i* the two bits
+    ``(row_bit, col_bit)`` are packed as ``row_bit*2 + col_bit`` and shifted left by
+    ``2*(nest_depth - i)`` bits, then summed across levels.  Points are sorted by
+    this value so subcell ranges can be found with ``searchsorted`` rather than
+    linear scans.
+
+    Args:
+        grid: Grid object.  Must already have ``total_bounds``, ``_search_spacing``,
+            and optionally ``cell_codec`` (integer-key codec for the ``_by_lvl`` dicts).
+            Six attributes are written on return — see *Writes to grid* below.
+        pts: Point DataFrame sorted by ``(row_name, col_name)`` on entry (or any
+            order — the function re-sorts internally).  A temporary ``sc_nr`` column
+            is appended when ``nest_depth > 0``; it is **not** removed afterward.
+        c: Value columns to aggregate.  Every column must exist in ``pts``.
+        y: Northing / latitude column in ``pts``.
+        x: Easting / longitude column in ``pts``.
+        row_name: Integer row-index column (written by ``assign_points_to_cells``).
+        col_name: Integer column-index column (written by ``assign_points_to_cells``).
+        nest_depth: Number of quadtree levels below the base cell.  0 disables
+            subcell nesting entirely (no ``sc_nr`` column, no ``_by_lvl`` subcell
+            entries beyond level 0).  Higher values give finer spatial resolution
+            for the radius search at the cost of more dict entries
+            (up to ``4^1 + … + 4^nest_depth`` extra entries per non-empty cell).
+        silent: Unused; reserved for future progress logging.
+
+    Writes to grid:
+        id_to_sums        : ``{(row, col): ndarray}`` — sum of ``c`` columns over all
+                            points in the cell.  Used by ``clusters.py`` and
+                            ``grid_class.py``.
+        id_to_pt_ids      : ``{(row, col): ndarray}`` — point index array for the cell.
+                            Used by ``null_distribution.py`` and ``plot_grid.py``.
+        id_to_vals_xy     : ``{(row, col): ndarray}`` — stacked ``[c + [x, y]]`` array
+                            for the cell.  Used by ``disk_aggregation.py`` to compute
+                            candidate-count ceilings before the search loop.
+        id_to_sums_by_lvl : ``{key: ndarray}`` — same as ``id_to_sums`` at level 0,
+                            plus one entry per non-empty subcell at each deeper level.
+                            Keys are codec-packed int64 when ``grid.cell_codec`` is set,
+                            else ``(lvl, (row_centroid, col_centroid))`` tuples.
+                            The main radius-search loop in ``disk_aggregation.py`` reads
+                            this dict exclusively.
+        id_to_pt_ids_by_lvl  : same structure, stores point-index arrays.
+        id_to_vals_xy_by_lvl : same structure, stores stacked ``[c + [x, y]]`` arrays.
     """
     # what is points data initally sorted by
     # aggregate cells to super cells to save lookup time 
@@ -104,143 +161,120 @@ def aggregate_point_data_to_cells(
     pts.sort_values(cols_for_sort,inplace=True)
     
     # extract variables from dataframe for faster access speed
-    row_ids = pts[row_name].unique().tolist()
-    col_ids = pts[col_name].unique().tolist()
-    pts_rows = pts[row_name].tolist()
+    pts_rows = pts[row_name].values
     pts_cols = pts[col_name].values
-    pts_cols_list = pts[col_name].tolist()
-    pts_vals = pts[c].values #if type(c)==list and len(c)>1 else pts[c[0]].values
+    pts_vals = pts[c].values
     pts_vals_xy = pts[c+[x,y]].values
-    pts_ids = pts.index.values #tuple([int(x) for x in pts.index])
+    pts_ids = pts.index.values
     pts_subcell_nrs = pts[subcell_nr].values if nest_depth > 0 else _np_zeros(len(pts_cols))
-    n_pts, col_max = len(pts), col_ids[-1]
+    n_pts = len(pts)
 
-    # save position of first point in row
-    pos, row_id_indexes = 0, []
-    for i, row_id in enumerate(row_ids):
-        row_id_indexes.append(pos+next((idx for idx, val in enumerate(pts_rows[pos:]) if val==row_id),None))   
-        pos = row_id_indexes[i]+1 
-    
-    # output dictionarys
+    # row group boundaries: positions where row_name changes value (pts is sorted)
+    row_id_indexes = list(_np_where(_np_diff(pts_rows, prepend=pts_rows[0] - 1) != 0)[0])
+    row_ids = [int(pts_rows[i]) for i in row_id_indexes]
+
+    # output dicts
+    # NOTE (future min/max/range support): id_to_sums stores a per-cell SUM of the
+    # value columns. min/max/range are not additive — supporting them will require
+    # an analogous per-cell MIN/MAX dict here (e.g. id_to_min / id_to_max via
+    # .min(axis=0)/.max(axis=0) over each cell's points) that disk_aggregation can
+    # reduce as min-of-mins / max-of-maxes for contained cells. Not implemented yet.
     id_to_sums, id_to_pt_ids, id_to_vals_xy = {}, {}, {}
-    id_to_pt_ids_by_lvl = {}#{i: {} for i in range(1, nest_depth+1)}
-    id_to_sums_by_lvl = {}#{i: {} for i in range(1, nest_depth+1)}
-    id_to_vals_xy_by_lvl = {}#{i: {} for i in range(1, nest_depth+1)}
+    id_to_pt_ids_by_lvl = {}
+    id_to_sums_by_lvl = {}
+    id_to_vals_xy_by_lvl = {}
 
     # Key builder for the *_by_lvl dicts: packed int64 when the integer-key codec
-    # is active (config.USE_INT_CELL_KEYS), else the original (lvl,(row,col)) tuple.
+    # is active, else the original (lvl,(row,col)) tuple.
     # The level-0 (row,col) dicts above keep tuple keys (clusters/plots/exports).
     _codec = getattr(grid, 'cell_codec', None)
     if _codec is not None:
-        # print("codec not none")
         def _k(lvl, rc):
             return int(_codec.key(lvl, rc[0], rc[1]))
     else:
-        # print("codec none")
         def _k(lvl, rc):
             return (lvl, rc)
-    
-    # TODO: remove next line after testing
-    tot = {"0":sum(pts_vals), **{i:0 for i in range(1, nest_depth+1) }}
 
-    def nest_next_lvl(
-            pos_min:int,
-            pos_max:int,
-            subcell_val:int=0,
-            lvl:int=1,
-            row:int=0,
-            col:int=0,row_col=(0,0)
-        ):
+    def nest_next_lvl(pos_min_init, pos_max_init, row_init, col_init):
+        """Iterative quadtree descent: replaces recursion with an explicit stack.
+        Also replaces the inner generator scan with searchsorted — same fix as
+        the cell-boundary loop above. No behavioural change for nest_depth 0 or 1.
         """
-        function that recursively splits cell into quadrants until nest_depth is reached: 
-        2 subcell rows and 2 subcell columns and store the result of each non empty quadrant in dictionary
-        """
+        stack = [(pos_min_init, pos_max_init, 0, 1, row_init, col_init)]
+        while stack:
+            pos_min, pos_max, subcell_val, lvl, row, col = stack.pop()
+            subcell_mult = 2**((nest_depth - lvl) * 2)
+            # precompute quadrant index for every point in this slice once
+            quad_nrs = (pts_subcell_nrs[pos_min:pos_max] - subcell_val) // subcell_mult
+            cur_pos = pos_min
+            for cur_quad_nr in range(4):
+                if cur_pos >= pos_max:
+                    break
+                offset = cur_pos - pos_min
+                if quad_nrs[offset] > cur_quad_nr:
+                    continue
+                # searchsorted to find end of this quadrant — O(log n) not O(n)
+                rel = int(_np_searchsorted(quad_nrs[offset:], cur_quad_nr + 1, side='left'))
+                pos_next = cur_pos + rel
+                next_subcell_val = subcell_val + cur_quad_nr * subcell_mult
+                row_c = row + cur_quad_nr // 2 / (2**lvl)
+                col_c = col + cur_quad_nr %  2 / (2**lvl)
+                rc = (row_c + 2**-(lvl+1), col_c + 2**-(lvl+1))
+                _kc = _k(lvl, rc)
+                id_to_sums_by_lvl[_kc]    = pts_vals[cur_pos:pos_next].sum(axis=0)
+                id_to_pt_ids_by_lvl[_kc]  = pts_ids[cur_pos:pos_next]
+                id_to_vals_xy_by_lvl[_kc] = pts_vals_xy[cur_pos:pos_next]
+                if lvl + 1 <= nest_depth:
+                    stack.append((cur_pos, pos_next, next_subcell_val, lvl+1, row_c, col_c))
+                cur_pos = pos_next
 
-        subcell_mult = 2**((nest_depth-lvl)*2)
-        
-        for cur_quad_nr in range(4):
-            # 
-            if pos_min >= pos_max:
-                break
-            # if there are no points in quadrant, continue with next
-            if (pts_subcell_nrs[pos_min]-subcell_val) // subcell_mult > cur_quad_nr:
-                continue
-            # otherwise there are points in quadrant
-            # find first point not in quadrant, if none include all remaining points 
-            pos_next = next((i+pos_min for i, subcell_nr in enumerate(pts_subcell_nrs[pos_min:pos_max]) if (subcell_nr-subcell_val)//subcell_mult>cur_quad_nr), pos_max)
-            # TODO: remove next line after testing
-            
-            next_subcell_val = subcell_val + cur_quad_nr * subcell_mult
-            row_c = row + cur_quad_nr//2 * 1/(2**lvl)
-            col_c = col + cur_quad_nr%2 * 1/(2**lvl)
-            row_col_centroids = (row_c+2**-(lvl+1),col_c+2**-(lvl+1))
-            _kc = _k(lvl, row_col_centroids)
-            id_to_sums_by_lvl[_kc] = pts_vals[pos_min:pos_next].sum(axis=0)
-            id_to_pt_ids_by_lvl[_kc] = pts_ids[pos_min:pos_next]
-            id_to_vals_xy_by_lvl[_kc] = pts_vals_xy[pos_min:pos_next]
-            if lvl+1 <= nest_depth:
-                nest_next_lvl(
-                    pos_min=pos_min,
-                    pos_max=pos_next,
-                    subcell_val=next_subcell_val,
-                    lvl=lvl+1, row=row_c, col=col_c, row_col=row_col,
-                )
-            pos_min = pos_next
-        #
-    #
+    # loop over rows; use searchsorted to find column-group boundaries in O(log n)
+    row_ends = row_id_indexes[1:] + [n_pts]
+    for cur_row, cur_col_i, next_row_i in zip(row_ids, row_id_indexes, row_ends):
+        cur_col_i = int(cur_col_i)
+        next_row_i = int(next_row_i)
+        row_cols = pts_cols[cur_col_i:next_row_i]   # sorted col ids for this row
+        cur_col = int(row_cols[0])
 
-    # loop over rows
-    for cur_row, cur_col_i, next_row_i, cur_col in zip(row_ids, row_id_indexes, row_id_indexes[1:]+[n_pts], pts_cols[row_id_indexes]):
-        # somwhere np.int64 was introduced thus reapply int() type. Could be done more elagantly if source of np.int64 is identified
-        cur_row, cur_col_i, next_row_i, cur_col = int(cur_row), int(cur_col_i), int(next_row_i), int(cur_col)
-        # find next column to the right until all points from row an included in a column of the row
         while True:
-            # for points of the same row that are to the right of current column, find first and return its position and column 
-            next_col_i, next_col = next(((i+cur_col_i,c) for i,c in enumerate(pts_cols_list[cur_col_i:next_row_i]) if cur_col<c),(next_row_i,col_max+1)) 
-            # if there are no points to the right of the column break to continue with the next row
-            if cur_col_i >= next_col_i:
-                break
-            
-            # for points within resulting cell:
-            # aggregate data
-            id_to_sums[(cur_row,cur_col)] = pts_vals[cur_col_i:next_col_i].sum(axis=0)
-            # store point ids
-            id_to_pt_ids[(cur_row,cur_col)] = pts_ids[cur_col_i:next_col_i]
-            # store point coords
-            id_to_vals_xy[(cur_row,cur_col)] = pts_vals_xy[cur_col_i:next_col_i]
+            # first position in this row where col > cur_col
+            rel = int(_np_searchsorted(row_cols, cur_col, side='right'))
+            next_col_i = cur_col_i + rel
+            next_col   = int(row_cols[rel]) if rel < len(row_cols) else -1
 
-            _k0 = _k(0, (cur_row, cur_col))
-            id_to_sums_by_lvl[_k0] = pts_vals[cur_col_i:next_col_i].sum(axis=0)
-            # TODO the next two are not needed as no cell will be counted as ovlpd
-            # if nest_depth > 0:
-            id_to_pt_ids_by_lvl[_k0] = pts_ids[cur_col_i:next_col_i]
-            id_to_vals_xy_by_lvl[_k0] = pts_vals_xy[cur_col_i:next_col_i]
-            # now create subcells and aggregate data within it
+            cell_vals  = pts_vals[cur_col_i:next_col_i]
+            cell_ids   = pts_ids[cur_col_i:next_col_i]
+            cell_vxy   = pts_vals_xy[cur_col_i:next_col_i]
+            cell_sum   = cell_vals.sum(axis=0)
+
+            # level-0 cell dicts (tuple keys, used by clusters/plots/exports)
+            rc = (cur_row, cur_col)
+            id_to_sums[rc]    = cell_sum
+            id_to_pt_ids[rc]  = cell_ids
+            id_to_vals_xy[rc] = cell_vxy
+
+            # level-0 entry in the by-lvl dicts (shared arrays, no copy)
+            _k0 = _k(0, rc)
+            id_to_sums_by_lvl[_k0]    = cell_sum
+            id_to_pt_ids_by_lvl[_k0]  = cell_ids
+            id_to_vals_xy_by_lvl[_k0] = cell_vxy
+
             if nest_depth > 0:
-                nest_next_lvl(
-                    pos_min=cur_col_i,
-                    pos_max=next_col_i,
-                    subcell_val=0,
-                    lvl=1, row=cur_row-.5,col=cur_col-.5,row_col=(cur_row,cur_col)
-                )
-            cur_col_i, cur_col = next_col_i, next_col
+                nest_next_lvl(cur_col_i, next_col_i, cur_row - 0.5, cur_col - 0.5)
+
+            if next_col == -1:
+                break
+            cur_col_i = next_col_i
+            cur_col   = next_col
+            row_cols  = row_cols[rel:]   # advance the view
         #
     #
-    # TODO dictionaries that are no longer needed
-    grid.id_to_sums = id_to_sums
-    grid.id_to_pt_ids = id_to_pt_ids
-    grid.id_to_vals_xy = id_to_vals_xy
-    # print("id_to_sums_by_lvl[:10]",list(id_to_sums_by_lvl.items())[:10])
-    grid.id_to_pt_ids_by_lvl = id_to_pt_ids_by_lvl
-    grid.id_to_sums_by_lvl = id_to_sums_by_lvl
+
+    grid.id_to_sums          = id_to_sums
+    grid.id_to_pt_ids         = id_to_pt_ids
+    grid.id_to_vals_xy        = id_to_vals_xy
+    grid.id_to_pt_ids_by_lvl  = id_to_pt_ids_by_lvl
+    grid.id_to_sums_by_lvl    = id_to_sums_by_lvl
     grid.id_to_vals_xy_by_lvl = id_to_vals_xy_by_lvl
-    subsubtypes_sparse_grid = set()
-    for row_col in set(id_to_pt_ids):
-        for x in row_col:
-            subsubtypes_sparse_grid.add(type(x))
-    # TODO drop column 
-    # if nest_depth > 0:
-    #     pts.drop(columns=[subcell_nr], inplace=True)
-    
-    return 
+    return
 #

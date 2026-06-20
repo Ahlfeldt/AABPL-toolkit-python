@@ -239,7 +239,8 @@ def predict_timing(
 
     # ── Geometry (absolute seconds, uncached only, topology features only) ──
     # geo: 55 rows (R²=0.732)
-    if geometry_cached:
+    # TODO this should be removed in production.
+    if False and geometry_cached:
         geo_s = 0.0
     else:
         lv = (2.6429

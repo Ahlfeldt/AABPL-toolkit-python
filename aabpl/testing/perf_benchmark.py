@@ -230,16 +230,18 @@ def run_single_config(
             c=col,
             exclude_pt_itself=exclude_pt_itself,
             silent=silent,
-            trynew=1,
             proj_crs=local_crs,
             pts_target=pts_target,
+            agg='sum',
+            suffix="_sum",
         )
     finally:
         _cfg.FIXED_SPACING_RATIO = None
         _cfg.FIXED_NEST_DEPTH = None
     t_wall = _time.perf_counter() - t_wall_start
     geometry_cached = set(_aabpl_config.disk_region_cache.keys()) == _cache_keys_before
-
+    av_pts_per_circle = next((pts_source[col].mean() for col in pts_source.columns[::-1] if col.endswith("_sum")),-1)
+    # print("av_pts_per_circle",av_pts_per_circle)
     # -- collect timing ------------------------------------------------------
     perf = analyze_func_perf(plot=False)
     _cfg.PROFILE_FUNC_TIMES = _profile_was
@@ -276,6 +278,7 @@ def run_single_config(
             "col": col,
             "n_source": len(pts_source),
             "n_target": len(pts_grid),
+            "av_pts_per_circle":av_pts_per_circle,
             "geometry_cached": geometry_cached,
             **eff_flags,
         },
@@ -373,7 +376,6 @@ def run_optimal_config(
             c=col,
             exclude_pt_itself=True,
             silent=silent,
-            trynew=1,
             proj_crs=local_crs,
             pts_target=pts_target,
         )

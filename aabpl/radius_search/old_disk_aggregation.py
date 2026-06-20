@@ -25,7 +25,7 @@ def search_and_aggregate(
     row_name:str='id_y',
     col_name:str='id_x',
     cell_region_name:str='cell_region',
-    sum_suffix:str=None,
+    suffix:str=None,
     exclude_pt_itself:bool=True,
     weight_valid_area:str=None,
     plot_pt_disk:dict=None,
@@ -93,9 +93,9 @@ def search_and_aggregate(
             plot_pt_disk['pt_id'] = sorted([(len(pt_ids), pt_ids[0] if len(pt_ids)>0 else []) for pt_ids in grid_id_to_pt_ids_by_lvl.values()])[-1][1]
 
     ##################### set up loop ############################
-    if sum_suffix is None:
-        sum_suffix = '_'+str(r)
-    sum_radius_names = [(cname+sum_suffix) for cname in c]
+    if suffix is None:
+        suffix = '_'+str(r)
+    sum_radius_names = [(cname+suffix) for cname in c]
     pts_source[sum_radius_names] = 0
      
     all_sums_cells_cntd_by_pt_cell = _np_zeros((n_pts, len(c)))
@@ -545,13 +545,13 @@ def search_and_aggregate(
             pts_source[sum_radius_name] = pts_source[sum_radius_name].values - pts_source[_excl_cname]
     
     if weight_valid_area:
-        pts_source['valid_area_share'+sum_suffix] = valid_area_shares
+        pts_source['valid_area_share'+suffix] = valid_area_shares
         for sum_radius_name in sum_radius_names:
-            pts_source[sum_radius_name] = pts_source[sum_radius_name].values / pts_source['valid_area_share'+sum_suffix].values
+            pts_source[sum_radius_name] = pts_source[sum_radius_name].values / pts_source['valid_area_share'+suffix].values
         if silent != True:
-            print("Appended radius sum"+("" if len(c)<=1 else "s")+" (r="+str(r)+") for " +', '.join(["'"+cname+"' as '"+sname+"'" for (cname,sname) in zip(c, sum_radius_names)])+" to pts DataFrame. (Sum names can be controlled by setting sum_suffix='...')")    
+            print("Appended radius sum"+("" if len(c)<=1 else "s")+" (r="+str(r)+") for " +', '.join(["'"+cname+"' as '"+sname+"'" for (cname,sname) in zip(c, sum_radius_names)])+" to pts DataFrame. (Sum names can be controlled by setting suffix='...')")    
             if weight_valid_area:
-                print("Appended valid area share as "+"'valid_area_share"+sum_suffix+"' to pts DataFrame.")    
+                print("Appended valid area share as "+"'valid_area_share"+suffix+"' to pts DataFrame.")    
     # ---- brute-force validation ----
     if not validate:
         return pts_source[sum_radius_names]

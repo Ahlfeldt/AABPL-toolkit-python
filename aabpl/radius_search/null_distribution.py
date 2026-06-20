@@ -257,7 +257,7 @@ def compute_null_distribution(
     y:str='lat',
     row_name:str='id_y',
     col_name:str='id_x',
-    sum_suffix:str='_750m',
+    suffix:str='_750m',
     random_seed:int=None,
     silent:bool=False,
 ):
@@ -308,7 +308,7 @@ def compute_null_distribution(
         y=y,
         row_name=row_name,
         col_name=col_name,
-        sum_suffix=sum_suffix,
+        suffix=suffix,
         silent=True,
     )
 
@@ -326,7 +326,7 @@ def compute_null_distribution(
     
     grid.search.perform_search(silent=True,)
 
-    sum_radius_names = [(cname+sum_suffix) for cname in c]
+    sum_radius_names = [(cname+suffix) for cname in c]
     disk_sums_for_random_points = rndm_pts[sum_radius_names].values
 
     cluster_threshold_values  = [_np_percentile(disk_sums_for_random_points[:,i], k_th_percentile,axis=0) for i, k_th_percentile in enumerate(k_th_percentiles)]
