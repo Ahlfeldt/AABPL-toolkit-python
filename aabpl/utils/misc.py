@@ -195,25 +195,22 @@ class DataFrameRelation(object):
             a:_pd_DataFrame,b:_pd_DataFrame, force_same_columns:bool=False, silent:bool=False
     ) -> bool:
         """
-        returns whether `a` is equal to `b` or a subset of `b`for shared columns.
-        Args:
-        a : pandas.DataFrame
-        any DataFrame to check its relation towards `b` 
-        b : pandas.DataFrame
-        any DataFrame to check relation of `a` towards `b`
-        force_same_columns : bool
-        if True will raise an error if DataFrames don't share all columns
-        silent : bool
-        if True will surpress warning if DataFrames don't share all columns
-        
-        Returns:
-        is_contained : bool
-          True if a equals b or a is subset of b. False otherwise
+        Returns True if every row of `a` exists in `b` (on shared columns).
+
+        Fast path: identity check (`a is b`) returns True immediately.
+        Otherwise builds a set of tuples from `b` on shared columns, then
+        iterates `a` row-by-row and returns False on the first missing row.
+        O(n_b) to build the set + O(n_a) to scan, with early exit.
         """
-        is_contained = DataFrameRelation.get_bilateral_relation_type(
-            a=a,b=b,force_same_columns=force_same_columns,silent=silent
-            ) in (DataFrameRelation.EQUAL, DataFrameRelation.SUBSET)
-        return is_contained
+        if type(a) != _pd_DataFrame or type(b) != _pd_DataFrame:
+            raise TypeError("search source and target both have be of type pandas.DataFrame. Types supplied:",type(a),type(b))
+        if a is b:
+            return True
+        shared_cols = [c for c in a.columns if c in b.columns]
+        if not shared_cols:
+            return False
+        b_set = set(map(tuple, b[shared_cols].itertuples(index=False, name=None)))
+        return all(row in b_set for row in a[shared_cols].itertuples(index=False, name=None))
     #
 #
 def find_column_name(static_part:str, dynamic_part:str='', existing_columns:list=[], maxlen:int=10):

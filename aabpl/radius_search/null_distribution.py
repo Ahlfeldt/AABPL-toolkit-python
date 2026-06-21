@@ -285,7 +285,8 @@ def compute_null_distribution(
             'Values for k_th_percentile must be >0 and <100. Provided values do not fullfill that condition',
             set([k_th_percentile for k_th_percentile in k_th_percentiles if k_th_percentile >= 100 or k_th_percentile <= 0])
         )
-    grid.cells_rndm_sample = True if min_pts_to_sample_cell == 0 else set([(row,col) for (row,col),pts in grid.id_to_pt_ids.items() if len(pts)>=min_pts_to_sample_cell])
+    from aabpl.radius_search.point_grid_assignment import cell_count_iter as _cell_count_iter
+    grid.cells_rndm_sample = True if min_pts_to_sample_cell == 0 else set((row, col) for row, col, cnt in _cell_count_iter(grid) if cnt >= min_pts_to_sample_cell)
     grid.sample_area = sample_area
 
     random_point_coords = draw_random_points_in_sample_area(

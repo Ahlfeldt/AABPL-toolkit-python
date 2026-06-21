@@ -16,11 +16,11 @@ from aabpl.testing.test_performance import time_func_perf
 from matplotlib.patches import (Rectangle as _plt_Rectangle, Polygon as _plt_Polygon, Circle as _plt_Circle)
 from matplotlib.pyplot import (step, subplots as _plt_subplots, colorbar as _plt_colorbar, get_cmap as _plt_get_cmap)
 from shapely.geometry import Polygon, LineString, Point
-import inspect # remove after testing
-from random import shuffle as _random_shuffle 
+from random import shuffle as _random_shuffle
 from matplotlib.pyplot import close as _plt_close
 
 class _ArcCheckStrict:
+    """Vectorised circle membership check (strict interior: dist < r)."""
     __slots__ = ('center', 'r')
     def __init__(self, x, y, r):
         self.center = _np_array([x, y])
@@ -29,6 +29,7 @@ class _ArcCheckStrict:
         return _np_linalg_norm(pts - self.center, axis=1) < self.r
 
 class _ArcCheckBoundary:
+    """Vectorised circle membership check (closed boundary: dist <= r)."""
     __slots__ = ('center', 'r')
     def __init__(self, x, y, r):
         self.center = _np_array([x, y])
@@ -37,6 +38,7 @@ class _ArcCheckBoundary:
         return _np_linalg_norm(pts - self.center, axis=1) <= self.r
 
 class _LineCheckStrict:
+    """Vectorised axis-aligned half-plane check (strict: coord > val)."""
     __slots__ = ('col_index', 'val')
     def __init__(self, col_index, val):
         self.col_index = col_index
@@ -45,6 +47,7 @@ class _LineCheckStrict:
         return pts[:, self.col_index] > self.val
 
 class _LineCheckBoundary:
+    """Vectorised axis-aligned half-plane check (closed: coord >= val)."""
     __slots__ = ('col_index', 'val')
     def __init__(self, col_index, val):
         self.col_index = col_index
@@ -53,6 +56,7 @@ class _LineCheckBoundary:
         return pts[:, self.col_index] >= self.val
 
 class _ConstRegionCheck:
+    """Trivial check that assigns all points to the same fixed region_id."""
     __slots__ = ('region_id',)
     def __init__(self, region_id):
         self.region_id = region_id
@@ -60,6 +64,7 @@ class _ConstRegionCheck:
         return _np_zeros(len(pts), int) + self.region_id
 
 class _TreeCheck:
+    """Recursive region-tree check: delegates to eval_region_tree."""
     __slots__ = ('check_tree',)
     def __init__(self, check_tree):
         self.check_tree = check_tree
@@ -108,7 +113,7 @@ def register_arc_check(
     'overlaps' / 'contains' attributes on the Circle split_edge object.
     """
     trgl_pt = (0.25,0.125)
-    point_in_triangle1 = _np_array([(0.25,0.125)]) # TODO remove wraping list
+    point_in_triangle1 = _np_array([(0.25,0.125)])
     
     if not alw_ov:
         closest_pt = tuple([float(v) for v in get_cell_closest_point_to_point(trgl_pt, cell)])
@@ -239,11 +244,8 @@ def build_boundary_checks(
         include_boundary=include_boundary,
     )
 
-    cells_alw_only_ovlpd = []
-
     for cell, alw_ov, nev_cn in zip(cells_to_check, cells_always_ovlpd, cells_never_cntd):
         if alw_ov and nev_cn:
-            cells_alw_only_ovlpd.append(cell) # TODO this can be removed - no longer necessary to store those.
             continue  # no boundary check needed: always overlapped, never contained
         row, col = int(cell[0]), int(cell[1])
         if row == 0 and col == 0:
@@ -326,7 +328,20 @@ def classify_subcell_quadrants(
         include_boundary:bool=False,
     ):
     """
-    function that recursivey splits cell into quadrants until max nest_depth is reached or the cell/subquadrant is fully cntd or not ovlpd.
+    Recursively split a cell into quadrants and classify each as contained, overlapped, or discarded.
+
+    Starting from the unit square (in normalised r/grid_spacing coordinates), the cell
+    is divided into four quadrants at each recursion level. A quadrant is classified as:
+    - ``cntd``    — all 4 corner vertices are within the region (fully contained);
+    - ``ovlpd``   — at least one corner vertex is within the region but not all (partially
+                    overlapping); recurse deeper if ``lvl < nest_depth``, else keep as ovlpd;
+    - ``discarded`` — no corner vertices are within the region (entirely outside the disk).
+
+    Vertex containment/overlap results are cached in ``vtx_cntd`` / ``vtx_ovlpd`` dicts
+    so shared corners between adjacent quadrants are computed only once.
+
+    Returns (cntd_subcells, ovlpd_subcells, discarded_subcells) — each a list of
+    (level, (row_centroid, col_centroid)) tuples.
     """
     quarterstep = 2**(-lvl-1)
     halfstep = 2**(-lvl)
@@ -2163,6 +2178,16 @@ def build_check_index(
 
 _REGION_AND_TRGL_MULT = 10  # triangles 1..8; multiplier must exceed max triangle index (8)
 
+def _cells_to_arr(cells):
+    """Convert an iterable of (lvl, (row, col)) tuples to a float32 (N,3) array."""
+    cells = list(cells)
+    if not cells:
+        import numpy as _np_local
+        return _np_local.empty((0, 3), dtype=_np_local.float32)
+    import numpy as _np_local
+    return _np_local.array([[lvl, r, c] for lvl, (r, c) in cells], dtype=_np_local.float32)
+
+
 def build_region_cell_lookups(
         id_to_offset_regions: dict,
         shared_cntd_cells: set,
@@ -2171,53 +2196,54 @@ def build_region_cell_lookups(
     Build all region-cell lookup dicts that the radius-search loop reads at runtime.
 
     Returns a dict whose keys map directly to grid.search attributes:
-      - region_id_to_{cntd,ovlpd,nested_cntd,nested_ovlpd,
-                       distinct_cntd,distinct_ovlpd}_cells:
-            region_id → list of (lvl, (row, col)) tuples at the base (level-0) and nested
-            sub-cell levels respectively.
-      - region_and_trgl_id_to_{nested_cntd,nested_ovlpd,
-                               distinct_cntd,distinct_ovlpd}_cells:
-            region_and_trgl_id (= region_id * 10 + triangle_nr) → list of (lvl, (row, col)).
-            For symmetry-merged regions each of the 8 triangles may have its own
-            nested cell list (stored in reg.nested_cells_by_trgl); all others share
-            the region's standard list.
+      - region_id_to_{cntd,ovlpd}_cells:
+            region_id → float32 array of shape (N, 3) with columns [lvl, row, col].
+      - region_and_trgl_id_to_{nested_cntd,distinct_cntd,distinct_ovlpd}_cells:
+            region_and_trgl_id (= region_id * 10 + triangle_nr) → float32 (N,3) array.
+      - shared_cntd_cells: float32 (N,3) array (was a set of tuples).
       - region_and_trgl_mult: the multiplier used to encode region_and_trgl_id (always 10).
-      - shared_cntd_cells: passed through unchanged so the caller only needs to store the returned dict.
+
+    Cell lists are stored as compact float32 (N,3) arrays instead of lists of Python
+    tuples to save ~94% of per-entry memory.  ``codec.offset_int`` accepts both formats.
     """
+    shared_arr = _cells_to_arr(shared_cntd_cells)
+    shared_set = shared_cntd_cells  # keep as set for the distinct-cell filter below
+
     attr = {
-        'region_id_to_cntd_cells':                 {rid: list(reg.cntd_cells)          for rid, reg in id_to_offset_regions.items()},
-        'region_id_to_ovlpd_cells':                {rid: list(reg.ovlpd_cells)         for rid, reg in id_to_offset_regions.items()},
-        'region_id_to_area':                       {rid: reg.calc_area()               for rid, reg in id_to_offset_regions.items()},
-        'shared_cntd_cells':                       shared_cntd_cells,
-        'region_and_trgl_mult':                    _REGION_AND_TRGL_MULT,
+        'region_id_to_cntd_cells':  {rid: _cells_to_arr(reg.nested_cntd_cells)  for rid, reg in id_to_offset_regions.items()},
+        'region_id_to_ovlpd_cells': {rid: _cells_to_arr(reg.nested_ovlpd_cells) for rid, reg in id_to_offset_regions.items()},
+        'region_id_to_area':        {rid: reg.calc_area()                        for rid, reg in id_to_offset_regions.items()},
+        'shared_cntd_cells':        shared_arr,
+        'region_and_trgl_mult':     _REGION_AND_TRGL_MULT,
     }
 
-    region_and_trgl_to_nested_cntd_cells:   dict = {}
-    region_and_trgl_to_distinct_cntd_cells: dict = {}
+    region_and_trgl_to_nested_cntd_cells:    dict = {}
+    region_and_trgl_to_distinct_cntd_cells:  dict = {}
     region_and_trgl_to_distinct_ovlpd_cells: dict = {}
     for reg_id, reg in id_to_offset_regions.items():
-        nc_std = list(reg.nested_cntd_cells)
-        no_std = list(reg.nested_ovlpd_cells)
-        dc_std = list(reg.distinct_cntd_cells)
-        do_std = list(reg.distinct_ovlpd_cells)
+        nc_std_arr = _cells_to_arr(reg.nested_cntd_cells)
+        no_std_arr = _cells_to_arr(reg.nested_ovlpd_cells)
+        dc_std_arr = _cells_to_arr(reg.distinct_cntd_cells)
+        do_std_arr = _cells_to_arr(reg.distinct_ovlpd_cells)
         by_trgl = getattr(reg, 'nested_cells_by_trgl', {})
         for trgl_nr in range(1, 9):
             key = reg_id * _REGION_AND_TRGL_MULT + trgl_nr
             if trgl_nr in by_trgl:
                 nc, no = by_trgl[trgl_nr]
-                region_and_trgl_to_nested_cntd_cells[key]   = list(nc)
-
-                region_and_trgl_to_distinct_cntd_cells[key] = [(lvl, (r, c)) for lvl, (r, c) in nc if (lvl, (r, c)) not in shared_cntd_cells]
-                region_and_trgl_to_distinct_ovlpd_cells[key] = list(no)
+                nc_list = list(nc)
+                region_and_trgl_to_nested_cntd_cells[key]    = _cells_to_arr(nc_list)
+                region_and_trgl_to_distinct_cntd_cells[key]  = _cells_to_arr(
+                    [(lvl, (r, c)) for lvl, (r, c) in nc_list if (lvl, (r, c)) not in shared_set]
+                )
+                region_and_trgl_to_distinct_ovlpd_cells[key] = _cells_to_arr(no)
             else:
-                region_and_trgl_to_nested_cntd_cells[key]   = nc_std
+                region_and_trgl_to_nested_cntd_cells[key]    = nc_std_arr
+                region_and_trgl_to_distinct_cntd_cells[key]  = dc_std_arr
+                region_and_trgl_to_distinct_ovlpd_cells[key] = do_std_arr
 
-                region_and_trgl_to_distinct_cntd_cells[key] = dc_std
-                region_and_trgl_to_distinct_ovlpd_cells[key] = do_std
-
-    attr['region_and_trgl_id_to_nested_cntd_cells']   = region_and_trgl_to_nested_cntd_cells
-    attr['region_and_trgl_id_to_distinct_cntd_cells'] = region_and_trgl_to_distinct_cntd_cells
-    attr['region_and_trgl_id_to_distinct_ovlpd_cells']= region_and_trgl_to_distinct_ovlpd_cells
+    attr['region_and_trgl_id_to_nested_cntd_cells']    = region_and_trgl_to_nested_cntd_cells
+    attr['region_and_trgl_id_to_distinct_cntd_cells']  = region_and_trgl_to_distinct_cntd_cells
+    attr['region_and_trgl_id_to_distinct_ovlpd_cells'] = region_and_trgl_to_distinct_ovlpd_cells
     return attr
 
 

@@ -1,3 +1,4 @@
+from functools import wraps as _wraps
 from warnings import simplefilter
 from pandas.errors import PerformanceWarning as _pd_PerformanceWarning
 from pandas import DataFrame as _pd_DataFrame
@@ -24,7 +25,7 @@ def _validate_kwargs(
         sample_area_crs:str,
         r:float,
         c:list=[],
-        agg:str='sum',
+        stat:str='sum',
         x:str='lon',
         y:str='lat',
         row_name:str='id_y',
@@ -68,12 +69,8 @@ def _validate_kwargs(
         raise ValueError('`x` (x-coord column name) must be in columns of pts')
     if not y in pts.columns:
         raise ValueError('`y` (y-coord column name) must be in columns of pts')
-    if not type(suffix) is str:
-        if not suffix is None:
-            suffix = str(suffix)
-        else:
-            r_suffix = int(r) if r%1==0 or len(str(int(r))) > 5 else round(r,6-len(str(int(r))))
-            suffix = '_' + str(r_suffix)+'m'
+    if suffix is not None and not isinstance(suffix, (str, dict, list, tuple)):
+        suffix = str(suffix)
     if x_tgt is None:
         x_tgt = x
     if y_tgt is None:
@@ -89,7 +86,7 @@ def _validate_kwargs(
     else:
         if c is None or len(c)==0:
             print("Warning: No columns specified for aggregation - will simply count number of points within radius.")
-            agg = 'count'
+            stat = 'count'
         try:
             if any([type(column)!=str for column in c]):
                 raise TypeError
@@ -101,15 +98,25 @@ def _validate_kwargs(
         raise ValueError('`x_tgt` (x-coord column name) must be in columns of pts_target')
     if not y_tgt in pts_target.columns:
         raise ValueError('`y_tgt` (y-coord column name) must be in columns of pts_target')
+    if crs is None:
+        raise ValueError(
+            "crs is required. Pass your coordinate reference system string (e.g. crs='EPSG:4326'), "
+            "or pass crs='' to skip reprojection entirely when your coordinates are already in a "
+            "Cartesian/projected plane and r is expressed in the same units as your coordinates."
+        )
     if sample_area_crs is None:
         sample_area_crs = crs
-    if proj_crs == 'auto': 
+    if not crs:
+        # Cartesian mode: coordinates are already in the target unit system; skip all reprojection.
+        # r is interpreted directly in the same units as the x/y columns.
+        local_crs = proj_crs if proj_crs != 'auto' else None
+    elif proj_crs == 'auto':
         x_center = (min([pts[x].min(), pts_target[x_tgt].min()])+max([pts[x].max(), pts_target[x_tgt].max()]))/2
         y_center = (min([pts[y].min(), pts_target[y_tgt].min()])+max([pts[y].max(), pts_target[y_tgt].max()]))/2
         local_crs = 'EPSG:'+str(convert_wgs_to_utm(x_center, y_center))
     else:
         local_crs = proj_crs
-    if crs != local_crs:
+    if crs and crs != local_crs:
         x,y,local_crs = convert_pts_to_crs(pts=pts, x=x, y=y, initial_crs=crs, target_crs=proj_crs)
         if not same_target:
             x_tgt,y_tgt,local_crs = convert_pts_to_crs(pts=pts_target, x=x_tgt, y=y_tgt, initial_crs=crs, target_crs=proj_crs)
@@ -121,7 +128,7 @@ def _validate_kwargs(
             pts_source=pts,
             initial_crs=local_crs,
             local_crs=local_crs,
-            data_crs=crs,
+            data_crs=crs or None,
             r=r,
             x=x,
             y=y,
@@ -139,7 +146,7 @@ def _validate_kwargs(
         # throwaway build here.
         grid = None
 
-    return (pts, local_crs,  sample_area_crs, c, x, y, suffix, pts_target, x_tgt, y_tgt, row_name_tgt, col_name_tgt, grid, agg)
+    return (pts, local_crs,  sample_area_crs, c, x, y, suffix, pts_target, x_tgt, y_tgt, row_name_tgt, col_name_tgt, grid, stat)
 #
 
 
@@ -264,62 +271,31 @@ _MOMENT_AGGS = {
     'kurtosis': [2, 3, 4],
 }
 
+# Short agg abbreviations used in auto-generated column suffixes.
+_AGG_ABBR = {
+    'sum':      'sum',
+    'count':    'cnt',
+    'mean':     'avg',
+    'variance': 'var',
+    'std':      'std',
+    'cv':       'cv',
+    'skewness': 'skw',
+    'kurtosis': 'krt',
+}
 
-def radius_sum(pts, crs:str, r:float, c:list=[], suffix:str='_r_sum', **kwargs):
-    """Aggregate neighbouring points within radius r by summing each column in c.
-    Convenience wrapper for ``radius_search(..., agg='sum')``.
-    All keyword arguments are forwarded to ``radius_search``.
-    """
-    return radius_search(pts=pts, crs=crs, r=r, c=c, agg='sum', suffix=suffix, **kwargs)
+def _default_suffix(stat, r):
+    """Return the auto-generated suffix for a given stat and radius.
 
-def radius_count(pts, crs:str, r:float, c:list=[], suffix:str='_r_count', **kwargs):
-    """Count neighbouring points within radius r for each column in c.
-    Convenience wrapper for ``radius_search(..., agg='count')``.
-    All keyword arguments are forwarded to ``radius_search``.
+    Format: ``_{abbr}_{r}`` where abbr is the short stat name and r is the
+    radius formatted with up to 4 significant figures (e.g. ``_sum_2000``,
+    ``_avg_750.5``, ``_krt_1235``).
     """
-    return radius_search(pts=pts, crs=crs, r=r, c=c, agg='count', suffix=suffix, **kwargs)
+    abbr = _AGG_ABBR.get(stat, stat[:3])
+    r_str = f'{r:.4g}' if r != int(r) else str(int(r))
+    if 'e' in r_str:
+        r_str = str(int(round(r)))
+    return f'_{abbr}_{r_str}'
 
-def radius_mean(pts, crs:str, r:float, c:list=[], suffix:str='_r_mean', **kwargs):
-    """Compute the mean of neighbouring points within radius r for each column in c.
-    Convenience wrapper for ``radius_search(..., agg='mean')``.
-    All keyword arguments are forwarded to ``radius_search``.
-    """
-    return radius_search(pts=pts, crs=crs, r=r, c=c, agg='mean', suffix=suffix, **kwargs)
-
-def radius_variance(pts, crs:str, r:float, c:list=[], suffix:str='_r_variance', **kwargs):
-    """Compute the variance of neighbouring points within radius r for each column in c.
-    Convenience wrapper for ``radius_search(..., agg='variance')``.
-    All keyword arguments are forwarded to ``radius_search``.
-    """
-    return radius_search(pts=pts, crs=crs, r=r, c=c, agg='variance', suffix=suffix, **kwargs)
-
-def radius_std(pts, crs:str, r:float, c:list=[], suffix:str='_r_std', **kwargs):
-    """Compute the standard deviation of neighbouring points within radius r for each column in c.
-    Convenience wrapper for ``radius_search(..., agg='std')``.
-    All keyword arguments are forwarded to ``radius_search``.
-    """
-    return radius_search(pts=pts, crs=crs, r=r, c=c, agg='std', suffix=suffix, **kwargs)
-
-def radius_cv(pts, crs:str, r:float, c:list=[], suffix:str='_r_cv', **kwargs):
-    """Compute the coefficient of variation (std/mean) of neighbouring points within radius r.
-    Convenience wrapper for ``radius_search(..., agg='cv')``.
-    All keyword arguments are forwarded to ``radius_search``.
-    """
-    return radius_search(pts=pts, crs=crs, r=r, c=c, agg='cv', suffix=suffix, **kwargs)
-
-def radius_skewness(pts, crs:str, r:float, c:list=[], suffix:str='_r_skewness', **kwargs):
-    """Compute the skewness of neighbouring points within radius r for each column in c.
-    Convenience wrapper for ``radius_search(..., agg='skewness')``.
-    All keyword arguments are forwarded to ``radius_search``.
-    """
-    return radius_search(pts=pts, crs=crs, r=r, c=c, agg='skewness', suffix=suffix, **kwargs)
-
-def radius_kurtosis(pts, crs:str, r:float, c:list=[], suffix:str='_r_kurtosis', **kwargs):
-    """Compute the (excess) kurtosis of neighbouring points within radius r for each column in c.
-    Convenience wrapper for ``radius_search(..., agg='kurtosis')``.
-    All keyword arguments are forwarded to ``radius_search``.
-    """
-    return radius_search(pts=pts, crs=crs, r=r, c=c, agg='kurtosis', suffix=suffix, **kwargs)
 
 # TODO: min/max/range are NOT yet implemented. Unlike sum/mean/variance/skewness/
 # kurtosis they are NOT additive — they cannot be derived from radius-sums of cell
@@ -329,35 +305,36 @@ def radius_kurtosis(pts, crs:str, r:float, c:list=[], suffix:str='_r_kurtosis', 
 # cells must still be scanned point-by-point. Wrappers prepared but commented out.
 # def radius_max(pts, crs:str, r:float, c:list=[], suffix:str='_r_max', **kwargs):
 #     """Compute the max of neighbouring points within radius r for each column in c.
-#     Convenience wrapper for ``radius_search(..., agg='max')``.
+#     Convenience wrapper for ``radius_search(..., statt='max')``.
 #     """
-#     return radius_search(pts=pts, crs=crs, r=r, c=c, agg='max', suffix=suffix, **kwargs)
+#     return radius_search(pts=pts, crs=crs, r=r, c=c, statt='max', suffix=suffix, **kwargs)
 
 # def radius_min(pts, crs:str, r:float, c:list=[], suffix:str='_r_min', **kwargs):
 #     """Compute the min of neighbouring points within radius r for each column in c.
-#     Convenience wrapper for ``radius_search(..., agg='min')``.
+#     Convenience wrapper for ``radius_search(..., statt='min')``.
 #     """
-#     return radius_search(pts=pts, crs=crs, r=r, c=c, agg='min', suffix=suffix, **kwargs)
+#     return radius_search(pts=pts, crs=crs, r=r, c=c, statt='min', suffix=suffix, **kwargs)
 
 # def radius_range(pts, crs:str, r:float, c:list=[], suffix:str='_r_range', **kwargs):
 #     """Compute the range (max - min) of neighbouring points within radius r for each column in c.
-#     Convenience wrapper for ``radius_search(..., agg='range')``.
+#     Convenience wrapper for ``radius_search(..., statt='range')``.
 #     """
 #     # implement by computing both max and min in one search, then subtract.
-#     return radius_search(pts=pts, crs=crs, r=r, c=c, agg='range', suffix=suffix, **kwargs)
+#     return radius_search(pts=pts, crs=crs, r=r, c=c, statt='range', suffix=suffix, **kwargs)
 
 
 
 @time_func_perf
 def radius_search(
     pts:_pd_DataFrame,
-    crs:str,
+    crs:str,    # e.g. 'EPSG:4326'; pass '' to skip reprojection (Cartesian coords)
     r:float,
     c:list=[],
     x:str='lon',
     y:str='lat',
-    agg:str=['sum','count','mean','variance','std','cv','skewness','kurtosis'][0],
-    exclude_pt_itself:bool=True,
+    stat:str=['sum','count','mean','variance','std','cv','skewness','kurtosis'][0],
+    exclude_self:bool=True,
+    exclude_pt_itself:bool=None,
     proj_crs:str='auto',
     keep_cols:bool=False,
     overwrite:bool=False,
@@ -366,7 +343,7 @@ def radius_search(
     sample_area_crs:str=None,
     spacing:float=None,
     # include_boundary:bool=False,  # NOT YET IMPLEMENTED
-    suffix:str='_r_sum',
+    suffix=None,
     row_name:str='id_y',
     col_name:str='id_x',
     pts_target:_pd_DataFrame=None,
@@ -389,14 +366,19 @@ def radius_search(
         Note: row order of ``pts`` may change after the call.
     crs (str):
         CRS of the coordinates in ``pts``, e.g. ``'EPSG:4326'``.
+        Pass ``crs=''`` to skip reprojection entirely — use this when your
+        coordinates are already in a Cartesian/projected plane and ``r`` is in
+        the same units as ``x``/``y``.
     r (float):
-        Search radius in metres (after reprojection to a metric CRS).
+        Search radius.  In metres when reprojection is active; in the same
+        units as ``x``/``y`` when ``crs=''``.
     c (str or list):
         Column name or list of column names to aggregate within the search radius.
         If empty or None, points within the radius are counted.
         Columns must exist in ``pts`` (or in ``pts_target`` if provided).
-    exclude_pt_itself (bool):
+    exclude_self (bool):
         If True, each point's own value is subtracted from its radius aggregate (default=True).
+        Formerly ``exclude_pt_itself`` (deprecated).
     weight_valid_area (str):
         Inverse-area weighting for edge effects. ``'estimate'`` uses a fast approximation
         (MSE ≈ 5 % of cell area); ``'precise'`` is exact but slow. ``None`` disables weighting (default=None).
@@ -428,9 +410,19 @@ def radius_search(
         whose cell size is chosen automatically for speed. Per-point aggregates are exact
         regardless of this value, so a finer output grid is well-defined. When None, defaults to
         ``r/3`` (default=None).
+    stat (str or list):
+        Statistic to compute within the search radius. One of ``'sum'``, ``'count'``,
+        ``'mean'``, ``'variance'``, ``'std'``, ``'cv'``, ``'skewness'``, ``'kurtosis'``
+        (default=``'sum'``). Pass a **list** to compute multiple statistics in a single
+        search pass, e.g. ``stat=['sum', 'mean', 'variance']``. When used with
+        ``detect_cluster_pts`` / ``detect_cluster_cells`` the **first** stat in the list
+        drives cluster detection; any additional stats are appended to the output grid as
+        extra cell-level aggregates.
     suffix (str):
         Suffix appended to each column name in ``c`` to form the result column names.
-        When None, defaults to ``'_{r}m'`` (e.g. ``'_750m'`` for ``r=750``) (default=None).
+        When None (default), derived from ``stat`` and ``r``: ``_{abbr}_{r}``
+        e.g. ``employment_sum_2000``, ``employment_avg_750``, ``employment_krt_2000``.
+        When ``stat`` is a list, pass a dict ``{stat: suffix}`` for per-stat control.
     pts_target (pandas.DataFrame):
         Points to aggregate over. If None, ``pts`` is used as both source and target (default=None).
     x_tgt (str):
@@ -459,7 +451,7 @@ def radius_search(
     -------
     grid (aabpl.Grid):
         The Grid object used for the search. Aggregated values are written directly into ``pts``
-        as columns ``{c}{suffix}``. Use ``grid.plot.vars()`` to visualise results.
+        as columns ``{c}{suffix}`` (e.g. ``employment_sum_750``). Use ``grid.plot.vars()`` to visualise results.
 
     Examples:
     -------
@@ -468,17 +460,37 @@ def radius_search(
     pts = read_csv('C:/path/to/file.txt', sep=',', header=None)
     pts.columns = ["eid", "employment", "industry", "lat", "lon", "moved"]
     grid = radius_search(pts, crs="EPSG:4326", r=750, c=['employment'])
-    grid.plot.vars(filename='employment_750m')
+    # Result column: employment_sum_750
+    grid.plot.vars(filename='employment_750')
     """
+    # ---- multi-stat normalisation -------------------------------------------
+    # When stat is a list/tuple we run the search ONCE using the union of all
+    # required helper columns (the search always sums), then derive each stat's
+    # output columns from those sums in post-processing.
+    _stat_list = None       # None → single-stat path (unchanged behaviour)
+    _stat_suffixes = {}     # {stat_name: output_suffix}
+    _multi_pow_hcols = {}   # {power: [helper_col_name per orig_col]} (multi-stat only)
+    if isinstance(stat, (list, tuple)):
+        _stat_list = [str(a) for a in stat]
+        if isinstance(suffix, dict):
+            _stat_suffixes = {a: suffix.get(a, _default_suffix(a, r)) for a in _stat_list}
+        elif isinstance(suffix, (list, tuple)):
+            _stat_suffixes = dict(zip(_stat_list, suffix))
+        else:
+            _stat_suffixes = {a: _default_suffix(a, r) for a in _stat_list}
+        stat = 'sum'         # grid building and search are stat-agnostic
+        suffix = '__rs_int__'  # internal suffix dropped after post-processing
+    # -------------------------------------------------------------------------
+
     _cols_before = set(pts.columns)
     _orig_pts_target = pts_target  # capture before _validate_kwargs may set it to pts
     _cols_before_tgt = set(pts_target.columns) if pts_target is not None else None
     init_sort = find_column_name('initial_sort', existing_columns=pts.columns)
     pts[init_sort] = range(len(pts))
 
-    (pts, local_crs, sample_area_crs, c, x, y, suffix, pts_target, x_tgt, y_tgt, row_name_tgt, col_name_tgt, grid, agg
+    (pts, local_crs, sample_area_crs, c, x, y, suffix, pts_target, x_tgt, y_tgt, row_name_tgt, col_name_tgt, grid, stat
      ) = _validate_kwargs(
-            pts=pts, crs=crs, sample_area_crs=sample_area_crs, r=r, c=c, agg=agg, x=x, y=y, row_name=row_name,
+            pts=pts, crs=crs, sample_area_crs=sample_area_crs, r=r, c=c, stat=stat, x=x, y=y, row_name=row_name,
             col_name=col_name, suffix=suffix, pts_target=pts_target, x_tgt=x_tgt, y_tgt=y_tgt,
             row_name_tgt=row_name_tgt, col_name_tgt=col_name_tgt,
             output_spacing=spacing,
@@ -492,40 +504,70 @@ def radius_search(
     grid.output_row_name = row_name
     grid.output_col_name = col_name
 
+    # Resolve dynamic default suffix for the single-stat path (multi-stat already set
+    # suffix='__rs_int__' above; _validate_kwargs may have changed stat, e.g. to 'count').
+    if suffix is None:
+        suffix = _default_suffix(stat, r)
+
     # Snapshot the user's requested columns before any helper columns are appended.
     # Used to define _output_cols and to drive the moment-combine block.
     orig_cols = list(c)
 
-    if agg in _MOMENT_AGGS:
-        # variance/skewness/kurtosis are computed from raw moments: radius-sum x^p
-        # for the required powers (one helper column per original column per power)
-        # plus a count column. All helpers are dropped again after combining below.
-        # Append powers grouped (all x^2, then all x^3, ...) so the result columns
-        # have a predictable [Sum(x) | Sum(x^2) | ... | count] layout.
-        moment_powers = _MOMENT_AGGS[agg]
-        moment_helper_cols = []
-        for pw in moment_powers:
+    count_helper_col = None
+    moment_helper_cols = []
+
+    if _stat_list is not None:
+        # Multi-stat: add the union of all helpers required across every requested stat.
+        # Powers are grouped (all x^2 first, then all x^3, …) so the result-column
+        # layout mirrors the single-stat moment path and the same combine logic applies.
+        _needs_count = any(a in ['count', 'mean'] + list(_MOMENT_AGGS) for a in _stat_list)
+        _max_power = max((max(_MOMENT_AGGS[a]) for a in _stat_list if a in _MOMENT_AGGS), default=0)
+        for pw in range(2, _max_power + 1):
+            _multi_pow_hcols[pw] = []
             for colname in orig_cols:
                 hcol = find_column_name(f'{colname}pow{pw}', '_helper_col', existing_columns=pts_target.columns)
                 pts_target[hcol] = pts_target[colname].astype(float) ** pw
                 c.append(hcol)
                 moment_helper_cols.append(hcol)
-        count_helper_col = find_column_name('count', '_helper_col', existing_columns=pts_target.columns)
-        # print("count_helper_col",count_helper_col)
-        pts_target[count_helper_col] = 1
-        c.append(count_helper_col)
-    if agg in ['count', 'mean']:
-        count_helper_col = find_column_name('count', '_helper_col', existing_columns=pts_target.columns)
-        pts_target[count_helper_col] = 1
-        if agg == 'count':
-            # Only the count is needed — drop all value columns from the search.
-            # Reassign to a new local list so the caller's list is not mutated.
-            c = []
-        c.append(count_helper_col)
-    # Track the exact set of columns radius_search is supposed to produce so the
-    # cleanup filter below can simply check membership instead of guessing via
-    # prefix/suffix heuristics.
-    _output_cols = set(col + suffix for col in orig_cols)
+                _multi_pow_hcols[pw].append(hcol)
+        if _needs_count:
+            count_helper_col = find_column_name('count', '_helper_col', existing_columns=pts_target.columns)
+            pts_target[count_helper_col] = 1
+            c.append(count_helper_col)
+        # Actual output columns across all stats (used for collision check + cleanup)
+        _output_cols = set(col + _stat_suffixes[a] for a in _stat_list for col in orig_cols)
+        if not orig_cols and 'count' in _stat_list and count_helper_col:
+            _output_cols.add(count_helper_col + _stat_suffixes['count'])
+    else:
+        if stat in _MOMENT_AGGS:
+            # variance/skewness/kurtosis are computed from raw moments: radius-sum x^p
+            # for the required powers (one helper column per original column per power)
+            # plus a count column. All helpers are dropped again after combining below.
+            # Append powers grouped (all x^2, then all x^3, ...) so the result columns
+            # have a predictable [Sum(x) | Sum(x^2) | ... | count] layout.
+            moment_powers = _MOMENT_AGGS[stat]
+            for pw in moment_powers:
+                for colname in orig_cols:
+                    hcol = find_column_name(f'{colname}pow{pw}', '_helper_col', existing_columns=pts_target.columns)
+                    pts_target[hcol] = pts_target[colname].astype(float) ** pw
+                    c.append(hcol)
+                    moment_helper_cols.append(hcol)
+            count_helper_col = find_column_name('count', '_helper_col', existing_columns=pts_target.columns)
+            pts_target[count_helper_col] = 1
+            c.append(count_helper_col)
+        if stat in ['count', 'mean']:
+            count_helper_col = find_column_name('count', '_helper_col', existing_columns=pts_target.columns)
+            pts_target[count_helper_col] = 1
+            if stat == 'count':
+                # Only the count is needed — drop all value columns from the search.
+                # Reassign to a new local list so the caller's list is not mutated.
+                c = []
+            c.append(count_helper_col)
+        # Track the exact set of columns radius_search is supposed to produce so the
+        # cleanup filter below can simply check membership instead of guessing via
+        # prefix/suffix heuristics.
+        _output_cols = set(col + suffix for col in orig_cols)
+
     if not overwrite:
         _collision = _output_cols & _cols_before
         if _collision:
@@ -548,11 +590,15 @@ def radius_search(
         _prog.start()
         _prog.step("initializing")
 
+    if exclude_pt_itself is not None:
+        print("DeprecationWarning: `exclude_pt_itself` is deprecated, use `exclude_self` instead.")
+        exclude_self = exclude_pt_itself
+
     # initialize disk_search
     grid.search = DiskSearch(
         grid=grid,
         r=r,
-        exclude_pt_itself=exclude_pt_itself,
+        exclude_self=exclude_self,
         weight_valid_area=weight_valid_area,
     )
 
@@ -599,7 +645,54 @@ def radius_search(
         _prog.step("searching")
     disk_sums_for_pts = grid.search.perform_search(silent=False if silent is None else silent,plot_pt_disk=_d.get('plot_pt_disk'))
 
-    if agg in ['mean']:
+    if _stat_list is not None:
+        # Multi-stat post-processing: derive each requested stat from the internal
+        # radius sums and write results under the per-stat output suffix.
+        _int_suf = suffix  # the internal suffix used during the search
+        count_rs = count_helper_col + _int_suf if count_helper_col else None
+        _pow_block_rs = {pw: [hc + _int_suf for hc in hcs] for pw, hcs in _multi_pow_hcols.items()}
+        for _st in _stat_list:
+            _suf = _stat_suffixes[_st]
+            if _st == 'sum':
+                for col in orig_cols:
+                    pts[col + _suf] = pts[col + _int_suf]
+            elif _st == 'count':
+                for col in orig_cols:
+                    pts[col + _suf] = pts[count_rs]
+                if not orig_cols and count_helper_col:
+                    pts[count_helper_col + _suf] = pts[count_rs]
+            elif _st == 'mean':
+                n = pts[count_rs].where(pts[count_rs] > 0)
+                for col in orig_cols:
+                    pts[col + _suf] = pts[col + _int_suf] / n
+            elif _st in _MOMENT_AGGS:
+                _mpowers = _MOMENT_AGGS[_st]
+                n = pts[count_rs].where(pts[count_rs] > 0)
+                for i, col in enumerate(orig_cols):
+                    m1 = pts[col + _int_suf] / n
+                    E = {pw: pts[_pow_block_rs[pw][i]] / n for pw in _mpowers}
+                    m2 = E[2] - m1 ** 2
+                    if _st == 'variance':
+                        _result = m2
+                    elif _st == 'std':
+                        _result = m2.clip(lower=0) ** 0.5
+                    elif _st == 'cv':
+                        _result = m2.clip(lower=0) ** 0.5 / m1
+                    elif _st == 'skewness':
+                        m3 = E[3] - 3 * m1 * E[2] + 2 * m1 ** 3
+                        _result = m3 / m2 ** 1.5
+                    else:  # kurtosis
+                        m4 = E[4] - 4 * m1 * E[3] + 6 * m1 ** 2 * E[2] - 3 * m1 ** 4
+                        _result = m4 / m2 ** 2 - 3
+                    pts[col + _suf] = _result
+        # Drop all internal result columns (they carry the internal suffix)
+        pts.drop(columns=[col for col in pts.columns if col.endswith(_int_suf)], inplace=True, errors='ignore')
+        # Drop source helper columns from pts_target
+        _hcols_to_drop = moment_helper_cols + ([count_helper_col] if count_helper_col else [])
+        if _hcols_to_drop:
+            pts_target.drop(columns=_hcols_to_drop, inplace=True, errors='ignore')
+
+    if stat in ['mean']:
         n_rs = 1 # TODO for distance bands... later
         radius_count_cols = disk_sums_for_pts.columns[-n_rs:]
         radius_count_col = radius_count_cols[0] # TODO for distance bands... later
@@ -609,7 +702,7 @@ def radius_search(
                 pts.loc[n > 0, s_name] = pts.loc[n > 0, s_name] / n[n > 0]
                 pts.loc[n == 0, s_name] = _np_nan
         pts.drop(columns=[count_helper_col], inplace=True)
-    if agg in ['count']:
+    if stat in ['count']:
         # Rename the single count-result column to each user-requested col+suffix.
         # When orig_cols is non-empty, copy the count into each expected output col
         # and drop the internal name. When orig_cols is empty keep the internal col.
@@ -619,11 +712,11 @@ def radius_search(
         if orig_cols:
             pts.drop(columns=[count_result_col], inplace=True, errors='ignore')
         pts_target.drop(columns=[count_helper_col], inplace=True, errors='ignore')
-    if agg in _MOMENT_AGGS:
+    if stat in _MOMENT_AGGS:
         # result-column layout: [Sum(x) per col | Sum(x^p) per col for each power |
         # count]. Combine raw moments into the central statistic, written back into
         # each original column's slot, then drop every helper column.
-        moment_powers = _MOMENT_AGGS[agg]
+        moment_powers = _MOMENT_AGGS[stat]
         cols = list(disk_sums_for_pts.columns)
         k = len(orig_cols)
         count_col = cols[-1]
@@ -633,19 +726,19 @@ def radius_search(
             m1 = pts[cols[i]] / n                                   # E[x]
             E = {pw: pts[pow_block[pw][i]] / n for pw in moment_powers}  # E[x^p]
             m2 = E[2] - m1 ** 2                                     # variance (central 2nd moment)
-            if agg == 'variance':
-                stat = m2
-            elif agg == 'std':
-                stat = m2.clip(lower=0) ** 0.5
-            elif agg == 'cv':
-                stat = m2.clip(lower=0) ** 0.5 / m1
-            elif agg == 'skewness':
+            if stat == 'variance':
+                _result = m2
+            elif stat == 'std':
+                _result = m2.clip(lower=0) ** 0.5
+            elif stat == 'cv':
+                _result = m2.clip(lower=0) ** 0.5 / m1
+            elif stat == 'skewness':
                 m3 = E[3] - 3 * m1 * E[2] + 2 * m1 ** 3
-                stat = m3 / m2 ** 1.5
+                _result = m3 / m2 ** 1.5
             else:  # 'kurtosis' (excess: normal -> 0)
                 m4 = E[4] - 4 * m1 * E[3] + 6 * m1 ** 2 * E[2] - 3 * m1 ** 4
-                stat = m4 / m2 ** 2 - 3
-            pts[cols[i]] = stat
+                _result = m4 / m2 ** 2 - 3
+            pts[cols[i]] = _result
         # drop helper result columns (all Sum(x^p) blocks + count) ...
         pts.drop(columns=cols[k:], inplace=True)
         # ... and the source helper columns we added to pts_target
@@ -654,7 +747,7 @@ def radius_search(
     # These are NOT additive and cannot be derived from radius sums. The search
     # engine must produce a per-point radius MIN/MAX directly (see the NOTE in the
     # agg-setup block above and in disk_aggregation / point_grid_assignment). Once
-    # the engine supports an agg='min'/'max', the result column will already hold
+    # the engine supports an statt='min'/'max', the result column will already hold
     # the min/max and need no moment combine; 'range' computes both and subtracts:
     # if agg in ['min', 'max']:
     #     # result already holds the per-point radius min/max — nothing to combine.
@@ -697,14 +790,64 @@ def radius_search(
     return grid
 #
 
+@_wraps(radius_search)
+def radius_sum(pts, crs:str, r:float, c:list=[], suffix=None, **kwargs):
+    """Sum values of neighbouring points within radius r. Wraps ``radius_search(stat='sum')``.\n\n"""
+    return radius_search(pts=pts, crs=crs, r=r, c=c, stat='sum', suffix=suffix, **kwargs)
+radius_sum.__doc__ = "Sum values of neighbouring points within radius r. Wraps ``radius_search(stat='sum')``.\n\n" + (radius_search.__doc__ or "")
+
+@_wraps(radius_search)
+def radius_count(pts, crs:str, r:float, c:list=[], suffix=None, **kwargs):
+    """Count neighbouring points within radius r. Wraps ``radius_search(stat='count')``.\n\n"""
+    return radius_search(pts=pts, crs=crs, r=r, c=c, stat='count', suffix=suffix, **kwargs)
+radius_count.__doc__ = "Count neighbouring points within radius r. Wraps ``radius_search(stat='count')``.\n\n" + (radius_search.__doc__ or "")
+
+@_wraps(radius_search)
+def radius_mean(pts, crs:str, r:float, c:list=[], suffix=None, **kwargs):
+    """Mean of neighbouring point values within radius r. Wraps ``radius_search(stat='mean')``.\n\n"""
+    return radius_search(pts=pts, crs=crs, r=r, c=c, stat='mean', suffix=suffix, **kwargs)
+radius_mean.__doc__ = "Mean of neighbouring point values within radius r. Wraps ``radius_search(stat='mean')``.\n\n" + (radius_search.__doc__ or "")
+
+@_wraps(radius_search)
+def radius_variance(pts, crs:str, r:float, c:list=[], suffix=None, **kwargs):
+    """Variance of neighbouring point values within radius r. Wraps ``radius_search(stat='variance')``.\n\n"""
+    return radius_search(pts=pts, crs=crs, r=r, c=c, stat='variance', suffix=suffix, **kwargs)
+radius_variance.__doc__ = "Variance of neighbouring point values within radius r. Wraps ``radius_search(stat='variance')``.\n\n" + (radius_search.__doc__ or "")
+
+@_wraps(radius_search)
+def radius_std(pts, crs:str, r:float, c:list=[], suffix=None, **kwargs):
+    """Standard deviation of neighbouring point values within radius r. Wraps ``radius_search(stat='std')``.\n\n"""
+    return radius_search(pts=pts, crs=crs, r=r, c=c, stat='std', suffix=suffix, **kwargs)
+radius_std.__doc__ = "Standard deviation of neighbouring point values within radius r. Wraps ``radius_search(stat='std')``.\n\n" + (radius_search.__doc__ or "")
+
+@_wraps(radius_search)
+def radius_cv(pts, crs:str, r:float, c:list=[], suffix=None, **kwargs):
+    """Coefficient of variation (std/mean) of neighbouring point values within radius r. Wraps ``radius_search(stat='cv')``.\n\n"""
+    return radius_search(pts=pts, crs=crs, r=r, c=c, stat='cv', suffix=suffix, **kwargs)
+radius_cv.__doc__ = "Coefficient of variation of neighbouring point values within radius r. Wraps ``radius_search(stat='cv')``.\n\n" + (radius_search.__doc__ or "")
+
+@_wraps(radius_search)
+def radius_skewness(pts, crs:str, r:float, c:list=[], suffix=None, **kwargs):
+    """Skewness of neighbouring point values within radius r. Wraps ``radius_search(stat='skewness')``.\n\n"""
+    return radius_search(pts=pts, crs=crs, r=r, c=c, stat='skewness', suffix=suffix, **kwargs)
+radius_skewness.__doc__ = "Skewness of neighbouring point values within radius r. Wraps ``radius_search(stat='skewness')``.\n\n" + (radius_search.__doc__ or "")
+
+@_wraps(radius_search)
+def radius_kurtosis(pts, crs:str, r:float, c:list=[], suffix=None, **kwargs):
+    """Excess kurtosis of neighbouring point values within radius r. Wraps ``radius_search(stat='kurtosis')``.\n\n"""
+    return radius_search(pts=pts, crs=crs, r=r, c=c, stat='kurtosis', suffix=suffix, **kwargs)
+radius_kurtosis.__doc__ = "Excess kurtosis of neighbouring point values within radius r. Wraps ``radius_search(stat='kurtosis')``.\n\n" + (radius_search.__doc__ or "")
+
+
 @time_func_perf
 def detect_cluster_pts(
     pts:_pd_DataFrame,
     crs:str,
     r:float,
     c:list=[],
-    agg:str=['sum','count','mean','variance','std','cv','skewness','kurtosis'][0],
-    exclude_pt_itself:bool=True,
+    stat:str=['sum','count','mean','variance','std','cv','skewness','kurtosis'][0],
+    exclude_self:bool=True,
+    exclude_pt_itself:bool=None,
     sample_area='buff_cells_min_pts',
     sample_area_crs:str=None,
     min_pts_to_sample_cell:int=0,
@@ -743,9 +886,9 @@ def detect_cluster_pts(
     init_sort = find_column_name('initial_sort', existing_columns=pts.columns)
     pts[init_sort] = range(len(pts))
 
-    (pts, local_crs, sample_area_crs, c, x, y, suffix, pts_target, x_tgt, y_tgt, row_name_tgt, col_name_tgt, grid, agg
+    (pts, local_crs, sample_area_crs, c, x, y, suffix, pts_target, x_tgt, y_tgt, row_name_tgt, col_name_tgt, grid, stat
      ) = _validate_kwargs(
-            pts=pts, crs=crs, sample_area_crs=sample_area_crs, r=r, c=c, agg=agg,
+            pts=pts, crs=crs, sample_area_crs=sample_area_crs, r=r, c=c, stat=stat,
             x=x, y=y, row_name=row_name, col_name=col_name, suffix=suffix,
             pts_target=pts_target, x_tgt=x_tgt, y_tgt=y_tgt, row_name_tgt=row_name_tgt, col_name_tgt=col_name_tgt,
             output_spacing=spacing,
@@ -775,11 +918,15 @@ def detect_cluster_pts(
     _prog.start()
     _prog.step("initializing")
 
+    if exclude_pt_itself is not None:
+        print("DeprecationWarning: `exclude_pt_itself` is deprecated, use `exclude_self` instead.")
+        exclude_self = exclude_pt_itself
+
     # initialize disk_search
     grid.search = DiskSearch(
         grid,
         r=r,
-        exclude_pt_itself=exclude_pt_itself,
+        exclude_self=exclude_self,
         weight_valid_area=weight_valid_area,
     )
 
@@ -932,8 +1079,9 @@ def detect_cluster_cells(
     crs:str,
     r:float,
     c:list=[],
-    agg:str=['sum','count','mean','variance','std','cv','skewness','kurtosis'][0],
-    exclude_pt_itself:bool=True,
+    stat:str=['sum','count','mean','variance','std','cv','skewness','kurtosis'][0],
+    exclude_self:bool=True,
+    exclude_pt_itself:bool=None,
     sample_area='buff_cells_min_pts',
     sample_area_crs:str=None,
     min_pts_to_sample_cell:int=0,
@@ -1068,9 +1216,9 @@ def detect_cluster_cells(
         aggregates ``{c}{suffix}`` are appended to ``pts``.
     """
     _cols_before = set(pts.columns)
-    (pts, local_crs, sample_area_crs, c, x, y, suffix, pts_target, x_tgt, y_tgt, row_name_tgt, col_name_tgt, grid, agg
+    (pts, local_crs, sample_area_crs, c, x, y, suffix, pts_target, x_tgt, y_tgt, row_name_tgt, col_name_tgt, grid, stat
      ) = _validate_kwargs(
-            pts=pts, crs=crs, sample_area_crs=sample_area_crs, r=r, c=c, agg=agg,
+            pts=pts, crs=crs, sample_area_crs=sample_area_crs, r=r, c=c, stat=stat,
             x=x, y=y, row_name=row_name, col_name=col_name, suffix=suffix, pts_target=pts_target, x_tgt=x_tgt, y_tgt=y_tgt,
             row_name_tgt=row_name_tgt, col_name_tgt=col_name_tgt,
             build_grid_obj=False,  # grid is built by the detect_cluster_pts call below
@@ -1086,7 +1234,8 @@ def detect_cluster_cells(
         crs=local_crs,
         r=r,
         c=c,
-        agg=agg,
+        stat=stat,
+        exclude_self=exclude_self,
         exclude_pt_itself=exclude_pt_itself,
         weight_valid_area=weight_valid_area,
         sample_area=sample_area,
@@ -1162,7 +1311,8 @@ def detect_cluster_cells_from_labeled_pts(
     c:list=[],
     is_cluster_column:str='cluster',
     cluster_suffix:str='_cluster',
-    exclude_pt_itself:bool=True,
+    exclude_self:bool=True,
+    exclude_pt_itself:bool=None,
     x:str='lon',
     y:str='lat',
     row_name:str='id_y',
@@ -1209,9 +1359,9 @@ def detect_cluster_cells_from_labeled_pts(
     init_sort = find_column_name('initial_sort', existing_columns=pts.columns)
     pts[init_sort] = range(len(pts))
 
-    (pts, local_crs, sample_area_crs, c, x, y, suffix, pts_target, x_tgt, y_tgt, row_name_tgt, col_name_tgt, grid, agg
+    (pts, local_crs, sample_area_crs, c, x, y, suffix, pts_target, x_tgt, y_tgt, row_name_tgt, col_name_tgt, grid, _stat
      ) = _validate_kwargs(
-            pts=pts, crs=crs, sample_area_crs=None, r=r, c=c, agg='sum',
+            pts=pts, crs=crs, sample_area_crs=None, r=r, c=c, stat='sum',
             x=x, y=y, row_name=row_name, col_name=col_name, suffix=suffix,
             output_spacing=spacing, proj_crs=proj_crs, silent=silent,
     )
@@ -1231,7 +1381,10 @@ def detect_cluster_cells_from_labeled_pts(
 
     # Assign points to grid cells and pre-aggregate per-cell mass (used for cluster
     # totals). No radius search and no null distribution is performed.
-    grid.search = DiskSearch(grid, r=r, exclude_pt_itself=exclude_pt_itself,
+    if exclude_pt_itself is not None:
+        print("DeprecationWarning: `exclude_pt_itself` is deprecated, use `exclude_self` instead.")
+        exclude_self = exclude_pt_itself
+    grid.search = DiskSearch(grid, r=r, exclude_self=exclude_self,
                              weight_valid_area=False)
     grid.search.set_target(pts=pts_target, c=c, x=x_tgt, y=y_tgt,
                            row_name=row_name_tgt, col_name=col_name_tgt, silent=silent)

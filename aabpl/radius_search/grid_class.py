@@ -503,11 +503,11 @@ class Grid(object):
             tmp[col] = pts[col].values
 
         grp = tmp.groupby(['_row', '_col'])[val_cols]
-        if agg == 'sum':
+        if stat == 'sum':
             agg_df = grp.sum()
-        elif agg == 'mean':
+        elif stat == 'mean':
             agg_df = grp.mean()
-        elif agg == 'count':
+        elif stat == 'count':
             agg_df = grp.count()
         else:
             raise ValueError(f"agg must be 'sum', 'mean', or 'count'; got {agg!r}")
@@ -583,7 +583,7 @@ class Grid(object):
             # even after radius_search dropped proj_x/proj_y from the user's pts.
             snap = getattr(self, '_output_snapshot', None)
             out_pts = snap if snap is not None else tgt.pts
-            self.aggregate_pts_to_output_cells(out_pts, val_cols=list(tgt.c), x=tgt.x, y=tgt.y, agg='sum')
+            self.aggregate_pts_to_output_cells(out_pts, val_cols=list(tgt.c), x=tgt.x, y=tgt.y, stat='sum')
             self.assign_output_cell_ids(out_pts, x=tgt.x, y=tgt.y, row_name=tgt.row_name, col_name=tgt.col_name)
             # propagate the out_* cell ids back onto the user's target pts (by index)
             if snap is not None and str(self.output_row_name).startswith('out_'):
@@ -609,6 +609,9 @@ class Grid(object):
         """
         # Helper function to avoid redundant list comprehension syntax
         def calc_cells_area(cells):
+            import numpy as _np_local
+            if isinstance(cells, _np_local.ndarray):
+                return float(_np_local.sum(2.0 ** (-2.0 * cells[:, 0]))) if len(cells) else 0.0
             return sum(2**(-2 * lvl) for lvl, _ in cells)
 
         # 1. Base shared metrics

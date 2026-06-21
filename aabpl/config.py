@@ -62,7 +62,7 @@ PROFILE_FUNC_TIMES: bool = False
 # The real cost of deep nesting is BUILD TIME, not memory: constructing the nd=6
 # geometry once took ~97s (vs sub-second at low nd) — which is why
 # choose_nest_depth caps around 4 in practice. Hence the cache: build once, reuse.
-DISK_REGION_CACHE_MAXSIZE: int = 10
+DISK_REGION_CACHE_MAXSIZE: int = 10*5
 disk_region_cache: _OrderedDict = _OrderedDict()
 
 # ---------------------------------------------------------------------------

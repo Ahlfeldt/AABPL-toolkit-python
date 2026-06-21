@@ -436,7 +436,7 @@ def aggreagate_point_data_to_disks_vectorized_nested(
     col_name:str='id_x',
     cell_name:str='cell_id',
     suffix:str='_750m',
-    exclude_pt_itself:bool=True,
+    exclude_self:bool=True,
     reset_sum_cols_to_zero:bool=True,
     silent = False,
 ):
@@ -524,7 +524,7 @@ def aggreagate_point_data_to_disks_vectorized_nested(
 
     pts_df[sum_radius_names] = pts_df[sum_radius_names].values + sums_within_disks
             
-    if exclude_pt_itself:
+    if exclude_self:
         # substract data from point itself unless specified otherwise
         pts_df[sum_radius_names] = pts_df[sum_radius_names].values-pts_df[sum_names]
     

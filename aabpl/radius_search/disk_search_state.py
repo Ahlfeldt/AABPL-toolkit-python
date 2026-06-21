@@ -147,7 +147,7 @@ class DiskSearch(object):
         grid,
         r:float=0.0075,
         nest_depth:int=None,
-        exclude_pt_itself:bool=True,
+        exclude_self:bool=True,
         weight_valid_area:str=None,
         include_boundary:bool=False,
     ):
@@ -158,13 +158,13 @@ class DiskSearch(object):
         # link to grid
         grid.search = self
         self.grid = grid
-        self.exclude_pt_itself = exclude_pt_itself
+        self.exclude_self = exclude_self
         self.weight_valid_area = weight_valid_area
         self.include_boundary = include_boundary
 
         self.update_search_params(
             grid=grid,
-            exclude_pt_itself=exclude_pt_itself,
+            exclude_self=exclude_self,
             weight_valid_area=weight_valid_area,
             r=r,
             nest_depth=nest_depth,
@@ -177,15 +177,15 @@ class DiskSearch(object):
     def update_search_params(
         self,
         grid,
-        exclude_pt_itself:bool=None,
+        exclude_self:bool=None,
         weight_valid_area:str=None,
         r:float=None,
         nest_depth:int=None,
         include_boundary:bool=None,
         relation_tgt_to_src:str=None,
     ):
-        if exclude_pt_itself is not None:
-            self.exclude_pt_itself = exclude_pt_itself
+        if exclude_self is not None:
+            self.exclude_self = exclude_self
         if weight_valid_area is not None:
             self.weight_valid_area = weight_valid_area
         if relation_tgt_to_src is not None:
@@ -422,7 +422,7 @@ class DiskSearch(object):
             col_name=self.source.col_name,
             cell_region_name=self.source.cell_region_name,
             suffix=self.source.suffix,
-            exclude_pt_itself=self.exclude_pt_itself,
+            exclude_self=self.exclude_self,
             weight_valid_area=self.weight_valid_area,
             plot_pt_disk=plot_pt_disk,
             silent=silent,

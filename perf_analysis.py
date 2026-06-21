@@ -190,7 +190,7 @@ def plot_timing_breakdown(df: pd.DataFrame):
         + " nd=" + sub["nest_depth"].astype(str)
         + " tn=" + sub["trynew"].astype(str)
     )
-    agg = sub.groupby("_label")[[c for c, _, _ in COMPONENTS]].mean()
+    stat = sub.groupby("_label")[[c for c, _, _ in COMPONENTS]].mean()
 
     fig, ax = plt.subplots(figsize=(max(10, len(agg) * 0.6), 5))
     bottoms = np.zeros(len(agg))

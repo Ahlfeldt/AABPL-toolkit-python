@@ -384,7 +384,8 @@ class GridPlots(object):
         ax.flat[1].set_ylabel('col nr') 
         ax.flat[1].title.set_text("Grid row / col indices")
         
-        X = _np_array([[len(self.grid.id_to_pt_ids[(row_id, col_id)]) if (row_id, col_id) in self.grid.id_to_pt_ids else 0 for col_id in self.grid._search_col_ids] for row_id in reversed(self.grid._search_row_ids)])
+        from aabpl.radius_search.point_grid_assignment import cell_count as _cell_count
+        X = _np_array([[_cell_count(self.grid, row_id, col_id) for col_id in self.grid._search_col_ids] for row_id in reversed(self.grid._search_row_ids)])
         # p = ax.flat[2].pcolormesh(X, cmap='Reds')
         p = ax.flat[2].imshow(X=X, interpolation='none', extent=extent, cmap='Reds')
         _plt_colorbar(p, cax=add_color_bar_ax(fig,ax.flat[2]))

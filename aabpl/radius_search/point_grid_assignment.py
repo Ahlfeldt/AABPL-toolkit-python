@@ -179,10 +179,16 @@ def aggregate_point_data_to_cells(
     # an analogous per-cell MIN/MAX dict here (e.g. id_to_min / id_to_max via
     # .min(axis=0)/.max(axis=0) over each cell's points) that disk_aggregation can
     # reduce as min-of-mins / max-of-maxes for contained cells. Not implemented yet.
-    id_to_sums, id_to_pt_ids, id_to_vals_xy = {}, {}, {}
-    id_to_pt_ids_by_lvl = {}
+    id_to_sums = {}
     id_to_sums_by_lvl = {}
     id_to_vals_xy_by_lvl = {}
+
+    # pre-allocate contiguous array for all subcell sums (avoids one small ndarray
+    # object per node; values are indexed by int stored in id_to_sums_by_lvl)
+    _max_nodes = n_pts * (nest_depth + 1)
+    _n_cols_arr = max(len(c), 1)
+    _sums_array = _np_zeros((_max_nodes, _n_cols_arr), dtype=float)
+    _node_count = 0
 
     # Key builder for the *_by_lvl dicts: packed int64 when the integer-key codec
     # is active, else the original (lvl,(row,col)) tuple.
@@ -221,9 +227,11 @@ def aggregate_point_data_to_cells(
                 col_c = col + cur_quad_nr %  2 / (2**lvl)
                 rc = (row_c + 2**-(lvl+1), col_c + 2**-(lvl+1))
                 _kc = _k(lvl, rc)
-                id_to_sums_by_lvl[_kc]    = pts_vals[cur_pos:pos_next].sum(axis=0)
-                id_to_pt_ids_by_lvl[_kc]  = pts_ids[cur_pos:pos_next]
-                id_to_vals_xy_by_lvl[_kc] = pts_vals_xy[cur_pos:pos_next]
+                nonlocal _node_count
+                _sums_array[_node_count] = pts_vals[cur_pos:pos_next].sum(axis=0)
+                id_to_sums_by_lvl[_kc]    = _node_count
+                id_to_vals_xy_by_lvl[_kc] = (cur_pos << 32) | pos_next
+                _node_count += 1
                 if lvl + 1 <= nest_depth:
                     stack.append((cur_pos, pos_next, next_subcell_val, lvl+1, row_c, col_c))
                 cur_pos = pos_next
@@ -244,20 +252,18 @@ def aggregate_point_data_to_cells(
 
             cell_vals  = pts_vals[cur_col_i:next_col_i]
             cell_ids   = pts_ids[cur_col_i:next_col_i]
-            cell_vxy   = pts_vals_xy[cur_col_i:next_col_i]
             cell_sum   = cell_vals.sum(axis=0)
 
             # level-0 cell dicts (tuple keys, used by clusters/plots/exports)
             rc = (cur_row, cur_col)
-            id_to_sums[rc]    = cell_sum
-            id_to_pt_ids[rc]  = cell_ids
-            id_to_vals_xy[rc] = cell_vxy
+            id_to_sums[rc] = cell_sum
 
-            # level-0 entry in the by-lvl dicts (shared arrays, no copy)
+            # level-0 entry in the by-lvl dicts
             _k0 = _k(0, rc)
-            id_to_sums_by_lvl[_k0]    = cell_sum
-            id_to_pt_ids_by_lvl[_k0]  = cell_ids
-            id_to_vals_xy_by_lvl[_k0] = cell_vxy
+            _sums_array[_node_count] = cell_sum
+            id_to_sums_by_lvl[_k0]    = _node_count
+            id_to_vals_xy_by_lvl[_k0] = (cur_col_i << 32) | next_col_i
+            _node_count += 1
 
             if nest_depth > 0:
                 nest_next_lvl(cur_col_i, next_col_i, cur_row - 0.5, cur_col - 0.5)
@@ -270,11 +276,31 @@ def aggregate_point_data_to_cells(
         #
     #
 
-    grid.id_to_sums          = id_to_sums
-    grid.id_to_pt_ids         = id_to_pt_ids
-    grid.id_to_vals_xy        = id_to_vals_xy
-    grid.id_to_pt_ids_by_lvl  = id_to_pt_ids_by_lvl
+    grid.id_to_sums           = id_to_sums
     grid.id_to_sums_by_lvl    = id_to_sums_by_lvl
     grid.id_to_vals_xy_by_lvl = id_to_vals_xy_by_lvl
+    grid.sums_array           = _sums_array[:_node_count]
+    grid.pts_vals_xy          = pts_vals_xy
+    grid.pts_ids              = pts_ids
     return
 #
+
+def _lvl0_packed(grid, row, col):
+    """Return the packed int64 position for a level-0 cell, or None if empty."""
+    codec = grid.cell_codec
+    k = codec.key(0, row, col) if codec is not None else (0, (row, col))
+    return grid.id_to_vals_xy_by_lvl.get(k)
+
+def cell_count(grid, row, col):
+    """Number of points in level-0 cell (row, col); 0 if empty."""
+    pos = _lvl0_packed(grid, row, col)
+    return (pos & 0xFFFFFFFF) - (pos >> 32) if pos is not None else 0
+
+def cell_count_iter(grid):
+    """Yield (row, col, count) for every non-empty level-0 cell."""
+    codec = grid.cell_codec
+    vxy = grid.id_to_vals_xy_by_lvl
+    for rc in grid.id_to_sums:
+        k = codec.key(0, rc[0], rc[1]) if codec is not None else (0, rc)
+        pos = vxy[k]
+        yield rc[0], rc[1], (pos & 0xFFFFFFFF) - (pos >> 32)

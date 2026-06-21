@@ -13,8 +13,6 @@ from mpmath import mp
 from aabpl.illustrations.plot_utils import plot_polygon
 from matplotlib.pyplot import close as _plt_close
 
-# from shapely.geometry import Polygon as _shapely_Polygon, LineString, Point
-
 
 # for each circle remember the meaning of the check (contains / overlaps)
 # for each intersection point save what circle it comes from
@@ -102,34 +100,6 @@ def _normalize_region_winding(region, arc_steps_per_degree:float=50):
     region.centroid = calculate_polygon_centroid(region.get_plot_coords(arc_steps_per_degree=arc_steps_per_degree))
     region.is_clockwise = False
     return region
-    # import warnings
-
-    # def fxn():
-    #     warnings.warn("deprecated", DeprecationWarning)
-
-    # with warnings.catch_warnings(record=True) as w:
-    #     # Cause all warnings to always be triggered.
-    #     warnings.simplefilter("always")
-    #     # Trigger a warning.
-    #     fxn()
-    #     # Verify some things
-    #     assert len(w) == 1
-    #     assert issubclass(w[-1].category, DeprecationWarning)
-    #     assert "deprecated" in str(w[-1].message)
-    # coords = _np_array(coords)
-    # coords_1 = _np_roll(coords, -1, axis=0)
-    # # Compute signed area of each triangle
-    # signed_areas = 0.5 * _np_cross(coords, coords_1)
-    # # Compute centroid of each triangle
-    # centroids = (coords + coords_1) / 3.0
-    # # # Get average of those centroids, weighted by the signed areas.
-    # # centroid = _np_average(centroids, axis=0, weights=signed_areas)
-    # try:
-    #     centroid = _np_average(centroids, axis=0, weights=signed_areas)
-    # except:
-    #     centroid = _shapely_Polygon(coords).centroid.coords[0]
-    # centroid = tuple([float(c) for c in centroid])
-    # return centroid
 
 class Vertex(object):
     """
@@ -184,7 +154,6 @@ class Vertex(object):
     def __repr__(self):
         props_not_to_print = ['all_vtx', 'outgoing_edges', 'incoming_edges', 'regions']
         return str(tuple([round(a,5) for a in self.xy]))
-        # return str({key: val if type(val) != float else round(val,5) for key, val in self.__dict__.items() if key not in props_not_to_print})
     #
 
     def delete(self):
@@ -197,7 +166,15 @@ class Vertex(object):
 
 
 class Edge(object):
-    
+    """Abstract base for boundary edges: LineSegment, Arc, and Circle.
+
+    Stores the two endpoint vertices (vtx1, vtx2 in CCW order), a shared
+    all_edges registry, and optional ``contains``/``overlaps`` cell tuples that
+    record which grid cell this edge serves as a boundary check for.
+    Subclasses implement intersection(), split(), calc_min/max_dist_to_pt(),
+    get_plot_coords(), and transform_to_trgl().
+    """
+
     def __init__(
             self,
             vtx1:Vertex,
@@ -207,20 +184,14 @@ class Edge(object):
             overlaps:tuple=None,
             enforce_int:bool=True
             ):
-        """
-        vertices are order counter clockwise
-        enforce_int ensures that contains and overlaps are tuples of int() not numpy.int
-        """
         self.vtx1 = vtx1
         self.vtx2 = vtx2
         self.coords = (
-            vtx1.xy if (vtx1 is not None) else (None, None), 
+            vtx1.xy if (vtx1 is not None) else (None, None),
             vtx2.xy if (vtx2 is not None) else (None, None),
             )
         self.regions = []
         self.plot_coords = None
-        # vtx1.outgoing_edges.append(self)
-        # vtx2.incoming_edges.append(self)
         self.all_edges = all_edges
         self.all_vtx = vtx1.all_vtx
         
@@ -348,22 +319,14 @@ class LineSegment(Edge):
             RESCALE_FACTOR:int = 1,
             DECIMALS:int = 117,
             ):
-        """
-        
-        """
+        """Return a list of (x, y) intersection points with ``edge`` (0, 1, or 2 items)."""
         if edge.type == 'LineSegment':
-            res = line_intersection(
-                self.coords, 
-                edge.coords, 
-                tangent_tol=TANGENT_TOL, 
-                rescale=RESCALE_FACTOR, 
+            return line_intersection(
+                self.coords,
+                edge.coords,
+                tangent_tol=TANGENT_TOL,
+                rescale=RESCALE_FACTOR,
                 decimals=DECIMALS)
-            # if len (res)<1:
-            #     print('itx',res,"sc",self.coords,"ec", edge.coords)
-            #     ax = self.plot_single(edgecolor='red')
-            #     ax = edge.plot_single(edgecolor='blue',ax=ax)
-            return res
-        # print("-L--", edge.center, edge.r, self.vtx1.xy, self.vtx2.xy)
         if edge.type == 'Circle':
             return circle_line_segment_intersection(
                 circle_center=edge.center,
@@ -423,11 +386,9 @@ class LineSegment(Edge):
     #
 
     def transform_to_trgl(self, i:int):
-        """
-        
-        """
-        if i == 1: return self 
-        
+        """Return a copy of this edge transformed into triangle symmetry zone i (1–8)."""
+        if i == 1: return self
+
         new_vtx1 = Vertex(*transform_coord(self.vtx1.xy, i), all_vtx=self.all_vtx)
         new_vtx2 = Vertex(*transform_coord(self.vtx2.xy, i), all_vtx=self.all_vtx)
         
@@ -461,10 +422,6 @@ class Arc(Edge):
         self.angle_vtx1, self.angle_vtx2  = angles_to_origin((vtx1.xy, vtx2.xy), center) if not None in [vtx1,vtx2] else (0,360)
         self.abs_angle_vtx1, self.abs_angle_vtx2 = (angle_to(center, vtx1.xy), angle_to(center, vtx2.xy)) if not None in [vtx1,vtx2] else (0,360)
         self.angle_min, self.angle_max = sorted((self.angle_vtx1, self.angle_vtx2))
-        
-        # to-do. if radius/spacing is ever smaller 1/(2**.5) then angles can possibly be above 180 degrees
-        # if not is_clockwise is None and is_clockwise != ((self.angle_vtx2-self.angle_vtx1)%360>=180):
-        #     print("conflict: "+printme, is_clockwise,"v1",self.angle_vtx1,"v2", self.angle_vtx2)
         self.is_clockwise = (self.angle_vtx2-self.angle_vtx1)%360>=180 if is_clockwise is None else is_clockwise
         
         if not self.is_clockwise:
@@ -602,8 +559,6 @@ class Arc(Edge):
         dist_vtx1 = ((self.vtx1.x - pt[0])**2 + (self.vtx1.y - pt[1])**2)**0.5
         dist_vtx2 = ((self.vtx2.x - pt[0])**2 + (self.vtx2.y - pt[1])**2)**0.5
         max_dist = max(dist_vtx1, dist_vtx2)
-        
-        # return max_dist # TODO remove this.
 
         # 2. Distance from the circle center to the query point
         dx = pt[0] - self.center[0]
@@ -638,10 +593,8 @@ class Arc(Edge):
         return max_dist
     
     def transform_to_trgl(self, i:int):
-        """
-        
-        """
-        if i == 1: return self 
+        """Return a copy of this arc transformed into triangle symmetry zone i (1–8)."""
+        if i == 1: return self
         new_center = transform_coord(self.center, i)
         new_vtx1 = Vertex(*transform_coord(self.vtx1.xy, i), all_vtx=self.all_vtx)
         new_vtx2 = Vertex(*transform_coord(self.vtx2.xy, i), all_vtx=self.all_vtx)
@@ -669,23 +622,12 @@ class Arc(Edge):
             )
     #
     def get_plot_coords(self, arc_steps_per_degree:float=5):
-        # return [self.vtx1.xy, self.vtx2.xy]
-        # total_angle = abs(self.angle_max - self.angle_min)
-        # n_steps = max(3,-int(-(total_angle * arc_steps_per_degree)))
         total_angle = abs(self.first_angle - self.second_angle)
-        n_steps = max(3,-int(-(total_angle * arc_steps_per_degree)))
-        
-        if not self.plot_coords is None and len(self.plot_coords)==n_steps+1:
+        n_steps = max(3, -int(-(total_angle * arc_steps_per_degree)))
+
+        if not self.plot_coords is None and len(self.plot_coords) == n_steps + 1:
             return self.plot_coords
-        
-        # if abs(self.abs_angle_vtx2-self.abs_angle_vtx1) > abs(self.abs_angle_vtx2-(self.abs_angle_vtx1+360)):
-        #     first_angle = 0
-        #     second_angle = 0
-        # elif abs(self.abs_angle_vtx2-self.abs_angle_vtx1) > abs(self.abs_angle_vtx2-(self.abs_angle_vtx1+360)):
-        #     0
-        # else:
-        #     first_angle = self.abs_angle_vtx1
-        #     second_angle = self.abs_angle_vtx2
+
         cx, cy = self.center
         r = self.r
         coords = []
@@ -701,20 +643,18 @@ class Arc(Edge):
         # if abs(total_angle)>=180: # TOOD this is a dirty fix. ensure this works
         #     print(self.is_clockwise, self.angle_vtx1, self.angle_vtx2, total_angle)
         #     total_angle = (self.angle_vtx1 - self.angle_vtx2)%360*-1 if not self.is_clockwise else (self.angle_vtx2 - self.angle_vtx1)%360
-        # for angle_step in _np_linspace(0, total_angle, n_steps):
-        #     x = cx + r * _math_cos((rotation+self.angle_vtx1+angle_step)/360*2*_math_pi)
-        #     y = cy + r * _math_sin((rotation+self.angle_vtx1+angle_step)/360*2*_math_pi)
-        #     coords.append((float(x),float(y)))
-        # coords = [self.vtx1.xy,self.vtx2.xy] #if not self.is_clockwise else [self.vtx2.xy,self.vtx1.xy] 
         self.plot_coords = coords
-        # if len(coords)<2:
-        #     print("coords",coords)
         return coords
     #
 #
 
 class Circle(object):
-    """TODO potentially add as subclass of Edge?"""
+    """Full circle (360°) used exclusively as a boundary-check split edge.
+
+    Unlike Arc, Circle is not restricted to an angular range and is never part
+    of a region boundary — it is used only in check_dict to split triangle-1
+    regions into sub-regions during build_boundary_checks / split_regions_by_checks.
+    """
     def __init__(self, center, r):
         self.type = "Circle"
         self.center = center
@@ -744,7 +684,15 @@ class Circle(object):
 #
 
 class OffsetRegion(object):
-    """OffsetRegion bounded by line segments and arcs"""
+    """A convex sub-region of the search disk pattern within triangle 1.
+
+    Each OffsetRegion is a polygon bounded by LineSegment and Arc edges. It
+    represents one uniquely-identifiable subset of triangle-1 positions that
+    share the same disk-overlap/containment relationship with a fixed set of
+    grid cells.  The ``checks`` list stores True/False outcomes of each
+    boundary check applied during split_regions_by_checks, which together
+    identify the region's role in the overall disk pattern.
+    """
 
     def __init__(self, edges, checks, all_regions:dict, trgl_nr:int=1, printme=""):
         self.id = -1
@@ -761,20 +709,13 @@ class OffsetRegion(object):
                 if vtx not in self.vertices:
                     self.vertices.append(vtx)
                     vtx.regions.append(self)
-            # check if most extreme x/y values are not at the vertices but between
+            # For arc edges the axis-aligned extrema may lie between vertices
             if edge.type == 'Arc':
                 cx, cy = edge.center
                 if edge._angle_on_arc(0):   xs.append(cx + edge.r)
                 if edge._angle_on_arc(90):  ys.append(cy + edge.r)
                 if edge._angle_on_arc(180): xs.append(cx - edge.r)
                 if edge._angle_on_arc(270): ys.append(cy - edge.r)
-        # if len(xs):
-        #     print("xs",xs,min([vtx.x for vtx in self.vertices]),max([vtx.x for vtx in self.vertices]))
-        # if len(ys):
-        #     print(angles_to_origin([(1,1),(1,0),(0,-1)],(0,0)))
-        #     print("ys",ys, min([vtx.y for vtx in self.vertices]),max([vtx.y for vtx in self.vertices]))
-        # To-Do: For edges that have an arc it   might be that a point between the vertices is 
-        # the max/min x/y value. Probably only the case  
         xs = [vtx.x for vtx in self.vertices] + xs
         ys = [vtx.y for vtx in self.vertices] + ys
         if not xs or not ys:
@@ -845,22 +786,7 @@ class OffsetRegion(object):
     #
 
     def calc_area(self, arc_steps_per_degree:float=100):
-        # xs = []
-        # ys = []
-        # for ((x,y), edge_end_coord), edge in zip(self.coords, self.edges):
-        #     xs.append(x)  
-        #     ys.append(y)  
-        #     if edge.type == 'Arc':
-        #         total_angle = abs(edge.angle_max - edge.angle_min)
-        #         n_steps = max(3,-int(-(total_angle * arc_steps_per_degree)))
-        #         cx, cy = edge.center
-        #         r = edge.r
-        #         rotation = angle_to((0,0), edge.center)
-        #         for angle_step in _np_linspace(edge.angle_min, edge.angle_max, n_steps):
-        #             xs.append(cx + r * _math_cos((rotation+angle_step)/360*2*_math_pi))
-        #             ys.append(cy + r * _math_sin((rotation+angle_step)/360*2*_math_pi))
-        # xs =_np_array(xs)
-        # ys =_np_array(ys)
+        """Shoelace area of the region polygon (arcs sampled at arc_steps_per_degree steps/degree)."""
         plot_coords = _np_array(self.get_plot_coords(arc_steps_per_degree=arc_steps_per_degree))
         xs = plot_coords[:,0]
         ys = plot_coords[:,1]

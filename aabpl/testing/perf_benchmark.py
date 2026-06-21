@@ -162,12 +162,13 @@ def run_single_config(
     local_crs: str = "auto",
     dist_stats: Optional[dict] = None,
     silent: bool = True,
-    exclude_pt_itself=True,
+    exclude_self=True,
     use_int_cell_keys: Optional[bool] = None,
     vectorized_search_loop: Optional[bool] = None,
     batch_overlap: Optional[bool] = None,
     batch_overlap_min_group: Optional[int] = None,
     generation: Optional[str] = None,
+    geo_stats_folder: Optional[str] = None,
 ) -> dict:
     """
     Run radius_search for one (radius, spacing, nest_depth) combination
@@ -186,6 +187,9 @@ def run_single_config(
     local_crs   : projected CRS for internal computation
     dist_stats  : pre-computed compute_spatial_stats result (saves time across calls)
     silent      : suppress radius_search console output
+    geo_stats_folder : if given, persist geometric stats (cell counts/areas relative to
+                  circle area) for this (spacing_ratio, nest_depth) pair to a JSON file
+                  named geo_nd{nd}_sr{sr:.8f}.json.  Written only on first occurrence.
     """
     pts_source = pts_source.copy()
     pts_grid = pts_target if pts_target is not None else pts_source
@@ -228,11 +232,11 @@ def run_single_config(
             crs=crs,
             r=radius,
             c=col,
-            exclude_pt_itself=exclude_pt_itself,
+            exclude_self=exclude_self,
             silent=silent,
             proj_crs=local_crs,
             pts_target=pts_target,
-            agg='sum',
+            stat='sum',
             suffix="_sum",
         )
     finally:
@@ -240,6 +244,10 @@ def run_single_config(
         _cfg.FIXED_NEST_DEPTH = None
     t_wall = _time.perf_counter() - t_wall_start
     geometry_cached = set(_aabpl_config.disk_region_cache.keys()) == _cache_keys_before
+    if geo_stats_folder is not None and not os.path.isfile(
+        _geo_stats_path(spacing_ratio, nest_depth, geo_stats_folder)
+    ):
+        compute_and_save_geo_stats(spacing_ratio, nest_depth, geo_stats_folder)
     av_pts_per_circle = next((pts_source[col].mean() for col in pts_source.columns[::-1] if col.endswith("_sum")),-1)
     # print("av_pts_per_circle",av_pts_per_circle)
     # -- collect timing ------------------------------------------------------
@@ -374,7 +382,7 @@ def run_optimal_config(
             crs=crs,
             r=radius,
             c=col,
-            exclude_pt_itself=True,
+            exclude_self=True,
             silent=silent,
             proj_crs=local_crs,
             pts_target=pts_target,
@@ -586,33 +594,201 @@ def load_results(output_folder: str, only_new: bool = True,
     return df
 
 
-def _enrich_geo_stats(df: pd.DataFrame) -> None:
-    """Add n_regions / mean_cntd_count / mean_ovlpd_count from the geometry cache in-place."""
-    import aabpl.config as _cfg
+def _cell_area_sum(cells) -> float:
+    """Total normalised area covered by a list of (lvl, rc) quadtree cells.
+    A cell at level *lvl* has side 2^-lvl, so area = 4^-lvl (in units where the
+    base cell is 1×1).
+    """
+    import numpy as _np_local
+    if isinstance(cells, _np_local.ndarray):
+        return float(_np_local.sum(4.0 ** (-cells[:, 0]))) if len(cells) else 0.0
+    return sum(4.0 ** (-lvl) for lvl, _ in cells)
+
+
+def _geo_stats_path(r_over_s: float, nest_depth: int, geo_folder: str) -> str:
+    return os.path.join(geo_folder, f"geo_nd{int(nest_depth)}_sr{round(float(r_over_s), 8):.8f}.json")
+
+
+def compute_and_save_geo_stats(
+    r_over_s: float,
+    nest_depth: int,
+    geo_folder: str,
+) -> Optional[dict]:
+    """Compute full geometric stats for a (r/s, nest_depth) pair and persist them.
+
+    Reads from the in-memory geometry cache (must already be populated by
+    build_disk_region_lookups).  Skips silently if the cache entry is absent.
+    Returns the stats dict (or None on cache miss).
+
+    Saved stats (all area-weighted by region size unless prefixed ``mean_``):
+        n_regions, n_shared_cntd, total_area, circle_area, area_ratio
+        mean_count_cntd / mean_count_ovlpd   — simple mean over regions (count)
+        mean_area_cntd  / mean_area_ovlpd    — simple mean over regions (cell area)
+        w_count_cntd    / w_count_ovlpd      — area-weighted mean count
+        w_area_cntd     / w_area_ovlpd       — area-weighted mean cell area
+    """
+    import math
+    cache_key = (round(float(r_over_s), 8), int(nest_depth), False)
+    cached = _aabpl_config.disk_region_cache.get(cache_key)
+    if cached is None:
+        return None
+
+    region_id_to_cntd  = cached["region_id_to_cntd_cells"]
+    region_id_to_ovlpd = cached["region_id_to_ovlpd_cells"]
+    region_id_to_area  = cached["region_id_to_area"]
+    shared_cntd        = cached.get("shared_cntd_cells", set())
+
+    total_area = sum(region_id_to_area.values()) or 1.0
+    n_regions  = len(region_id_to_cntd)
+
+    sum_count_cntd = sum_count_ovlpd = 0.0
+    sum_area_cntd  = sum_area_ovlpd  = 0.0
+    w_count_cntd   = w_count_ovlpd   = 0.0
+    w_area_cntd    = w_area_ovlpd    = 0.0
+
+    for rid, cntd_cells in region_id_to_cntd.items():
+        reg_area = region_id_to_area.get(rid, 0.0)
+        ovlpd_cells = region_id_to_ovlpd.get(rid, [])
+        cnt_c = len(cntd_cells);            cnt_o = len(ovlpd_cells)
+        a_c   = _cell_area_sum(cntd_cells); a_o   = _cell_area_sum(ovlpd_cells)
+
+        sum_count_cntd += cnt_c;   sum_count_ovlpd += cnt_o
+        sum_area_cntd  += a_c;     sum_area_ovlpd  += a_o
+        w_count_cntd   += cnt_c * reg_area;  w_count_ovlpd += cnt_o * reg_area
+        w_area_cntd    += a_c   * reg_area;  w_area_ovlpd  += a_o   * reg_area
+
+    n = n_regions or 1
+    circle_area = math.pi * r_over_s ** 2
+    mean_ac = sum_area_cntd  / n
+    mean_ao = sum_area_ovlpd / n
+    w_ac    = w_area_cntd    / total_area
+    w_ao    = w_area_ovlpd   / total_area
+    stats = {
+        "r_over_s":                  float(r_over_s),
+        "nest_depth":                int(nest_depth),
+        "n_regions":                 n_regions,
+        "n_shared_cntd":             len(shared_cntd),
+        "total_area":                total_area,
+        "circle_area":               circle_area,
+        "area_ratio":                total_area / circle_area,
+        # simple means (one value per region, equally weighted)
+        "mean_count_cntd":           sum_count_cntd  / n,
+        "mean_count_ovlpd":          sum_count_ovlpd / n,
+        "mean_area_cntd":            mean_ac,
+        "mean_area_ovlpd":           mean_ao,
+        # area-weighted means (each region weighted by its spatial area)
+        "w_count_cntd":              w_count_cntd  / total_area,
+        "w_count_ovlpd":             w_count_ovlpd / total_area,
+        "w_area_cntd":               w_ac,
+        "w_area_ovlpd":              w_ao,
+        # cell area as share of circle area (= micro_area_share_* from calc_micro_region_stats)
+        "area_share_cntd":           mean_ac / circle_area if circle_area > 0 else 0.0,
+        "area_share_ovlpd":          mean_ao / circle_area if circle_area > 0 else 0.0,
+        "area_share_cntd_weighted":  w_ac    / circle_area if circle_area > 0 else 0.0,
+        "area_share_ovlpd_weighted": w_ao    / circle_area if circle_area > 0 else 0.0,
+    }
+
+    os.makedirs(geo_folder, exist_ok=True)
+    with open(_geo_stats_path(r_over_s, nest_depth, geo_folder), "w") as f:
+        json.dump(stats, f, indent=2, default=float)
+    return stats
+
+
+def load_geo_stats(r_over_s: float, nest_depth: int, geo_folder: str) -> Optional[dict]:
+    """Load persisted geo stats for one (r/s, nest_depth) pair, or None if missing."""
+    path = _geo_stats_path(r_over_s, nest_depth, geo_folder)
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _enrich_geo_stats(df: pd.DataFrame, geo_folder: Optional[str] = None) -> None:
+    """Enrich df in-place with geometric stats for each (radius_over_spacing, nest_depth).
+
+    Stats are sourced in order of preference:
+      1. Saved JSON files in *geo_folder* (survives across sessions, no cache needed).
+      2. In-memory geometry cache (populated if geometry was built this session).
+
+    Columns added:
+        n_regions, n_shared_cntd, area_ratio
+        mean_count_cntd, mean_count_ovlpd   (simple mean over regions)
+        mean_area_cntd,  mean_area_ovlpd    (simple mean over regions)
+        w_count_cntd,    w_count_ovlpd      (area-weighted mean count)
+        w_area_cntd,     w_area_ovlpd       (area-weighted mean cell area)
+    """
     import math
 
-    def _stats(r_over_s, nest_depth):
+    GEO_COLS = [
+        "n_regions", "n_shared_cntd", "area_ratio",
+        "mean_count_cntd", "mean_count_ovlpd",
+        "mean_area_cntd",  "mean_area_ovlpd",
+        "w_count_cntd",    "w_count_ovlpd",
+        "w_area_cntd",     "w_area_ovlpd",
+        "area_share_cntd", "area_share_ovlpd",
+        "area_share_cntd_weighted", "area_share_ovlpd_weighted",
+    ]
+
+    def _from_cache(r_over_s, nest_depth):
         key = (round(float(r_over_s), 8), int(nest_depth), False)
-        cached = _cfg.disk_region_cache.get(key)
+        cached = _aabpl_config.disk_region_cache.get(key)
         if cached is None:
-            return None, None, None
-        region_id_to_cntd  = cached["region_id_to_cntd_cells"]
-        region_id_to_ovlpd = cached["region_id_to_ovlpd_cells"]
-        region_id_to_area  = cached["region_id_to_area"]
-        total_area = sum(region_id_to_area.values()) or 1.0
-        n_regions  = len(region_id_to_cntd)
-        mean_cntd  = sum(len(v) * region_id_to_area[k] for k, v in region_id_to_cntd.items())  / total_area
-        mean_ovlpd = sum(len(v) * region_id_to_area[k] for k, v in region_id_to_ovlpd.items()) / total_area
-        return n_regions, mean_cntd, mean_ovlpd
+            return None
+        # compute on the fly (same logic as compute_and_save_geo_stats)
+        cntd  = cached["region_id_to_cntd_cells"]
+        ovlpd = cached["region_id_to_ovlpd_cells"]
+        areas = cached["region_id_to_area"]
+        shared = cached.get("shared_cntd_cells", set())
+        total_area = sum(areas.values()) or 1.0
+        n = len(cntd) or 1
+        sc, so, ac, ao, wcc, wco, wac, wao = 0., 0., 0., 0., 0., 0., 0., 0.
+        for rid, cc in cntd.items():
+            oc = ovlpd.get(rid, [])
+            ra = areas.get(rid, 0.)
+            c, o = len(cc), len(oc)
+            a, b = _cell_area_sum(cc), _cell_area_sum(oc)
+            sc += c; so += o; ac += a; ao += b
+            wcc += c*ra; wco += o*ra; wac += a*ra; wao += b*ra
+        ca = math.pi * r_over_s ** 2
+        mac = ac/n; mao = ao/n; wac_ = wac/total_area; wao_ = wao/total_area
+        return {
+            "n_regions": n, "n_shared_cntd": len(shared),
+            "area_ratio": total_area / ca,
+            "mean_count_cntd": sc/n, "mean_count_ovlpd": so/n,
+            "mean_area_cntd":  mac,  "mean_area_ovlpd":  mao,
+            "w_count_cntd": wcc/total_area, "w_count_ovlpd": wco/total_area,
+            "w_area_cntd":  wac_,           "w_area_ovlpd":  wao_,
+            "area_share_cntd":           mac  / ca if ca > 0 else 0.0,
+            "area_share_ovlpd":          mao  / ca if ca > 0 else 0.0,
+            "area_share_cntd_weighted":  wac_ / ca if ca > 0 else 0.0,
+            "area_share_ovlpd_weighted": wao_ / ca if ca > 0 else 0.0,
+        }
 
     combos = df[["radius_over_spacing", "nest_depth"]].drop_duplicates()
-    stats_map = {
-        (row.radius_over_spacing, row.nest_depth): _stats(row.radius_over_spacing, row.nest_depth)
-        for row in combos.itertuples(index=False)
-    }
-    df["n_regions"]       = df.apply(lambda r: stats_map.get((r["radius_over_spacing"], r["nest_depth"]), (None, None, None))[0], axis=1)
-    df["mean_cntd_count"] = df.apply(lambda r: stats_map.get((r["radius_over_spacing"], r["nest_depth"]), (None, None, None))[1], axis=1)
-    df["mean_ovlpd_count"]= df.apply(lambda r: stats_map.get((r["radius_over_spacing"], r["nest_depth"]), (None, None, None))[2], axis=1)
+    stats_map = {}
+    for row in combos.itertuples(index=False):
+        ros, nd = row.radius_over_spacing, row.nest_depth
+        s = None
+        if geo_folder:
+            s = load_geo_stats(ros, nd, geo_folder)
+        if s is None:
+            s = _from_cache(ros, nd)
+        stats_map[(ros, nd)] = s
+
+    for col in GEO_COLS:
+        df[col] = df.apply(
+            lambda r, c=col: (stats_map.get((r["radius_over_spacing"], r["nest_depth"])) or {}).get(c),
+            axis=1,
+        )
+
+    # back-compat aliases kept for existing code that reads these names
+    if "mean_cntd_count" not in df.columns:
+        df["mean_cntd_count"]  = df["w_count_cntd"]
+    if "mean_ovlpd_count" not in df.columns:
+        df["mean_ovlpd_count"] = df["w_count_ovlpd"]
 
 
 # ---------------------------------------------------------------------------
@@ -786,14 +962,11 @@ def run_sweep(
         label = f"r={r} sr={round(s, 2)} nd={nd}"
         if skip_existing and any(f.startswith(skip_pattern) for f in completed):
             match = next(f for f in completed if f.startswith(skip_pattern))
-            if prog:
-                prog.clear()
             if verbose:
-                print(f"  load  {label}{tag}")
-                print(f"         pattern: {skip_pattern}")
-                print(f"         matched: {match}")
-            if prog:
-                prog.redraw()
+                from aabpl.utils.progress import progress_print as _pp
+                _pp(f"  load  {label}{tag}")
+                _pp(f"         pattern: {skip_pattern}")
+                _pp(f"         matched: {match}")
             try:
                 with open(os.path.join(output_folder, match)) as _f:
                     result = json.load(_f)
@@ -805,7 +978,8 @@ def run_sweep(
         if prog:
             prog.update(done, label=f"run   {label}")
         elif verbose:
-            print(f"  run   {label} n={len(pts_source)}{tag} ...", end=" ", flush=True)
+            from aabpl.utils.progress import progress_print as _pp
+            _pp(f"  run   {label} n={len(pts_source)}{tag} ...", end=" ", flush=True)
         try:
             result = run_single_config(
                 pts_source=pts_source, crs=crs, radius=r, spacing_ratio=s,
@@ -818,8 +992,9 @@ def run_sweep(
             completed.add(os.path.basename(fpath))
             results.append(result)
             if not prog and verbose:
+                from aabpl.utils.progress import progress_print as _pp
                 cached_str = "cached" if result["config"]["geometry_cached"] else "UNCACHED"
-                print(f"done  cpu={result['timing']['total_cpu_s']:.2f}s  geom={cached_str}")
+                _pp(f"done  cpu={result['timing']['total_cpu_s']:.2f}s  geom={cached_str}")
             return result
         except Exception as e:
             import traceback as _tb

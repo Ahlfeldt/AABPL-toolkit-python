@@ -50,9 +50,10 @@ def convert_coords_to_local_crs(
     
     """
     tgt_was_auto = target_crs == 'auto'
-    if tgt_was_auto: 
+    if tgt_was_auto:
         if initial_crs != "EPSG:4326":
-            transformer = _pyproj_Transformer.from_crs(crs_from=initial_crs, crs_to=local_crs, always_xy=True)
+            # Convert to WGS84 first to determine the best UTM zone, then pick local_crs
+            transformer = _pyproj_Transformer.from_crs(crs_from=initial_crs, crs_to="EPSG:4326", always_xy=True)
             x_wgs,y_wgs = transformer.transform(pts[x], pts[y])
             local_crs = 'EPSG:'+str(convert_wgs_to_utm(sum(x_wgs)/len(x_wgs), sum(y_wgs)/len(y_wgs)))
         else:
@@ -110,9 +111,9 @@ def convert_bounds_to_local_crs(
         for y in [ymin, (ymin + ymax)/2, ymax]:
             bounds_corners_x.append(x)
             bounds_corners_y.append(y)
-    if target_crs == 'auto': 
+    if target_crs == 'auto':
         if initial_crs != "EPSG:4326":
-            transformer = _pyproj_Transformer.from_crs(crs_from=initial_crs, crs_to=local_crs, always_xy=True)
+            transformer = _pyproj_Transformer.from_crs(crs_from=initial_crs, crs_to="EPSG:4326", always_xy=True)
             x_wgs,y_wgs = transformer.transform(bounds_corners_x, bounds_corners_y)
             local_crs = 'EPSG:'+str(convert_wgs_to_utm(sum(x_wgs)/len(x_wgs), sum(y_wgs)/len(y_wgs)))
         else:

@@ -12,6 +12,7 @@ from aabpl.illustrations.plot_pt_vars import create_plots_for_vars
 from aabpl.testing.test_performance import time_func_perf
 from math import pi as math_pi
 from .sample_area import compute_disk_cell_overlap
+from .point_grid_assignment import cell_count_iter, _lvl0_packed
 from aabpl import config as _cfg
 
 # Points per block when forming the (block x candidates) distance matrix. Bounds
@@ -34,7 +35,7 @@ def search_and_aggregate(
     col_name='id_x',
     cell_region_name='cell_region',
     suffix=None,
-    exclude_pt_itself=True,
+    exclude_self=True,
     weight_valid_area=None,
     plot_pt_disk=None,
     silent=False,
@@ -74,6 +75,8 @@ def search_and_aggregate(
     codec = grid.cell_codec
     sums_by_lvl = grid.id_to_sums_by_lvl
     vals_xy_by_lvl = grid.id_to_vals_xy_by_lvl
+    sums_array  = grid.sums_array
+    pts_vals_xy = grid.pts_vals_xy
     nonempty_cell_keys = set(sums_by_lvl)
     grid_spacing = grid._search_spacing
     contain_region_mult = grid.search.contain_region_mult
@@ -115,11 +118,16 @@ def search_and_aggregate(
             if (int(row_id), int(col_id)) not in cells_rndm_sample
         )
         invalid_keys = set(int(codec.key(0, rr, cc)) for rr, cc in invalid_cells)
-        # invalid-cell membership is a level-0 (row,col) test, so force the level to 0
-        cntd_l0_offset = {rid: codec.offset_int([(0, dc) for lvl, dc in cells])
-                          for rid, cells in cntd_cells_by_cell_region.items()}
-        ovlpd_l0_offset = {rid: codec.offset_int([(0, dc) for lvl, dc in cells])
-                           for rid, cells in ovlpd_cells_by_cell_region.items()}
+        # invalid-cell membership is a level-0 (row,col) test, so force the level to 0.
+        # cells may be float32 (N,3) arrays or legacy list-of-tuples; handle both.
+        def _l0_offset(cells):
+            import numpy as _np_local
+            if isinstance(cells, _np_local.ndarray):
+                arr = cells.copy(); arr[:, 0] = 0
+                return codec.offset_int(arr)
+            return codec.offset_int([(0, dc) for lvl, dc in cells])
+        cntd_l0_offset  = {rid: _l0_offset(cells) for rid, cells in cntd_cells_by_cell_region.items()}
+        ovlpd_l0_offset = {rid: _l0_offset(cells) for rid, cells in ovlpd_cells_by_cell_region.items()}
 
     # ---- helper paths --------------------------------------------------------
     # Set to True to run the optimized workflow
@@ -328,7 +336,8 @@ def search_and_aggregate(
         ovlpd_offset_flat, ovlpd_offset_pointers = flatten_offset_dict(ovlpd_offset_by_region)
 
         max_cells_per_region = max(len(cells) for cells in ovlpd_cells_by_cell_region.values()) if ovlpd_cells_by_cell_region else 0
-        max_candidates = sum(sorted(len(v) for v in grid.id_to_vals_xy.values())[-max_cells_per_region:]) if grid.id_to_vals_xy else 0
+        _counts = sorted(cnt for _, _, cnt in cell_count_iter(grid))
+        max_candidates = sum(_counts[-max_cells_per_region:]) if _counts else 0
 
         # ==========================================================================
         # DATEN-VORBEREITUNG (SORTIERUNG & HIERARCHIE-STRUKTUREN)
@@ -396,36 +405,29 @@ def search_and_aggregate(
         def sum_over_cells(cell_keys):
             if not cell_keys:
                 return zero_sum
-                
-            _sums = sums_by_lvl  # Lokaler Verweis für schnellen Zugriff
-            
+            _sums = sums_by_lvl
+            _arr  = sums_array
             if n_cols > 1:
-                # np.vstack konvertiert die extrahierten Arrays hocheffizient auf C-Ebene 
-                # in eine Matrix und summiert sie entlang der Achse 0.
-                return _np_sum([_sums[k] for k in cell_keys], axis=0) if len(cell_keys) > 1 else _sums[cell_keys[0]]
-                
-            return sum(_sums[k] for k in cell_keys)
-
+                return _np_sum([_arr[_sums[k]] for k in cell_keys], axis=0) if len(cell_keys) > 1 else _arr[_sums[cell_keys[0]]]
+            return sum(_arr[_sums[k]] for k in cell_keys)
 
         # reusable buffer to gather a region's overlap-candidate rows ([vals..., x, y])
         max_cells_per_region = max(len(cells) for cells in ovlpd_cells_by_cell_region.values())
-        max_candidates = sum(sorted(len(v) for v in grid.id_to_vals_xy.values())[-max_cells_per_region:])
+        _counts = sorted(cnt for _, _, cnt in cell_count_iter(grid))
+        max_candidates = sum(_counts[-max_cells_per_region:])
         candidate_buffer = _np_zeros((max_candidates, n_cols + 2), dtype=float)
-        
+
         def gather_overlap_candidates(home_key, region_id):
             _vals = vals_xy_by_lvl
+            _pvxy = pts_vals_xy
             _buffer = candidate_buffer
-            
             n = 0
             for k in covered_cell_keys(ovlpd_offset_by_region[region_id], home_key):
-                # 1. Sicherer, einmaliger Dictionary-Lookup
-                cell_array = _vals[k]
+                pos = _vals[k]
+                cell_array = _pvxy[pos >> 32 : pos & 0xFFFFFFFF]
                 length = len(cell_array)
-                
-                # 2. Direktes Slicing und Zuweisen über die lokalen Variablen
                 _buffer[n : n + length] = cell_array
                 n += length
-                
             return _buffer[:n]
 
     # ---- valid-area term (per point; only built when weighting) ----------------
@@ -515,6 +517,8 @@ def search_and_aggregate(
         sums_within_disks[start:end] += cell_sum + sum_over_cells(covered_cell_keys(cntd_offset_by_region[region_and_trgl[start]], hk))
         if weight_valid_area:
             invalid_area[start:end] += invalid_cntd_area(cell_region[start], hk)
+        if end - 1 >= next_threshold:
+            next_threshold = progress.update(end - 1)
 
     # ---- overlap sums: one (group x candidates) distance matrix per overlap group
     overlap_starts = _np_flatnonzero(overlap_changed)
@@ -548,9 +552,12 @@ def search_and_aggregate(
     # ---- example-disk plot: reconstruct the chosen point once, off the hot path -
     if plot_pt_disk is not None:
         if 'pt_id' not in plot_pt_disk:
-            plot_pt_disk['pt_id'] = sorted(
-                (len(pt_ids), pt_ids[0] if len(pt_ids) > 0 else None)
-                for pt_ids in grid.id_to_pt_ids_by_lvl.values())[-1][1]
+            def _rc_count(rc):
+                p = _lvl0_packed(grid, rc[0], rc[1])
+                return (p & 0xFFFFFFFF) - (p >> 32) if p else 0
+            _best_rc = max(grid.id_to_sums, key=_rc_count)
+            _pos = _lvl0_packed(grid, _best_rc[0], _best_rc[1])
+            plot_pt_disk['pt_id'] = int(grid.pts_ids[_pos >> 32]) if _pos and (_pos & 0xFFFFFFFF) > (_pos >> 32) else None
         target_id = plot_pt_disk['pt_id']
         if target_id in pts_source.index:
             pos = pts_source.index.get_loc(target_id)
@@ -566,7 +573,8 @@ def search_and_aggregate(
             ovlpd_abs = [decode(int(k)) for k in (ovlpd_offset_by_region[region_id] + hk)]
             cntd_keys = covered_cell_keys(
                 _np_concatenate([shared_cntd_offset, cntd_offset_by_region[region_id]]), hk)
-            pts_xy_in_cntd = (_np_array(flatten_list([vals_xy_by_lvl[k] for k in cntd_keys]))[:, -2:]
+            pts_xy_in_cntd = (_np_vstack([pts_vals_xy[vals_xy_by_lvl[k] >> 32 : vals_xy_by_lvl[k] & 0xFFFFFFFF]
+                                           for k in cntd_keys])[:, -2:]
                               if cntd_keys else _np_zeros((0, 2)))
             # The offset-region overlay needs the point's offset-region id, which is
             # keyed differently from cell_region; pass it only when it is a real key,
@@ -596,9 +604,15 @@ def search_and_aggregate(
     pts_source[sum_radius_names] = pts_source[sum_radius_names].values + sums_within_disks
     pts_source = pts_source.astype({name: dt for name, dt in zip(sum_radius_names, column_dtypes)})
 
-    if exclude_pt_itself and grid.search.tgt_df_contains_src_df:
-        for sum_name, value_col in zip(sum_radius_names, c):
-            pts_source[sum_name] = pts_source[sum_name].values - pts_source[value_col]
+    if exclude_self:
+        # TODO when implementing max,min,range - excluding the point itself cannot be done. Docstring for those function need to tell that.
+        # if we only have max,min,range as method and this option is on, consider informing via print 
+        if grid.search.tgt_df_contains_src_df:
+            for sum_name, value_col in zip(sum_radius_names, c):
+                pts_source[sum_name] = pts_source[sum_name].values - pts_source[value_col]
+        else:
+            print("Option `exclude_self=True` but seach target and search origin DataFrame seem to be different, thus point own values are not substracted. "+
+                  "You may have to Fall back to substract the point own values manually from result of radius aggregation.")
 
     if weight_valid_area:
         share_name = 'valid_area_share' + suffix
@@ -615,13 +629,11 @@ def search_and_aggregate(
         return pts_source[sum_radius_names]
 
     # ---- brute-force validation (O(n^2)) on one representative point per region -
-    id_to_pt_ids = grid.id_to_pt_ids
     all_xy = pts_target[[x, y]].values
     all_vals = pts_target[c].values if n_cols > 1 else pts_target[c[0]].values.reshape(-1, 1)
-    lvl0_cells = {k: v for k, v in id_to_pt_ids.items() if k[0] == 0}
-    cell_pop = {k: len(v) for k, v in lvl0_cells.items() if len(v) > 0}
+    cell_pop = {(row, col): cnt for row, col, cnt in cell_count_iter(grid) if cnt > 0}
     pts_source['_cell_pop'] = pts_source.apply(
-        lambda row: cell_pop.get((0, (int(row[row_name]), int(row[col_name]))), 0), axis=1)
+        lambda row: cell_pop.get((int(row[row_name]), int(row[col_name])), 0), axis=1)
     rep_indices = (pts_source.sort_values('_cell_pop', ascending=False)
                    .groupby(cell_region_name, sort=False).apply(lambda g: g.index[0]))
     pts_source.drop(columns=['_cell_pop'], inplace=True)
@@ -631,10 +643,10 @@ def search_and_aggregate(
         dists = np_norm(all_xy - rep_xy, axis=1)
         brute_sums = all_vals[dists <= r].sum(axis=0)
         
-        # Initialize own_vals as 0 or None in case exclude_pt_itself is False
+        # Initialize own_vals as 0 or None in case exclude_self is False
         own_vals = 0.0 
         
-        if exclude_pt_itself and grid.search.tgt_df_contains_src_df:
+        if exclude_self and grid.search.tgt_df_contains_src_df:
             if n_cols > 1:
                 own_vals = pts_target.loc[rep_idx, c].values.astype(float)
             else:

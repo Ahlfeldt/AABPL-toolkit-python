@@ -33,3 +33,5 @@ perf_test_gen/*
 Test*.ipynb
 Test.ipynb
 README.diverged.md
+region_stats
+region_stats/*

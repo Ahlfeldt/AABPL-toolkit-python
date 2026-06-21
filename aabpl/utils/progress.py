@@ -29,6 +29,11 @@ _OUTER_PROGRESS: _contextvars.ContextVar = _contextvars.ContextVar(
     '_aabpl_outer_progress', default=None
 )
 
+# Module-level reference to whichever bar is currently rendering a \r line.
+# Any bar sets this in start() and clears it in done()/cancel().
+# progress_print() uses it to erase the line before printing and redraw after.
+_ACTIVE_BAR = None
+
 # Wall time: used for ETA display (what the user actually waits for).
 _wall = _time.perf_counter
 # CPU time: used for EMA learning (immune to parallel load on a busy machine).
@@ -57,13 +62,17 @@ def progress_print(*args, **kwargs) -> None:
     Clears the current bar line, prints the message (with a newline so it
     stays visible), then redraws the bar on the line below.  Falls back to
     plain ``print`` when no bar is active.
+
+    Works for all bar types (DiskRegionProgress, SearchProgress,
+    RadiusSearchProgress, SweepProgress) — whichever called start() most
+    recently is tracked in _ACTIVE_BAR.
     """
-    outer = _OUTER_PROGRESS.get()
-    if outer is not None and getattr(outer, '_active', False):
+    bar = _ACTIVE_BAR
+    if bar is not None and getattr(bar, '_active', False):
         _sys.stdout.write(f"\r{' ' * _LINE_WIDTH}\r")
         _sys.stdout.flush()
         print(*args, **kwargs)
-        outer._render()
+        bar._render()
     else:
         print(*args, **kwargs)
 
@@ -138,10 +147,12 @@ class DiskRegionProgress:
         self._base_silent = silent
 
     def start(self) -> None:
+        global _ACTIVE_BAR
         if self._base_silent or not SHOW_PROGRESS or _BUILD_EST_SECONDS < _MIN_SECONDS_TO_SHOW or _OUTER_PROGRESS.get() is not None:
             self._active = False
             return
         self._active = True
+        _ACTIVE_BAR = self
         self._run_start_wall = _wall()
         self._run_start_cpu = _cpu()
         self._stage = -1
@@ -155,10 +166,12 @@ class DiskRegionProgress:
         self._render()
 
     def done(self) -> None:
-        global _BUILD_EST_SECONDS
+        global _BUILD_EST_SECONDS, _ACTIVE_BAR
         if not self._active:
             return
         self._active = False
+        if _ACTIVE_BAR is self:
+            _ACTIVE_BAR = None
         _sys.stdout.write("\r" + " " * _LINE_WIDTH + "\r")
         _sys.stdout.flush()
         wall_actual = _wall() - self._run_start_wall
@@ -168,9 +181,12 @@ class DiskRegionProgress:
 
     def cancel(self) -> None:
         """Erase the progress line without updating the EMA (use on error)."""
+        global _ACTIVE_BAR
         if not self._active:
             return
         self._active = False
+        if _ACTIVE_BAR is self:
+            _ACTIVE_BAR = None
         _sys.stdout.write("\r" + " " * _LINE_WIDTH + "\r")
         _sys.stdout.flush()
 
@@ -239,6 +255,7 @@ class SearchProgress:
     _UPDATE_INTERVAL: float = 2.0
 
     def start(self) -> None:
+        global _ACTIVE_BAR
         if self._base_silent or not SHOW_PROGRESS or _OUTER_PROGRESS.get() is not None:
             self._active = False
             return
@@ -254,6 +271,7 @@ class SearchProgress:
         self.next_threshold = min(max(1, self._n_pts // 10), pts_per_interval)
         if est_wall >= _MIN_SECONDS_TO_SHOW:
             self._active = True
+            _ACTIVE_BAR = self
             remaining = _fmt_eta(est_wall)
             bar = ">" + " " * (_BAR_WIDTH - 1)
             n_str = f"{self._n_pts:,} pts"
@@ -276,7 +294,9 @@ class SearchProgress:
                 step = max(1, self.next_threshold - self._last_update_i)
                 self._last_update_i = i
                 return i + step
+            global _ACTIVE_BAR
             self._active = True  # run is slower than estimated — show bar now
+            _ACTIVE_BAR = self
         try:
             p = i / self._n_pts
             est_wall = _SEARCH_EST_SECONDS * _ratio()
@@ -307,10 +327,12 @@ class SearchProgress:
         return i + pts_per_interval
 
     def done(self) -> None:
-        global _SEARCH_EST_SECONDS
+        global _SEARCH_EST_SECONDS, _ACTIVE_BAR
         if not self._active:
             return
         self._active = False
+        if _ACTIVE_BAR is self:
+            _ACTIVE_BAR = None
         _sys.stdout.write("\r" + " " * _LINE_WIDTH + "\r")
         _sys.stdout.flush()
         wall_actual = _wall() - self._run_start_wall
@@ -364,9 +386,11 @@ class _CombinedProgress:
         self._stage_map = {name: frac for name, frac in self._STAGE_WEIGHTS}
 
     def start(self) -> None:
+        global _ACTIVE_BAR
         if self._silent or not SHOW_PROGRESS:
             return
         self._active = True
+        _ACTIVE_BAR = self
         self._t0 = _wall()
         self._cpu0 = _cpu()
         self._progress = 0.0
@@ -380,9 +404,12 @@ class _CombinedProgress:
         self._render()
 
     def done(self) -> None:
+        global _ACTIVE_BAR
         if not self._active:
             return
         self._active = False
+        if _ACTIVE_BAR is self:
+            _ACTIVE_BAR = None
         wall_elapsed = _wall() - self._t0
         cpu_elapsed  = _cpu()  - self._cpu0
         type(self)._est_seconds = (1 - _EMA_ALPHA) * type(self)._est_seconds + _EMA_ALPHA * wall_elapsed
@@ -391,9 +418,12 @@ class _CombinedProgress:
         _sys.stdout.flush()
 
     def cancel(self) -> None:
+        global _ACTIVE_BAR
         if not self._active:
             return
         self._active = False
+        if _ACTIVE_BAR is self:
+            _ACTIVE_BAR = None
         _sys.stdout.write("\r" + " " * _LINE_WIDTH + "\r")
         _sys.stdout.flush()
 
@@ -471,7 +501,9 @@ class SweepProgress:
         self._active = False
 
     def start(self) -> None:
+        global _ACTIVE_BAR
         self._active = True
+        _ACTIVE_BAR = self
         self._t0 = _wall()
         self._done = 0
         self._label = ""
@@ -498,9 +530,12 @@ class SweepProgress:
         self._render()
 
     def done(self) -> None:
+        global _ACTIVE_BAR
         if not self._active:
             return
         self._active = False
+        if _ACTIVE_BAR is self:
+            _ACTIVE_BAR = None
         _sys.stdout.write(f"\r{' ' * _LINE_WIDTH}\r")
         elapsed = _wall() - self._t0
         _sys.stdout.write(f"  sweep done  {self._n} runs  {elapsed:.1f}s\n")

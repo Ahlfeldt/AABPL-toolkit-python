@@ -57,22 +57,31 @@ class CellKeyCodec:
         return _np.array([rq, cq], dtype=_np.int64)
 
     def offset_int(self, cells):
+        """Return int64 offset array for a collection of (lvl, (dr, dc)) cells.
+
+        Accepts either the classic list/set of ``(lvl, (dr, dc))`` tuples OR a
+        compact ``np.ndarray`` of shape ``(N, 3)`` with columns ``[lvl, dr, dc]``
+        (float32 or float64).  Both produce identical results.
+
+        Guarantee: ``home(pt_row, pt_col) + offset_int == key(lvl, pt_row+dr, pt_col+dc)``
         """
-        Berechnet den relativen Speicher-Schrittweiten-Offset.
-        Garantiert: home(pt_row, pt_col) + offset_int == key(lvl, pt_row + dr, pt_col + dc)
-        """
-        cells = list(cells)
-        if not cells:
-            return _np.empty(0, dtype=_np.int64)
-        
-        # FIX: Explizites Entpacken des inneren Koordinaten-Tupels (dr, dc)
-        lv = _np.fromiter((c[0] for c in cells), _np.float64, len(cells))
-        dr = _np.fromiter((c[1][0] for c in cells), _np.float64, len(cells))
-        dc = _np.fromiter((c[1][1] for c in cells), _np.float64, len(cells))
-        
+        if isinstance(cells, _np.ndarray):
+            if cells.shape[0] == 0:
+                return _np.empty(0, dtype=_np.int64)
+            lv = cells[:, 0].astype(_np.float64)
+            dr = cells[:, 1].astype(_np.float64)
+            dc = cells[:, 2].astype(_np.float64)
+        else:
+            cells = list(cells)
+            if not cells:
+                return _np.empty(0, dtype=_np.int64)
+            lv = _np.fromiter((c[0]    for c in cells), _np.float64, len(cells))
+            dr = _np.fromiter((c[1][0] for c in cells), _np.float64, len(cells))
+            dc = _np.fromiter((c[1][1] for c in cells), _np.float64, len(cells))
+
         lvl = lv.astype(_np.int64)
-        return (lvl * self.lvl_stride 
-                + self._to_scaled_int(dr) * self.row_stride 
+        return (lvl * self.lvl_stride
+                + self._to_scaled_int(dr) * self.row_stride
                 + self._to_scaled_int(dc))
 
 
