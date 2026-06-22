@@ -586,7 +586,6 @@ def choose_spacing_and_depth(
     def _is_cached(s, nd):
         return (round(s, 8), nd, False) in cache or (round(s, 8), nd, True) in cache
 
-    pairs = [(s, nd) for s in candidate_spacings for nd in candidate_depths]
 
     best_total        = math.inf
     best_pair         = (candidate_spacings[0], candidate_depths[0])
