@@ -63,67 +63,51 @@ from aabpl import (
 Explain the syntax with its arguments here
 
 ### Examples
-#### Example 1:
+
+See [`Example.py`](https://github.com/Ahlfeldt/AABPL-toolkit-python/blob/main/Example.py) (or [`Example.ipynb`](https://github.com/Ahlfeldt/AABPL-toolkit-python/blob/main/Example.ipynb)) for a full ready-to-run script. The core call looks like this:
+
+```python
+from pandas import read_csv
+from aabpl import detect_cluster_cells, radius_sum
+
 path_to_your_csv = 'input_data/hist_New_York.txt'
 crs_of_your_csv =  "EPSG:4326"
 pts = read_csv(path_to_your_csv, sep=",", header=None)
-pts.columns = ["eid", "employment", "industry", "lat","lon","moved"]
+pts.columns = ["eid", "employment", "industry", "lat", "lon", "moved"]
 
 grid = detect_cluster_cells(
     pts=pts,
     crs=crs_of_your_csv,
     r=750,
-    c='employment', # Name of the column or list of columns for which values shall be aggregated within search radius 
-    exclude_pt_itself=True, # False
-    sample_area='buff_cells_min_pts', # 'concave', 'convex', 'buffer', 'bounding_box', 'grid' or None
-    min_pts_to_sample_cell=1, # 0, 10
-    weight_valid_area=None, # 'estimate', 'precise'
+    c='employment',                     # column(s) to aggregate within search radius
+    exclude_pt_itself=True,
+    sample_area='buff_cells_min_pts',   # 'concave', 'convex', 'buffer', 'bounding_box', 'grid' or None
+    min_pts_to_sample_cell=1,
+    weight_valid_area=None,             # 'estimate' or 'precise'
     k_th_percentile=99.5,
     n_random_points=100000,
     random_seed=0,
-    queen_contingency=1, # 0, 2
+    queen_contingency=1,
     centroid_dist_threshold=2500,
     border_dist_threshold=1000,
     min_cluster_share_after_contingency=0.05,
-    spacing=250, # sets the cell width and height, if None defaults to r/3 
-    make_convex=True, # False
+    spacing=250,                        # output cell size; defaults to r/3
+    make_convex=True,
 )
 
-## Save DataFrames with radius sums and clusters
-# Using all the save options below is most likely excessive. 
-# saving the shapefile for save_cell_clusters and save_sparse_grid is most
-# likely sufficient
+# Save outputs
+df_clusters    = grid.save_cell_clusters(filename='output_gis/clusters',   file_format='shp')
+df_sparse_grid = grid.save_sparse_grid( filename='output_gis/sparse_grid', file_format='shp')
+pts.to_csv('output_data/pts_df_w_clusters.csv')
 
-# save files as needed
-# save only only clusters including their geometry, aggregate values, area and id
-df_clusters = grid.save_cell_clusters(filename=output_gis_folder+'clusters', file_format='shp')
-df_clusters = grid.save_cell_clusters(filename=output_data_folder+'clusters', file_format='csv')
+# Plots
+grid.plot.clusters(  'output_maps/clusters_employment_750m_995th')
+grid.plot.vars(      filename='output_maps/employment_vars')
+grid.plot.cluster_pts(filename='output_maps/employment_cluster_pts')
+grid.plot.rand_dist( filename='output_maps/rand_dist_employment')
 
-# save sparse grid including cells only those cells that at least contain one point
-df_sparse_grid = grid.save_sparse_grid(filename=output_gis_folder+'sparse_grid', file_format='shp')
-df_sparse_grid = grid.save_sparse_grid(filename=output_data_folder+'sparse_grid', file_format='csv')
-
-# save full grid including cells that have no points in them (through many empty cells this will occuppy unecessary disk space)
-# df_full_grid = grid.save_full_grid(filename=output_gis_folder+'full_grid', file_format='shp')
-# df_full_grid = grid.save_full_grid(filename=output_data_folder+'full_grid', file_format='csv')
-
-pts.to_csv(output_data_folder+'pts_df_w_clusters.csv')
-
-# CREATE PLOTS
-fig = grid.plot.clusters(output_maps_folder+'clusters_employment_750m_995th')
-fig = grid.plot.vars(filename=output_maps_folder+'employment_vars')
-fig = grid.plot.cluster_pts(filename=output_maps_folder+'employment_cluster_pts')
-fig = grid.plot.rand_dist(filename=output_maps_folder+'rand_dist_employment')
-
-# Alternatively if you are only interested in calculating the sums within disk around pts you may use this
-grid = radius_sum(
-    pts=pts,
-    crs=crs_of_your_csv,
-    r=750,
-    c='employment', # Name of the column or list of columns for which values shall be aggregated within search radius 
-    exclude_pt_itself=True
-)
-
+# Radius search only (no clustering)
+grid = radius_sum(pts=pts, crs=crs_of_your_csv, r=750, c='employment', exclude_pt_itself=True)
 ```
 
 
@@ -155,8 +139,8 @@ For future versions of the package, we aim to allow for a shapefile that defines
 
 The package will create the a number of folders in your working directory into which the outputs will be saved. File names are those specified in the `Example.py` file (you may choose different names). 
 
-Folder | File  | Description |
-|:------------------------|:-----------------------|:----------------------------------------------------------------------------------|
+| Folder | File | Description |
+|:---|:---|:---|
 | output_data | `clusters.csv` | CSV file containing information on the final delineated clusters, including geographic coordinates in decimal degrees, a cluster id that corresponds to the rank in the distribution of total mass within the cluster (in our case employment), the number of cells within the cluster, the total area of the cluster (in square meters). You may choose another file name in the 'Example.py' script. |
 | output_data | `grid_clusters.csv` | CSV file containing a gridded version of the data set, including groups of clustered grid cells identified by the cluster id, geographic coordinates in decimal degrees, and the total mass in the grid cell (in our case employment). You may choose another file name in the 'Example.py' script.   |
 | output_data | `pts_df_w_clusters.csv` | CSV file containing the plants with the input data and, in addition, an identifier for the cluster to which a plant belongs. You may choose another file name in the 'Example.py' script. |
@@ -177,7 +161,7 @@ All functions are available directly on the `aabpl` module after `import aabpl`.
 
 | Function | Description |
 |:---|:---|
-| **`radius_search(pts, crs, r, c, stat, ...)`** | **Core function.** For every point in `pts`, aggregates values of neighbouring points within radius `r`. Adds the result as a new column. Supports `stat` ∈ `{sum, count, mean, variance, std, cv, skewness, kurtosis}`. |
+| **`radius_search(pts, crs, r, c, stat, ...)`** | **Core function.** For every point in `pts`, aggregates values of neighbouring points within radius `r`. Adds the result as a new column. Supports `stat` in `{sum, count, mean, variance, std, cv, skewness, kurtosis}`. |
 | `radius_sum(pts, crs, r, c, ...)` | Shorthand for `radius_search(..., stat='sum')`. |
 | `radius_count(pts, crs, r, c, ...)` | Shorthand for `radius_search(..., stat='count')`. |
 | `radius_mean(pts, crs, r, c, ...)` | Shorthand for `radius_search(..., stat='mean')`. |

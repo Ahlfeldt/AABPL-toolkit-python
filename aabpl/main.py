@@ -388,11 +388,15 @@ def radius_search(
             - ``'buffer'``: buffer around individual points (slow for large datasets)
             - ``'bounding_box'``: axis-aligned bounding box
             - ``'grid'`` or ``None``: full grid extent
-        Alternatively pass a Shapely geometry directly (must already be in the metric projection).
+        Alternatively pass any Shapely ``Polygon`` or ``MultiPolygon`` directly. If the geometry
+        is in a geographic CRS (e.g. WGS-84), set ``sample_area_crs`` to its CRS string and it
+        will be reprojected automatically. If ``sample_area_crs`` is None the geometry is assumed
+        to already be in the same metric projection used internally.
         See ``infer_sample_area_from_pts`` for finer control (default=False).
     sample_area_crs (str):
-        CRS of the ``sample_area`` polygon. Ignored when ``sample_area`` is a string.
-        Defaults to ``crs`` when None (default=None).
+        CRS of the ``sample_area`` polygon (e.g. ``'EPSG:4326'``). Ignored when ``sample_area``
+        is a string. When None, the geometry is assumed to already be in the internal metric
+        projection (default=None).
     x (str):
         Column name of the x-coordinate (longitude) in ``pts`` (default=``'lon'``).
     y (str):
@@ -1058,7 +1062,7 @@ def detect_cluster_pts(
         grid.plot.cluster_pts(**plot_cluster_points)
 
     if not keep_cols:
-        _keep_extra = {grid.output_row_name, grid.output_col_name}
+        _keep_extra = {grid.output_row_name, grid.output_col_name, init_sort}
         _to_drop = [
             col for col in pts.columns
             if col not in _cols_before and col not in _output_cols and col not in _keep_extra
@@ -1147,7 +1151,10 @@ def detect_cluster_cells(
             - ``'buffer'``: buffer around individual points (slow for large datasets)
             - ``'bounding_box'``: axis-aligned bounding box
             - ``'grid'`` or ``None``: full grid extent
-        Alternatively pass a Shapely geometry directly (must already be in the metric projection).
+        Alternatively pass any Shapely ``Polygon`` or ``MultiPolygon`` directly. If the geometry
+        is in a geographic CRS (e.g. WGS-84), set ``sample_area_crs`` to its CRS string and it
+        will be reprojected automatically. If ``sample_area_crs`` is None the geometry is assumed
+        to already be in the same metric projection used internally.
         See ``infer_sample_area_from_pts`` for finer control (default='buff_non_empty_cells').
     sample_area_crs (str):
         CRS of the ``sample_area`` polygon. Ignored when ``sample_area`` is a string.
@@ -1231,7 +1238,7 @@ def detect_cluster_cells(
 
     grid = detect_cluster_pts(
         pts=pts,
-        crs=local_crs,
+        crs=local_crs if local_crs is not None else '',
         r=r,
         c=c,
         stat=stat,
@@ -1259,7 +1266,7 @@ def detect_cluster_cells(
         spacing=spacing,
         plot_distribution=plot_distribution,
         plot_cluster_points=plot_cluster_points,
-        keep_cols=keep_cols,
+        keep_cols=True,  # cell ids (row_name/col_name) are needed for clustering below
         overwrite=overwrite,
         _dev=_dev,
         silent=silent,
@@ -1417,7 +1424,7 @@ def detect_cluster_cells_from_labeled_pts(
     )
 
     if not keep_cols:
-        _keep_extra = {grid.output_row_name, grid.output_col_name}
+        _keep_extra = {grid.output_row_name, grid.output_col_name, init_sort}
         _to_drop = [
             col for col in pts.columns
             if col not in _cols_before and col not in _output_cols and col not in _keep_extra

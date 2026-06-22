@@ -606,7 +606,7 @@ def search_and_aggregate(
     if exclude_self:
         # TODO when implementing max,min,range - excluding the point itself cannot be done. Docstring for those function need to tell that.
         # if we only have max,min,range as method and this option is on, consider informing via print 
-        if True or grid.search.tgt_df_contains_src_df:
+        if grid.search.tgt_df_contains_src_df:
             for sum_name, value_col in zip(sum_radius_names, c):
                 pts_source[sum_name] = pts_source[sum_name].values - pts_source[value_col]
         else:

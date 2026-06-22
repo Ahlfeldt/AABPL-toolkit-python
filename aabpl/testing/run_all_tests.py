@@ -243,6 +243,173 @@ check((pts['val_r_count'] >= 0).all(), "stat='count': negative values")
 print(f"  c=['val'] stat='count'  sum={pts['val_r_count'].sum():.0f}  OK")
 
 # ═══════════════════════════════════════════════════════════════════════════════
+section("11 · keep_cols behaviour and stat helper cleanup")
+# ═══════════════════════════════════════════════════════════════════════════════
+
+GRID_COLS  = {'id_y', 'id_x'}   # default row_name / col_name
+PROJ_COLS  = {'proj_x', 'proj_y'}
+
+# 11a: keep_cols=False (default) — only requested output cols added
+pts = pts_base.copy()
+cols_before = set(pts.columns)
+aabpl.radius_search(pts=pts, crs='', r=R, c=['val'], x='x', y='y',
+                    stat='sum', silent=True, _dev=DEV)
+added = set(pts.columns) - cols_before
+check(added == {f'val_sum_{R}'}, f"keep_cols=False: unexpected cols added: {added}")
+print(f"  keep_cols=False (sum)  added={added}  OK")
+
+# 11b: keep_cols=True — grid/proj cols kept, but NO internal helpers
+pts = pts_base.copy()
+cols_before = set(pts.columns)
+aabpl.radius_search(pts=pts, crs='', r=R, c=['val'], x='x', y='y',
+                    stat='sum', keep_cols=True, silent=True, _dev=DEV)
+added = set(pts.columns) - cols_before
+internal_leaked = [c for c in added if '__rs_int__' in c]
+check(not internal_leaked, f"keep_cols=True: internal helpers leaked: {internal_leaked}")
+check(f'val_sum_{R}' in added, "keep_cols=True: output col missing")
+print(f"  keep_cols=True (sum)  added={sorted(added)}  OK")
+
+# 11c: keep_cols=None — grid index cols kept, proj cols kept, no helpers
+pts = pts_base.copy()
+cols_before = set(pts.columns)
+aabpl.radius_search(pts=pts, crs='', r=R, c=['val'], x='x', y='y',
+                    stat='sum', keep_cols=None, silent=True, _dev=DEV)
+added = set(pts.columns) - cols_before
+internal_leaked = [c for c in added if '__rs_int__' in c]
+check(not internal_leaked, f"keep_cols=None: internal helpers leaked: {internal_leaked}")
+check(f'val_sum_{R}' in added, "keep_cols=None: output col missing")
+print(f"  keep_cols=None (sum)  added={sorted(added)}  OK")
+
+# 11d: radius_count — count IS the output col, must be present
+pts = pts_base.copy()
+cols_before = set(pts.columns)
+aabpl.radius_count(pts=pts, crs='', r=R, c=['val'], x='x', y='y', silent=True, _dev=DEV)
+added = set(pts.columns) - cols_before
+check(any('cnt' in c or 'count' in c for c in added),
+      f"radius_count: count output col missing; added={added}")
+internal_leaked = [c for c in added if '__rs_int__' in c]
+check(not internal_leaked, f"radius_count: internal helpers leaked: {internal_leaked}")
+print(f"  radius_count  added={sorted(added)}  OK")
+
+# 11e: radius_variance — only variance col added, no count/sum helpers leaked
+pts = pts_base.copy()
+cols_before = set(pts.columns)
+aabpl.radius_variance(pts=pts, crs='', r=R, c=['val'], x='x', y='y', silent=True, _dev=DEV)
+added = set(pts.columns) - cols_before
+check(any('var' in c for c in added), f"radius_variance: variance col missing; added={added}")
+# count and sum helpers must NOT appear as output cols
+helper_leaked = [c for c in added if ('cnt' in c or 'count' in c or 'sum' in c) and '__rs_int__' not in c and c not in {f'val_var_{R}'}]
+check(not helper_leaked, f"radius_variance: count/sum helpers leaked into pts: {helper_leaked}")
+internal_leaked = [c for c in added if '__rs_int__' in c]
+check(not internal_leaked, f"radius_variance: internal helpers leaked: {internal_leaked}")
+print(f"  radius_variance  added={sorted(added)}  OK")
+
+# 11f: radius_variance + keep_cols=True — grid/proj cols kept, still no count/sum helpers
+pts = pts_base.copy()
+cols_before = set(pts.columns)
+aabpl.radius_variance(pts=pts, crs='', r=R, c=['val'], x='x', y='y',
+                      keep_cols=True, silent=True, _dev=DEV)
+added = set(pts.columns) - cols_before
+helper_leaked = [c for c in added if ('cnt' in c or 'count' in c or 'sum' in c) and '__rs_int__' not in c and c not in {f'val_var_{R}'}]
+check(not helper_leaked, f"radius_variance keep_cols=True: count/sum helpers leaked: {helper_leaked}")
+internal_leaked = [c for c in added if '__rs_int__' in c]
+check(not internal_leaked, f"radius_variance keep_cols=True: internal helpers leaked: {internal_leaked}")
+print(f"  radius_variance keep_cols=True  added={sorted(added)}  OK")
+
+# 11g: multi-stat ['variance','count'] — count IS requested so it must be present
+pts = pts_base.copy()
+cols_before = set(pts.columns)
+aabpl.radius_search(pts=pts, crs='', r=R, c=['val'], x='x', y='y',
+                    stat=['variance', 'count'], silent=True, _dev=DEV)
+added = set(pts.columns) - cols_before
+check(any('var' in c for c in added), f"multi [var,cnt]: variance col missing; added={added}")
+check(any('cnt' in c or 'count' in c for c in added), f"multi [var,cnt]: count col missing; added={added}")
+internal_leaked = [c for c in added if '__rs_int__' in c]
+check(not internal_leaked, f"multi [var,cnt]: internal helpers leaked: {internal_leaked}")
+print(f"  multi-stat ['variance','count']  added={sorted(added)}  OK")
+
+# ═══════════════════════════════════════════════════════════════════════════════
+section("12 · detect_cluster_pts  (crs='', nd=2, sum)")
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# This exercises the null-distribution path where random points (no 'val' col)
+# are the source. The exclude_self guard must NOT subtract src[value_col] there.
+
+pts = pts_base.copy()
+try:
+    grid = aabpl.detect_cluster_pts(
+        pts=pts, crs='', r=R, c=['val'], x='x', y='y',
+        stat='sum', n_random_points=500, random_seed=0,
+        silent=True, _dev=DEV,
+    )
+except Exception as e:
+    raise AssertionError(f"detect_cluster_pts raised: {e}")
+
+cluster_col = [c for c in pts.columns if 'cluster' in c.lower()]
+check(len(cluster_col) >= 1, f"detect_cluster_pts: no cluster column found; cols={list(pts.columns)}")
+check(pts[cluster_col[0]].dtype == bool or set(pts[cluster_col[0]].dropna().unique()) <= {0, 1, True, False},
+      f"detect_cluster_pts: cluster column not boolean; unique={pts[cluster_col[0]].unique()}")
+n_clustered = pts[cluster_col[0]].sum()
+print(f"  detect_cluster_pts  cluster_col={cluster_col[0]!r}  n_clustered={n_clustered}  OK")
+
+# ═══════════════════════════════════════════════════════════════════════════════
+section("12 · detect_cluster_cells  (crs='', nd=2, sum)")
+# ═══════════════════════════════════════════════════════════════════════════════
+
+pts = pts_base.copy()
+try:
+    grid = aabpl.detect_cluster_cells(
+        pts=pts, crs='', r=R, c=['val'], x='x', y='y',
+        stat='sum', n_random_points=500, random_seed=0,
+        silent=True, _dev=DEV,
+    )
+except Exception as e:
+    raise AssertionError(f"detect_cluster_cells raised: {e}")
+
+check(hasattr(grid, 'clustering'), "detect_cluster_cells: grid has no 'clustering' attribute")
+n_clusters = len(grid.clustering.cluster_ids) if grid.clustering is not None and hasattr(grid.clustering, 'cluster_ids') else '?'
+print(f"  detect_cluster_cells  n_clusters={n_clusters}  OK")
+
+# ═══════════════════════════════════════════════════════════════════════════════
+section("13 · detect_cluster_cells separate pts_target  (crs='', nd=2)")
+# ═══════════════════════════════════════════════════════════════════════════════
+# Ensures exclude_self is NOT applied when source != target.
+
+pts_src = pts_base.copy()
+pts_tgt = _make_pts(300, seed=99)
+try:
+    grid = aabpl.detect_cluster_cells(
+        pts=pts_src, crs='', r=R, c=['val'], x='x', y='y',
+        pts_target=pts_tgt, x_tgt='x', y_tgt='y',
+        stat='sum', n_random_points=500, random_seed=0,
+        silent=True, _dev=DEV,
+    )
+except Exception as e:
+    raise AssertionError(f"detect_cluster_cells (separate target) raised: {e}")
+
+print(f"  detect_cluster_cells separate pts_target  OK")
+
+# ═══════════════════════════════════════════════════════════════════════════════
+section("14 · detect_cluster_cells_from_labeled_pts  (crs='', nd=2)")
+# ═══════════════════════════════════════════════════════════════════════════════
+
+pts = pts_base.copy()
+# pre-label ~20% of points as clustered
+pts['cluster'] = pts['val'] > pts['val'].quantile(0.8)
+try:
+    grid = aabpl.detect_cluster_cells_from_labeled_pts(
+        pts=pts, crs='', r=R, c=['val'], x='x', y='y',
+        is_cluster_column='cluster',
+        suffix=f'_sum_{R}',
+        silent=True,
+    )
+except Exception as e:
+    raise AssertionError(f"detect_cluster_cells_from_labeled_pts raised: {e}")
+
+check(hasattr(grid, 'clustering'), "detect_cluster_cells_from_labeled_pts: grid has no 'clustering' attribute")
+print(f"  detect_cluster_cells_from_labeled_pts  OK")
+
+# ═══════════════════════════════════════════════════════════════════════════════
 print("\n" + "="*60)
 print("  ALL TESTS PASSED")
 print("="*60 + "\n")

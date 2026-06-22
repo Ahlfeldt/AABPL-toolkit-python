@@ -6,11 +6,11 @@ extra_test = ['pytest>=4', 'pytest-cov>=2',]
 extra_dev = [*extra_test,'twine>=4.0.2',]
 extra_ci = [*extra_test,'python-coveralls',]
 
-with open('./README.md', 'r') as f:
+with open('./README.md', 'r', encoding='utf-8') as f:
     long_description = f.read()
 setup(
     name=name,
-    version="0.3.2",
+    version="0.3.3",
     description='.',
     long_description=long_description,
     long_description_content_type='text/markdown',
