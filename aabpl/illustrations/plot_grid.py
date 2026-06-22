@@ -284,6 +284,8 @@ class GridPlots(object):
             sample_area_colors : list[str, str]
                 Two hex colours for [valid area, excluded area]
                 (default ``['#ffffff', '#bedbe6']``)
+            sample_area_linewidth : float
+                Border linewidth of the valid-area polygon (default ``0.5``).
 
         Returns
         -------

@@ -18,6 +18,7 @@ from .main import (
 )
 from .radius_search.grid_class import Grid
 from .radius_search.sample_area import infer_sample_area_from_pts
+from .radius_search.null_distribution import draw_random_coords
 from .utils.grid_aggregate import aggregate_to_grid
 
 __version__ = version('aabpl')

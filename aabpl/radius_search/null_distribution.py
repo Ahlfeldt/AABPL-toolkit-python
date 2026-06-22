@@ -212,18 +212,14 @@ def draw_random_points_in_sample_area(
             new_random_point_coordinates_in_sample_area =_np_array(
                 [
                 coords for coords in new_random_point_coordinates[rndm_cells_fully_valid]
+                if sample_area.covers(_shapely_Point(coords))
              ] +
             [
                 coords for coords,(lvl,row,col) in zip(
                     new_random_point_coordinates[~rndm_cells_fully_valid],
                     rndm_cells[~rndm_cells_fully_valid]
                 )
-                if cell_to_poly.get(
-                    (int(lvl),(
-                        (int if lvl >= 0 else float)(row),
-                        (int if lvl >= 0 else float)(col)
-                    )), sample_area
-                ).covers(_shapely_Point(coords)) 
+                if sample_area.covers(_shapely_Point(coords))
             ] #+
             # [
             #     coords for coords in new_random_point_coordinates[~rndm_cells_fully_valid]
@@ -260,21 +256,28 @@ def compute_null_distribution(
     suffix:str='_750m',
     random_seed:int=None,
     silent:bool=False,
+    null_distribution=None,
 ):
-    """Draws n_random_points within sample_area and aggregates data from points within search radius. 
-    From those values it calculates the k_th_percentile threshold value for the variable(s). This 
+    """Draws n_random_points within sample_area and aggregates data from points within search radius.
+    From those values it calculates the k_th_percentile threshold value for the variable(s). This
     execute methods
-    
-    k_th_percentile: in [0,100] k-th percentile 
+
+    k_th_percentile: in [0,100] k-th percentile
 
     1. draw n_random_points with draw_random_points_within_valid_area
     2. aggregate_point_data_to_disks_vectorized
-    TODO Check if how cluster value 
+    TODO Check if how cluster value
 
 
-    
+
     min_pts_to_sample_cell (int):
         minimum number of points in dataset that need to be in cell s.t. random points are allowed to be drawn within it. (default=1)
+    null_distribution (array-like or pd.DataFrame, optional):
+        User-supplied null-distribution coordinates. Must contain at least two columns (or be a
+        2-column array) with the same projected x/y units as ``pts``. When provided the internal
+        uniform-random draw is skipped and these coordinates are used directly. The radius sums
+        are still computed by the package. Useful when a non-uniform spatial distribution is
+        desired (e.g. stratified, clustered, or empirically derived reference points).
     """
     if type(k_th_percentile) != list:
         k_th_percentiles = [k_th_percentile for i in range(len(c))]
@@ -289,18 +292,34 @@ def compute_null_distribution(
     grid.cells_rndm_sample = True if min_pts_to_sample_cell == 0 else set((row, col) for row, col, cnt in _cell_count_iter(grid) if cnt >= min_pts_to_sample_cell)
     grid.sample_area = sample_area
 
-    random_point_coords = draw_random_points_in_sample_area(
-        grid=grid,
-        cell_width=grid._search_spacing,
-        n_random_points=n_random_points,
-        random_seed=random_seed,
-        cell_height=grid._search_spacing,
-    )
-
-    rndm_pts = _pd_DataFrame(
-        data = random_point_coords,
-        columns=[x,y]
-    )
+    if null_distribution is not None:
+        # User supplied their own null-distribution coordinates — skip internal draw.
+        if isinstance(null_distribution, _pd_DataFrame):
+            if x not in null_distribution.columns or y not in null_distribution.columns:
+                raise ValueError(
+                    f"null_distribution DataFrame must contain columns '{x}' and '{y}'. "
+                    f"Found: {list(null_distribution.columns)}"
+                )
+            rndm_pts = null_distribution[[x, y]].reset_index(drop=True).copy()
+        else:
+            arr = _np_array(null_distribution)
+            if arr.ndim != 2 or arr.shape[1] < 2:
+                raise ValueError(
+                    "null_distribution array must have shape (n, 2) with columns [x, y]."
+                )
+            rndm_pts = _pd_DataFrame(data=arr[:, :2], columns=[x, y])
+    else:
+        random_point_coords = draw_random_points_in_sample_area(
+            grid=grid,
+            cell_width=grid._search_spacing,
+            n_random_points=n_random_points,
+            random_seed=random_seed,
+            cell_height=grid._search_spacing,
+        )
+        rndm_pts = _pd_DataFrame(
+            data=random_point_coords,
+            columns=[x, y]
+        )
 
     grid.search.set_source(
         pts=rndm_pts,
@@ -324,13 +343,185 @@ def compute_null_distribution(
     )
     
     grid.rndm_pts = rndm_pts
-    
+    # Snapshot coords before perform_search cleanup drops them from rndm_pts.
+    grid._rndm_pts_x_snapshot = rndm_pts[x].values.copy()
+    grid._rndm_pts_y_snapshot = rndm_pts[y].values.copy()
+
     grid.search.perform_search(silent=True,)
 
     sum_radius_names = [(cname+suffix) for cname in c]
     disk_sums_for_random_points = rndm_pts[sum_radius_names].values
 
     cluster_threshold_values  = [_np_percentile(disk_sums_for_random_points[:,i], k_th_percentile,axis=0) for i, k_th_percentile in enumerate(k_th_percentiles)]
-    
-  
+
+
     return (cluster_threshold_values, rndm_pts)
+
+
+def draw_random_coords(
+    n_pts: int,
+    sample_area=None,
+    crs: str = None,
+    proj_crs: str = 'auto',
+    coord_generator=None,
+    random_seed=None,
+    x: str = 'x',
+    y: str = 'y',
+) -> _pd_DataFrame:
+    """Draw ``n_pts`` random coordinate pairs, optionally constrained to a valid area.
+
+    Use it to inspect, visualise, or pre-generate null-distribution coordinates
+    before passing them to ``detect_cluster_pts`` / ``detect_cluster_cells``
+    via the ``null_distribution`` argument.
+
+    Parameters
+    ----------
+    n_pts : int
+        Number of coordinate pairs to return.
+    sample_area : Polygon, MultiPolygon, or list of (x, y) tuples, optional
+        Valid area. Points that fall outside are rejected.
+        A coordinate list is interpreted as a ``shapely.Polygon`` automatically.
+        When ``None`` every coordinate produced by ``coord_generator`` is
+        accepted — ``coord_generator`` is then required.
+    crs : str, optional
+        CRS of ``sample_area`` (e.g. ``'EPSG:4326'``). When provided the
+        geometry is reprojected to ``proj_crs`` before sampling, using the
+        same ``convert_MultiPolygon_crs`` utility used internally by
+        ``detect_cluster_pts``. Leave ``None`` when ``sample_area`` is already
+        in the target projected CRS (metres).
+    proj_crs : str, default ``'auto'``
+        Target projected CRS. ``'auto'`` picks the best UTM zone from the
+        centroid of ``sample_area`` (requires ``sample_area`` to be supplied
+        and ``crs`` to be set). Pass an explicit EPSG string (e.g.
+        ``'EPSG:32618'``) to override. Ignored when ``crs`` is ``None``.
+    coord_generator : callable, optional
+        ``coord_generator(n, rng) -> array-like of shape (n, 2)``
+        where ``n`` is the number of candidates to produce in one batch and
+        ``rng`` is a ``numpy.random.Generator``. The function may return more
+        or fewer than ``n`` rows; the loop keeps calling it until ``n_pts``
+        valid points have been collected.
+
+        When ``None`` (default) a uniform draw over the bounding box of
+        ``sample_area`` is used — ``sample_area`` must be supplied in that
+        case.
+    random_seed : int, optional
+        Seed for the internal ``numpy.random.Generator``.
+    x, y : str
+        Column names for the returned DataFrame (default ``'x'``, ``'y'``).
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with columns ``[x, y]`` and exactly ``n_pts`` rows,
+        in the projected CRS (metres) when ``crs`` is supplied.
+
+    Examples
+    --------
+    Uniform draw inside a polygon (already projected)::
+
+        from shapely.geometry import Polygon
+        import aabpl
+        poly = Polygon([(0,0),(10000,0),(10000,10000),(0,10000)])
+        pts = aabpl.draw_random_coords(5000, sample_area=poly, random_seed=42)
+
+    From a coordinate list, auto-reprojected from WGS-84::
+
+        coords = [(-74.05, 40.65), (-73.85, 40.65), (-73.85, 40.85), (-74.05, 40.85)]
+        pts = aabpl.draw_random_coords(5000, sample_area=coords,
+                                        crs='EPSG:4326', random_seed=42)
+
+    Custom generator (e.g. clustered reference points)::
+
+        import numpy as np
+        def clustered(n, rng):
+            centres = rng.uniform(0, 10000, (10, 2))
+            idx = rng.integers(0, 10, n)
+            return centres[idx] + rng.normal(0, 500, (n, 2))
+
+        pts = aabpl.draw_random_coords(5000, sample_area=poly,
+                                        coord_generator=clustered)
+    """
+    import numpy as _np
+    from numpy.random import default_rng as _default_rng
+    from shapely.geometry import Polygon as _Polygon, MultiPolygon as _MultiPolygon
+
+    if sample_area is None and coord_generator is None:
+        raise ValueError(
+            "Provide at least one of 'sample_area' or 'coord_generator'. "
+            "When 'sample_area' is None every produced coordinate is accepted, "
+            "so 'coord_generator' must define the distribution."
+        )
+
+    # --- coerce coordinate list to Shapely Polygon ----------------------------
+    if sample_area is not None and not isinstance(sample_area, (_Polygon, _MultiPolygon)):
+        try:
+            sample_area = _Polygon(sample_area)
+        except Exception as e:
+            raise ValueError(
+                "sample_area must be a Shapely Polygon, MultiPolygon, or a list of "
+                f"(x, y) coordinate tuples. Could not interpret as Polygon: {e}"
+            )
+
+    # --- CRS reprojection (reuses shared utility from crs_transformation) -----
+    if crs is not None and sample_area is not None:
+        from aabpl.utils.crs_transformation import convert_MultiPolygon_crs, convert_wgs_to_utm
+        from pyproj import Transformer as _Transformer
+        if proj_crs == 'auto':
+            if crs != 'EPSG:4326':
+                # convert centroid to WGS-84 first to pick the right UTM zone
+                cx, cy = sample_area.centroid.coords[0]
+                t = _Transformer.from_crs(crs, 'EPSG:4326', always_xy=True)
+                cx_wgs, cy_wgs = t.transform(cx, cy)
+            else:
+                cx_wgs, cy_wgs = sample_area.centroid.coords[0]
+            proj_crs = 'EPSG:' + str(convert_wgs_to_utm(cx_wgs, cy_wgs))
+        if crs != proj_crs:
+            sample_area = convert_MultiPolygon_crs(sample_area, initial_crs=crs, target_crs=proj_crs)
+    elif crs is not None and sample_area is None:
+        raise ValueError(
+            "crs is set but sample_area is None — cannot determine target projection "
+            "without a geometry anchor. Either supply sample_area or set proj_crs explicitly "
+            "and reproject your coord_generator output yourself."
+        )
+
+    rng = _default_rng(random_seed)
+
+    # --- default generator: uniform over bounding box of sample_area ----------
+    if coord_generator is None:
+        xmin, ymin, xmax, ymax = sample_area.bounds
+        def coord_generator(n, rng):
+            return _np.column_stack([
+                rng.uniform(xmin, xmax, n),
+                rng.uniform(ymin, ymax, n),
+            ])
+
+    # --- draw loop ------------------------------------------------------------
+    collected = _np_ndarray(shape=(0, 2))
+    batch = max(1000, int(n_pts * 1.2))
+
+    while len(collected) < n_pts:
+        candidates = _np_array(coord_generator(batch, rng))
+        if candidates.ndim != 2 or candidates.shape[1] < 2:
+            raise ValueError(
+                "coord_generator must return an array-like of shape (n, 2). "
+                f"Got shape {candidates.shape}."
+            )
+        coords = candidates[:, :2]
+
+        if sample_area is not None:
+            coords = _np_array([
+                c for c in coords if sample_area.covers(_shapely_Point(c))
+            ])
+
+        if len(coords) > 0:
+            collected = _np_vstack([collected, coords])
+
+        # adapt batch size based on observed acceptance rate
+        accepted = len(coords)
+        if accepted > 0:
+            rate = accepted / len(candidates)
+            needed = n_pts - len(collected)
+            batch = max(1000, int(needed / rate * 1.2))
+
+    result = collected[:n_pts]
+    return _pd_DataFrame(data=result, columns=[x, y])

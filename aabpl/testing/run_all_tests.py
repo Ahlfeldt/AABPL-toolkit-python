@@ -460,6 +460,37 @@ except Exception as e:
     raise AssertionError(f"grid.plot.rand_dist raised after keep_cols=False cleanup: {e}")
 
 # ═══════════════════════════════════════════════════════════════════════════════
+section("16 · custom sample_area: Polygon and MultiPolygon containment check")
+# ═══════════════════════════════════════════════════════════════════════════════
+# Verifies that ALL random null-distribution points fall inside the user-supplied
+# polygon/multipolygon.  Uses crs='' (Cartesian) so projected coords == input coords.
+from shapely.geometry import Polygon, MultiPolygon, Point
+
+pts_sa = _make_pts(2000, seed=7)
+# Two non-overlapping rectangles that together cover the point cloud
+poly_a = Polygon([(5000,5000),(30000,5000),(30000,30000),(5000,30000)])
+poly_b = Polygon([(32000,32000),(48000,32000),(48000,48000),(32000,48000)])
+multi  = MultiPolygon([poly_a, poly_b])
+
+for label, sa in [('Polygon', poly_a), ('MultiPolygon', multi)]:
+    pts = pts_sa.copy()
+    grid_sa = aabpl.detect_cluster_pts(
+        pts=pts, crs='', r=R, c=['val'], x='x', y='y',
+        sample_area=sa,
+        n_random_points=2000, random_seed=0,
+        silent=True, _dev=DEV,
+    )
+    xs = grid_sa._rndm_pts_x_snapshot
+    ys = grid_sa._rndm_pts_y_snapshot
+    check(xs is not None, f"{label}: _rndm_pts_x_snapshot is None")
+    n_outside = sum(
+        not sa.covers(Point(x, y)) for x, y in zip(xs, ys)
+    )
+    check(n_outside == 0,
+          f"{label}: {n_outside}/{len(xs)} random points fall outside the supplied polygon")
+    print(f"  {label}: all {len(xs)} random points inside supplied geometry  OK")
+
+# ═══════════════════════════════════════════════════════════════════════════════
 print("\n" + "="*60)
 print("  ALL TESTS PASSED")
 print("="*60 + "\n")

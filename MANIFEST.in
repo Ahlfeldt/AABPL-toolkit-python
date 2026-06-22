@@ -1,0 +1,6 @@
+exclude .eggs
+prune .eggs
+prune dist
+prune build
+prune __pycache__
+prune *.egg-info

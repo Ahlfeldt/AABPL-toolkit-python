@@ -1,7 +1,7 @@
 from numpy import (
-    array as _np_array, 
+    array as _np_array, arange as _np_arange,
     exp as _np_exp,
-    unique, linspace, invert, flip, transpose, concatenate, sign, zeros, 
+    unique, linspace, invert, flip, transpose, concatenate, sign, zeros,
     min as _np_min, max as _np_max, equal, where, logical_or, logical_and, all, newaxis)
 from math import inf as _math_inf, pi as _math_pi, acos as _math_acos, sin as _math_sin, log2 as _math_log2
 from shapely.geometry import (
@@ -200,16 +200,21 @@ def intersect_polygon_with_grid(
     row_min = min(grid._search_row_ids)
     col_max = max(grid._search_col_ids)
     row_max = max(grid._search_row_ids)
-    grid.sample_x_steps = _np_array(
-        [grid.total_bounds.xmin + pad*grid._search_spacing for pad in range(grid.sample_col_min-min(grid._search_col_ids), 0)] +  
-        list(grid._search_x_steps) + 
-        [grid.total_bounds.xmax + pad*grid._search_spacing for pad in range(1, grid.sample_col_max - max(grid._search_col_ids) + 1)]
-    )
-    grid.sample_y_steps = _np_array(
-        [grid.total_bounds.ymin + pad*grid._search_spacing for pad in range(grid.sample_row_min-min(grid._search_row_ids), 0)] +  
-        list(grid._search_y_steps) + 
-        [grid.total_bounds.ymax + pad*grid._search_spacing for pad in range(1, grid.sample_row_max - max(grid._search_row_ids) + 1)]
-    )
+    _sp = grid._search_spacing
+    _x0, _y0 = grid.total_bounds.xmin, grid.total_bounds.ymin
+    _x1, _y1 = grid.total_bounds.xmax, grid.total_bounds.ymax
+    _col_lo, _col_hi = min(grid._search_col_ids), max(grid._search_col_ids)
+    _row_lo, _row_hi = min(grid._search_row_ids), max(grid._search_row_ids)
+    grid.sample_x_steps = concatenate([
+        _np_arange(_x0 + (sample_col_min - _col_lo) * _sp, _x0, _sp) if sample_col_min < _col_lo else _np_array([]),
+        grid._search_x_steps,
+        _np_arange(_x1 + _sp, _x0 + (sample_col_max + 1) * _sp + _sp * 0.5, _sp) if sample_col_max > _col_hi else _np_array([]),
+    ])
+    grid.sample_y_steps = concatenate([
+        _np_arange(_y0 + (sample_row_min - _row_lo) * _sp, _y0, _sp) if sample_row_min < _row_lo else _np_array([]),
+        grid._search_y_steps,
+        _np_arange(_y1 + _sp, _y0 + (sample_row_max + 1) * _sp + _sp * 0.5, _sp) if sample_row_max > _row_hi else _np_array([]),
+    ])
     # grid.sample_x_steps = _np_array(
     #     [grid.total_bounds.xmin - (col_min-col)*grid._search_spacing for col in range(sample_col_min, col_min)] +  
     #     list(grid._search_x_steps) + 
@@ -248,7 +253,7 @@ def intersect_polygon_with_grid(
     #clip_polygon_to_grid + split into subcells? 
     # unary union of polygons
     
-    used_poly_lvls = sorted(set([lvl for lvl,(row,col) in cell_to_poly if lvls_to_store==True or lvl in lvls_to_store]))
+    used_poly_lvls = sorted(set(lvl for lvl,(row,col) in cell_to_poly if lvls_to_store==True or lvl in lvls_to_store))
     min_lvl = int(min(used_poly_lvls))
     max_lvl = int(max(used_poly_lvls))
     abs_tol = rel_tol * (grid._search_spacing*2**-max_lvl)**2
@@ -273,8 +278,8 @@ def intersect_polygon_with_grid(
 
     # create unary union for cells with multiple polys
     cell_to_poly = {
-        k:_shapely_unary_union(v) if len(v)!=1 else v[0] 
-        for k,v in sorted([(k,v) for k,v in cell_to_poly.items()])
+        k:_shapely_unary_union(v) if len(v)!=1 else v[0]
+        for k,v in cell_to_poly.items()
         }
     # extract fully valid and partly valid cells
     cells_fully_valid  ={
@@ -359,7 +364,7 @@ def intersect_polygon_with_grid(
                 if (lvl, (row, col)) in cells_fully_valid:
                     cells_fully_valid.remove((lvl, (row, col)))
                 if (lvl, (row, col)) in cells_partly_valid_max_lvl:
-                    cells_partly_valid_max_lvl.remove((lvl, (row, col)), cell_parent)
+                    cells_partly_valid_max_lvl.discard((lvl, (row, col)))
             
             # if cell_parent_in_partly_valid:
             #     cells_partly_valid.remove(cell_parent)

@@ -69,6 +69,7 @@ def create_plots_for_vars(
         - ``s`` : float — scatter marker size (default auto)
         - ``vmin``, ``vmax`` : float — colormap range
         - ``sample_area_colors`` : list[str, str] — colours for [valid, excluded] area
+        - ``sample_area_linewidth`` : float — border linewidth of the valid-area polygon (default ``0.5``)
         - ``fig``, ``axs`` — existing Figure/Axes to draw into
     show : bool
         Display the figure (default ``True``).
@@ -99,7 +100,8 @@ def create_plots_for_vars(
         'cmap': 'Reds',
         'figsize': (10*ncols, 5*nrows),
         'additional_varnames':[],
-        'sample_area_colors': ["#ffffff",  "#bedbe6"]
+        'sample_area_colors': ["#ffffff",  "#bedbe6"],
+        'sample_area_linewidth': 0.5,
     }, **plot_kwargs)
     save_kwargs = {'dpi':300, 'bbox_inches':"tight", **save_kwargs}
     
@@ -109,6 +111,7 @@ def create_plots_for_vars(
     axs = plot_kwargs.pop('axs')
     
     sample_area_color, non_valid_area_color = plot_kwargs.pop('sample_area_colors')
+    sample_area_lw = plot_kwargs.pop('sample_area_linewidth')
     
     additional_varnames = plot_kwargs.pop('additional_varnames')
     if len(additional_varnames)>nrows:
@@ -170,7 +173,7 @@ def create_plots_for_vars(
             non_valid_patch = _plt_Patch(facecolor=non_valid_area_color, label='Non-valid area', edgecolor='black')
             sample_patch = _plt_Patch(facecolor=sample_area_color, label='Sample area', edgecolor='black')
             ax.legend(handles=[non_valid_patch, sample_patch], loc='best')
-            plot_polygon(poly=non_valid_area, ax=ax, facecolor=non_valid_area_color, edgecolor='black', linewidth=0.5)
+            plot_polygon(poly=non_valid_area, ax=ax, facecolor=non_valid_area_color, edgecolor='black', linewidth=sample_area_lw)
         # ADD DISTRIUBTION PLOT
         c = grid.search.source.pts[colname]
         vmin=plot_kwargs['vmin'] if 'vmin' in plot_kwargs else c.min()
@@ -178,7 +181,7 @@ def create_plots_for_vars(
         # norm = plot_kwargs['norm'] if 'norm' in plot_kwargs else _plt_LogNorm(vmin=c.min(),vmax=c.max()) if (c.min() > 0) else _plt_LogNorm()
         norm = plot_kwargs['norm'] if 'norm' in plot_kwargs else _plt_LogNorm(vmin=c.min(),vmax=c.max()) if (c.min() > 0) else 'linear'
         scttr = ax.scatter(x=xs, y=ys, c=c, norm=norm, cmap=cmap, rasterized=True, linewidths=0.3, **plot_kwargs)
-        plot_polygon(poly=non_valid_area, ax=ax, facecolor="none", edgecolor='black', linewidth=0.5)
+        plot_polygon(poly=non_valid_area, ax=ax, facecolor="none", edgecolor='black', linewidth=sample_area_lw)
         fig.colorbar(scttr, ax=ax, fraction=0.046, pad=0.04)
         set_map_frame(ax=ax,xmin=xmin,xmax=xmax,ymin=ymin,ymax=ymax)
 

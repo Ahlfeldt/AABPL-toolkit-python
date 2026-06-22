@@ -62,6 +62,7 @@ def create_distribution_plot(
         - ``hlines`` : dict — kwargs for ``ax.hlines`` threshold line
         - ``vlines`` : dict — kwargs for ``ax.vlines`` percentile line
         - ``fig``, ``axs`` — existing Figure/Axes to draw into
+        - ``sample_area_linewidth`` : float — border linewidth of the valid-area polygon (default ``0.5``)
     show : bool
         Display the figure (default ``True``).
     display_dpi : int
@@ -72,7 +73,14 @@ def create_distribution_plot(
     -------
     matplotlib.figure.Figure
     """
-    x_coord_name, y_coord_name = x,y
+    x_coord_name, y_coord_name = x, y
+    # Projected coord columns may have been dropped by keep_cols cleanup.
+    # Fall back to snapshots stored before cleanup when available.
+    src = getattr(getattr(grid, 'search', None), 'source', None)
+    _pts_x = pts[x_coord_name] if x_coord_name in pts.columns else getattr(src, '_proj_x_snapshot', None)
+    _pts_y = pts[y_coord_name] if y_coord_name in pts.columns else getattr(src, '_proj_y_snapshot', None)
+    _rnd_x = rndm_pts[x_coord_name] if x_coord_name in rndm_pts.columns else getattr(grid, '_rndm_pts_x_snapshot', None)
+    _rnd_y = rndm_pts[y_coord_name] if y_coord_name in rndm_pts.columns else getattr(grid, '_rndm_pts_y_snapshot', None)
     disk_sums_for_random_points = rndm_pts[radius_sum_columns]
     (n_random_points, ncols) = disk_sums_for_random_points.shape
     # specify default plot kwargs and add defaults
@@ -90,6 +98,7 @@ def create_distribution_plot(
                                  # keys: 'rand_dist', 'pts_dist', 'rand_map', 'pts_map'
         'hlines':{'color':'red', 'linewidth':1},
         'vlines':{'color':'red', 'linewidth':1},
+        'sample_area_linewidth': 0.5,
     }
     # Callers (grid.plot.rand_dist) forward **plot_kwargs; extract control args
     # that must not leak into ax.scatter().
@@ -108,7 +117,8 @@ def create_distribution_plot(
     title_override = kwargs.pop('title')
     suptitle_kwargs = kwargs.pop('suptitle')
     ax_titles = kwargs.pop('ax_titles')
-    for k in ['fig', 'axs', 'figsize', 'title', 'suptitle', 'ax_titles']:
+    sample_area_lw = kwargs.pop('sample_area_linewidth')
+    for k in ['fig', 'axs', 'figsize', 'title', 'suptitle', 'ax_titles', 'sample_area_linewidth']:
         plot_kwargs.pop(k,None)
 
     if fig is None or axs is None:
@@ -215,8 +225,8 @@ def create_distribution_plot(
         fig.add_subplot(ax)
 
         # combine them and build a new colormap
-        xmin, xmax =  min([pts[x_coord_name].min(), rndm_pts[x_coord_name].min()]), max([pts[x_coord_name].max(), rndm_pts[x_coord_name].max()])
-        ymin, ymax =  min([pts[y_coord_name].min(), rndm_pts[y_coord_name].min()]), max([pts[y_coord_name].max(), rndm_pts[y_coord_name].max()])
+        xmin, xmax = min([_pts_x.min(), _rnd_x.min()]), max([_pts_x.max(), _rnd_x.max()])
+        ymin, ymax = min([_pts_y.min(), _rnd_y.min()]), max([_pts_y.max(), _rnd_y.max()])
         
         _pts_nonzero = pts_vals[:,i][pts_vals[:,i]!=0]
         _rnd_nonzero = random_vals[:,i][random_vals[:,i]!=0]
@@ -276,11 +286,11 @@ def create_distribution_plot(
             sample_patch = _plt_Patch(facecolor=sample_area_color, label='Sample area', edgecolor='black')
             ax.legend(handles=[non_valid_patch, sample_patch], loc='best')
         # plot valid area borders
-        plot_polygon(ax=ax, poly=non_valid_area, facecolor=non_valid_area_color, edgecolor='black', linewidth=0.5)
+        plot_polygon(ax=ax, poly=non_valid_area, facecolor=non_valid_area_color, edgecolor='black', linewidth=sample_area_lw)
         # SCATTER RANDOM POINTS
-        sc = ax.scatter(x=rndm_pts[x_coord_name],y=rndm_pts[y_coord_name],c=random_vals[:,i], s=s, marker='.', norm=norm, cmap=cmap_scatter, linewidths=0.3)
+        sc = ax.scatter(x=_rnd_x, y=_rnd_y, c=random_vals[:,i], s=s, marker='.', norm=norm, cmap=cmap_scatter, linewidths=0.3)
         # add borders of polygon
-        plot_polygon(ax=ax, poly=grid.sample_area, facecolor="none", edgecolor='black', linewidth=0.5)
+        plot_polygon(ax=ax, poly=grid.sample_area, facecolor="none", edgecolor='black', linewidth=sample_area_lw)
         set_map_frame(ax=ax, xmin=xmin, xmax=xmax, ymin=ymin, ymax=ymax)
         fig.add_subplot(ax)
         fig.colorbar(sc, ax=ax, extend='neither', fraction=0.046, pad=0.04)
@@ -295,9 +305,9 @@ def create_distribution_plot(
         if not grid is None:
             p = ax.imshow(X=X, interpolation='none', cmap=cmap_binary, extent=extent)#, extent=extent
         # plot valid area borders
-        plot_polygon(ax=ax, poly=non_valid_area, facecolor=non_valid_area_color, edgecolor='black', linewidth=0.5)
+        plot_polygon(ax=ax, poly=non_valid_area, facecolor=non_valid_area_color, edgecolor='black', linewidth=sample_area_lw)
         # SCATTER POINTS
-        sc = ax.scatter(x=pts[x_coord_name],y=pts[y_coord_name],c=pts_vals[:,i], s=s, marker='.', norm=norm, cmap=cmap_scatter, linewidths=0.3)
+        sc = ax.scatter(x=_pts_x, y=_pts_y, c=pts_vals[:,i], s=s, marker='.', norm=norm, cmap=cmap_scatter, linewidths=0.3)
         # add borders of polygon
         # plot_polygon(ax=ax, poly=grid.sample_area, facecolor="none", edgecolor='black')
         set_map_frame(ax=ax, xmin=xmin, xmax=xmax, ymin=ymin, ymax=ymax)

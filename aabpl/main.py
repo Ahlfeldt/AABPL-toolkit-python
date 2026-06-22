@@ -186,7 +186,8 @@ def resolve_sample_area(
         # sample_area = subtract_invalid_area(sample_area, invalid_areas=_shapely_Polygon([]))
 
     elif type(sample_area) in [_shapely_Polygon, _shapely_MultiPolygon]:
-        sample_area = convert_MultiPolygon_crs(multipoly=sample_area, initial_crs=sample_area_crs,target_crs=local_crs)
+        if sample_area_crs and local_crs and sample_area_crs != local_crs:
+            sample_area = convert_MultiPolygon_crs(multipoly=sample_area, initial_crs=sample_area_crs, target_crs=local_crs)
     else:
         raise ValueError('sample_area must parameter most be one of ["str","Poylgon","MultiPolygon"] instead of type', type(sample_area))
     
@@ -379,6 +380,14 @@ def radius_search(
     weight_valid_area (str):
         Inverse-area weighting for edge effects. ``'estimate'`` uses a fast approximation
         (MSE ≈ 5 % of cell area); ``'precise'`` is exact but slow. ``None`` disables weighting (default=None).
+
+        **Limitation:** contained cells (fully inside the search disk) are treated as binary —
+        fully valid or fully invalid — based on whether they fall inside ``sample_area``.
+        Cells that straddle the ``sample_area`` boundary but were classified as fully valid
+        contribute zero invalid area, causing a slight upward bias in ``valid_area_share``
+        when ``sample_area`` is a custom Polygon or MultiPolygon with sharp edges. For
+        method-string sample areas (``'buff_non_empty_cells'``, ``'concave'``, etc.) the
+        boundary follows cell edges exactly and this bias does not occur.
     sample_area (shapely.Polygon | shapely.MultiPolygon | str):
         Area used for valid-area weighting. Accepted string values:
             - ``'buff_non_empty_cells'``: non-empty grid cells plus a radius-sized buffer (default)
@@ -856,6 +865,7 @@ def detect_cluster_pts(
     k_th_percentile:float=99.5,
     n_random_points:int=int(1e5),
     random_seed:int=None,
+    null_distribution=None,
     # include_boundary:bool=False,  # NOT YET IMPLEMENTED
     x:str='lon',
     y:str='lat',
@@ -882,6 +892,17 @@ def detect_cluster_pts(
     It draws random the bounding box containing all points from DataFrame(s) and aggregate the values within the radius to obtain a random distribution.
     Then all points from DataFrame which exceed the k_th_percentile of the random distribution are labeld as clustered.
     The results will be appended to DataFrame.
+
+    null_distribution (array-like or pd.DataFrame, optional):
+        User-supplied null-distribution coordinates. When provided the internal uniform-random draw
+        is skipped and these coordinates are used as reference points for computing the null radius
+        sums. Accepts a DataFrame with the same x/y column names used in the search, or a
+        2-column array ``[[x, y], ...]``.
+
+        **Important:** coordinates must be in the same projected CRS that ``pts`` is reprojected
+        into (metres), not in the original input CRS. When a real ``crs`` is supplied, use
+        ``aabpl.draw_random_coords()`` with the already-projected ``grid.sample_area`` to generate
+        compatible coordinates, or project your own points beforehand.
     """
     _cols_before = set(pts.columns)
     init_sort = find_column_name('initial_sort', existing_columns=pts.columns)
@@ -914,10 +935,12 @@ def detect_cluster_pts(
     elif len(k_th_percentile) < len(c):
         k_th_percentile = [k_th_percentile[i%len(k_th_percentile)] for i in range(len(c))]
 
-    _prog = DetectClusterProgress(silent=bool(silent), n_pts=len(pts))
-    _token = _OUTER_PROGRESS.set(_prog)
-    _prog.start()
-    _prog.step("initializing")
+    _is_internal = _OUTER_PROGRESS.get() is not None
+    if not _is_internal:
+        _prog = DetectClusterProgress(silent=bool(silent), n_pts=len(pts))
+        _token = _OUTER_PROGRESS.set(_prog)
+        _prog.start()
+        _prog.step("initializing")
 
     if exclude_pt_itself is not None:
         print("DeprecationWarning: `exclude_pt_itself` is deprecated, use `exclude_self` instead.")
@@ -931,7 +954,7 @@ def detect_cluster_pts(
         weight_valid_area=weight_valid_area,
     )
 
-    _prog.step("assigning target")
+    if not _is_internal: _prog.step("assigning target")
     grid.search.set_target(
         pts=pts_target,
         c=c,
@@ -949,7 +972,14 @@ def detect_cluster_pts(
         no_plot=plot_distribution is None and plot_cluster_points is None)
     intersect_polygon_with_grid(grid=grid)
 
-    _prog.step("null distribution")
+    if not _is_internal: _prog.step("null distribution")
+    if null_distribution is not None and local_crs and local_crs != crs:
+        print(
+            "WARNING: null_distribution coordinates must already be in the projected CRS "
+            f"'{local_crs}', not the input CRS '{crs}'. "
+            "pts were reprojected automatically but null_distribution is used as-is. "
+            "Use draw_random_coords() with the projected sample_area to generate valid coordinates."
+        )
     from .radius_search.null_distribution import compute_null_distribution
     (cluster_threshold_values, rndm_pts) = compute_null_distribution(
         grid=grid,
@@ -966,13 +996,14 @@ def detect_cluster_pts(
         k_th_percentile=k_th_percentile,
         random_seed=random_seed,
         silent=silent,
+        null_distribution=null_distribution,
     )
 
     if not silent:
         for (colname, threshold_value, k_th_p) in zip(c, cluster_threshold_values,k_th_percentile):
             progress_print("Threshold value for "+str(k_th_p)+"th-percentile is "+str(threshold_value)+" for "+str(colname)+" within "+str(r)+" meters.")
 
-    _prog.step("assigning source")
+    if not _is_internal: _prog.step("assigning source")
     _d = _dev or {}
     grid.search.set_source(
         pts=pts,
@@ -989,10 +1020,10 @@ def detect_cluster_pts(
         silent=silent,
     )
 
-    _prog.step("searching")
+    if not _is_internal: _prog.step("searching")
     disk_sums_for_pts = grid.search.perform_search(silent=silent,plot_pt_disk=_d.get('plot_pt_disk'))
 
-    _prog.step("labeling clusters")
+    if not _is_internal: _prog.step("labeling clusters")
     for j, cname in enumerate(c):
         pts[str(cname)+str(cluster_suffix)] = disk_sums_for_pts.values[:,j]>cluster_threshold_values[j]
 
@@ -1074,8 +1105,9 @@ def detect_cluster_pts(
     pts.sort_values(init_sort, inplace=True)
     pts.drop(columns=[init_sort], inplace=True)
 
-    _OUTER_PROGRESS.reset(_token)
-    _prog.done()
+    if not _is_internal:
+        _OUTER_PROGRESS.reset(_token)
+        _prog.done()
     return grid
 # done
 
@@ -1094,6 +1126,7 @@ def detect_cluster_cells(
     k_th_percentile:float=99.5,
     n_random_points:int=int(1e5),
     random_seed:int=None,
+    null_distribution=None,
     queen_contingency:int=1,
     rook_contingency:int=1,
     centroid_dist_threshold:float=None,
@@ -1142,7 +1175,18 @@ def detect_cluster_cells(
     exclude_pt_itself (bool):
         whether the sums within search radius point shall exlclude the point data itself (default=True)
     weight_valid_area (str):
-        if set to 'estimate' or 'precise' the radius aggregate will be weighted inversely by the share of area of valid cells within search radius. 'precise' is very slow, 'estimate' has MSE of 5% of cell area. (default=None)
+        If set to ``'estimate'`` or ``'precise'`` the radius aggregate will be weighted
+        inversely by the share of valid area within the search radius. ``'precise'`` is
+        exact but slow; ``'estimate'`` uses a fast logit approximation (MSE ≈ 5 % of cell
+        area). ``None`` disables weighting (default=None).
+
+        **Limitation:** contained cells (fully inside the search disk) are treated as binary —
+        fully valid or fully invalid — based on whether they fall inside ``sample_area``.
+        Cells that straddle the ``sample_area`` boundary but were classified as fully valid
+        contribute zero invalid area, causing a slight upward bias in ``valid_area_share``
+        when ``sample_area`` is a custom Polygon or MultiPolygon with sharp edges. For
+        method-string sample areas (``'buff_non_empty_cells'``, ``'concave'``, etc.) the
+        boundary follows cell edges exactly and this bias does not occur.
     sample_area (shapely.Polygon | shapely.MultiPolygon | str):
         Area used for drawing random comparison points. Accepted string values:
             - ``'buff_non_empty_cells'``: non-empty grid cells plus a radius-sized buffer (default)
@@ -1168,6 +1212,15 @@ def detect_cluster_cells(
         Number of random points drawn to build the comparison distribution (default=100000).
     random_seed (int):
         Random seed for reproducibility. None means no seed is set (default=None).
+    null_distribution (array-like or pd.DataFrame, optional):
+        User-supplied null-distribution coordinates. When provided the internal uniform-random draw
+        is skipped and these coordinates are used as reference points for computing the null radius
+        sums. Accepts a DataFrame with the same x/y column names used in the search, or a
+        2-column array ``[[x, y], ...]``.
+
+        **Important:** coordinates must be in the same projected CRS that ``pts`` is reprojected
+        into (metres), not in the original input CRS. Use ``aabpl.draw_random_coords()`` with
+        ``crs`` set to generate correctly projected coordinates.
     queen_contingency (int):
         Merge neighbouring clustered cells (including diagonals) into the same cluster.
         Values ≥ 2 also pull in cells that many steps away (default=1).
@@ -1252,6 +1305,7 @@ def detect_cluster_cells(
         k_th_percentile=k_th_percentile,
         n_random_points=n_random_points,
         random_seed=random_seed,
+        null_distribution=null_distribution,
         x=x,
         y=y,
         row_name=row_name,

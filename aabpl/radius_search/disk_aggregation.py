@@ -432,6 +432,12 @@ def search_and_aggregate(
     # ---- valid-area term (per point; only built when weighting) ----------------
     if weight_valid_area:
         def invalid_cntd_area(cell_region_id, home_key):
+            # NOTE: contained cells are treated as binary (fully valid OR fully invalid).
+            # Cells that straddle the sample_area boundary but were classified as fully
+            # valid still contribute 0 invalid area here, causing a slight upward bias in
+            # valid_area_share when sample_area is a custom polygon with sharp edges.
+            # TODO: use cell_to_poly_partly_valid to subtract the actual invalid fraction
+            # of boundary-straddling contained cells for a more precise estimate.
             abs_keys = cntd_l0_offset[cell_region_id] + home_key
             n_invalid = len(set(int(k) for k in abs_keys) & invalid_keys)
             return n_invalid * grid_spacing ** 2
