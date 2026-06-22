@@ -8,13 +8,10 @@ from shapely.geometry import Polygon as _shapely_Polygon, MultiPolygon as _shape
 simplefilter(action='ignore', category=_pd_PerformanceWarning)
 simplefilter(action='ignore', category=FutureWarning)
 
-from .radius_search.null_distribution import compute_null_distribution
 from .radius_search.sample_area import infer_sample_area_from_pts, subtract_invalid_area, intersect_polygon_with_grid
 from .testing.test_performance import time_func_perf
 from .radius_search.disk_search_state import DiskSearch
 from .radius_search.grid_class import Grid
-from .illustrations.plot_pt_vars import create_plots_for_vars
-from .illustrations.distribution_plot import create_distribution_plot
 from .utils.misc import count_polygon_edges, find_column_name
 from .utils.crs_transformation import convert_MultiPolygon_crs, convert_coords_to_local_crs, convert_pts_to_crs, convert_wgs_to_utm
 from .utils.progress import _OUTER_PROGRESS, RadiusSearchProgress, DetectClusterProgress, progress_print
@@ -949,6 +946,7 @@ def detect_cluster_pts(
     intersect_polygon_with_grid(grid=grid)
 
     _prog.step("null distribution")
+    from .radius_search.null_distribution import compute_null_distribution
     (cluster_threshold_values, rndm_pts) = compute_null_distribution(
         grid=grid,
         pts=pts,
@@ -995,6 +993,7 @@ def detect_cluster_pts(
         pts[str(cname)+str(cluster_suffix)] = disk_sums_for_pts.values[:,j]>cluster_threshold_values[j]
 
     if plot_distribution is not None:
+        from .illustrations.distribution_plot import create_distribution_plot
         create_distribution_plot(
             pts=pts,
             x=x,
@@ -1043,6 +1042,7 @@ def detect_cluster_pts(
             filename:str="",
             **plot_kwargs,
     ):
+        from .illustrations.plot_pt_vars import create_plots_for_vars
         return create_plots_for_vars(
             grid=self,
             colnames=colnames,

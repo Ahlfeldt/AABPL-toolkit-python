@@ -21,9 +21,6 @@ from math import log10 as _math_log10, inf as _math_inf
 from aabpl.utils.misc import flatten_list, find_column_name
 from aabpl.utils.crs_transformation import convert_bounds_to_local_crs
 from aabpl.illustrations.plot_utils import map_2D_to_rgb, get_2D_rgb_colobar_kwargs
-from aabpl.illustrations.plot_grid import GridPlots#plot_cell_sums, plot_grid_ids, plot_clusters, plot_cluster_vars
-from aabpl.illustrations.plot_sample_area import plot_sample_area
-from aabpl.illustrations.plot_pt_vars import create_plots_for_vars
 from .disk_search_state import (
     aggregate_point_data_to_cells,
     search_and_aggregate
@@ -198,6 +195,7 @@ class Grid(object):
         self.levels = [0]
 
         self.clustering = Clustering(self)
+        from aabpl.illustrations.plot_grid import GridPlots
         self.plot = GridPlots(self)
         # TODO total_bounds should also contain excluded area if not cntd 
         # min(points.total_bounds+r, max(points.total_bounds, excluded_area_total_bound))  
@@ -717,6 +715,7 @@ class Grid(object):
         filename:str='',
         plot_kwargs:dict={},
         show:bool=True,):
+        from aabpl.illustrations.plot_sample_area import plot_sample_area
         plot_sample_area(
             grid=self,
             pts=pts or self.pts if hasattr(self,"pts") else None,

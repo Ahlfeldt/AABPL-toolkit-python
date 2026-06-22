@@ -308,6 +308,7 @@ class LineSegment(Edge):
         self.type = 'LineSegment'
     #
     def reverse(self):
+        """Flip the direction of this segment in-place (swap vtx1 ↔ vtx2)."""
         self.vtx1, self.vtx2 = self.vtx2, self.vtx1
         self.coords = (self.vtx1.xy, self.vtx2.xy)
         return self
@@ -400,7 +401,16 @@ class LineSegment(Edge):
 
 
 class Arc(Edge):
-    """Arc around center (limited by two points on circle if supplied) in the current definition the edge of arc must be <180 degrees """
+    """
+    Circular arc edge (< 180°) defined by a centre, radius, and two endpoint vertices.
+
+    The arc travels from ``vtx1`` to ``vtx2`` in the direction determined by
+    ``is_clockwise`` (inferred from the angular span if not supplied).  Angles are
+    stored in both a relative form (``angle_vtx1/2``, relative to the arc's own
+    angular range) and an absolute form (``abs_angle_vtx1/2``, CCW degrees from the
+    +x axis).  ``first_angle`` / ``second_angle`` are the travel-order absolute
+    angles used by ``_angle_on_arc`` and ``get_plot_coords``.
+    """
     def __init__(
             self,
             center:tuple,
@@ -442,6 +452,7 @@ class Arc(Edge):
     #
 
     def reverse(self):
+        """Flip the direction of this arc in-place (swap vtx1 ↔ vtx2, toggle is_clockwise)."""
         self.vtx1, self.vtx2 = self.vtx2, self.vtx1
         self.coords = (self.vtx1.xy, self.vtx2.xy)
         self.first_angle, self.second_angle = self.second_angle, self.first_angle
@@ -695,6 +706,20 @@ class OffsetRegion(object):
     """
 
     def __init__(self, edges, checks, all_regions:dict, trgl_nr:int=1, printme=""):
+        """
+        Construct an OffsetRegion from an ordered list of edges forming a closed polygon.
+
+        Computes and caches the axis-aligned bounding box (xmin/xmax/ymin/ymax),
+        including arc extrema for curved edges.  Also computes the centroid and
+        normalises the winding order (counter-clockwise convention).
+
+        Parameters
+        ----------
+        edges       : list of Edge (LineSegment / Arc) — must form a closed chain
+        checks      : list — accumulated check results from prior split_with_edge calls
+        all_regions : dict — global registry mapping edge-coord tuples to regions
+        trgl_nr     : int — symmetry sector (1–8); 1 = canonical triangle-1
+        """
         self.id = -1
         self.edges = edges
         self.vertices = []
@@ -762,6 +787,7 @@ class OffsetRegion(object):
     #
 
     def get_vertex_coords(self):
+        """Return the ordered list of vertex (x, y) tuples tracing the region boundary."""
         coords = []
         for edge_start_coord, edge_end_coord in self.coords:
             if len(coords)==0 or edge_start_coord != coords[-1]:
@@ -962,10 +988,24 @@ class OffsetRegion(object):
             RESCALE_FACTOR:int = 1,
             DECIMALS:int = 117,
             ):
+        """
+        Find intersection points between this region's edges and ``intersection_edge``.
+
+        Iterates over every edge of the region and calls ``edge.intersection()``.
+        Raw intersection coordinates are snapped to the axes (x=0, x=0.5, y=0, y=0.5)
+        and to existing vertices when within ``MATCH_PTS_TOL``, to avoid creating
+        near-duplicate vertices that would break subsequent splitting.
+
+        Returns
+        -------
+        splits : list of dicts
+            Each entry describes one intersection event.  A dict with key ``'pts'``
+            describes a chord (the edge crosses the boundary twice); a dict with only
+            ``'xy'`` describes a tangent touch.
+        vertices_intersected : list of (x, y)
+            Coordinates of every split point found, used for deduplication.
+        """
         splits, vertices_intersected, edges_of_new_vtx = [], [], []
-        shared_along_vert = any([edge.vtx1.y==0 and edge.vtx2.y==0  for edge in self.edges]) # always false if there is a linecheck on x-axis
-        shared_along_diag = any([edge.vtx1.x==edge.vtx1.y and edge.vtx2.x==edge.vtx2.y for edge in self.edges])
-        # print("shared_along_vert",shared_along_vert,"shared_along_diag", shared_along_diag,  [v.xy for v in self.vertices])
         edges_to_skip = {}
         for i, edge in enumerate(self.edges):
             # print(i,"splits",splits)
@@ -1243,20 +1283,53 @@ class OffsetRegion(object):
             intersection_edge,
             check,
             plot_split:bool=False,
-            r=0, 
+            r=0,
             TANGENT_TOL:float = 1e-16,
             MATCH_PTS_TOL:float = 1e-15,
             RESCALE_FACTOR:int = 1,
             DECIMALS:int = 117,
         ):
         """
-        check if intersected
-        split edges
-        add vertices
-        split region 
+        Attempt to split this region along ``intersection_edge`` and record the check result.
+
+        If the edge does not intersect any of this region's edges (0 split points),
+        the region is left intact and ``add_check_result_no_intersection`` records
+        whether the region lies inside or outside the edge boundary.
+
+        If exactly 2 split points are found the region is divided into two child
+        regions: one on each side of the edge.  Each child inherits all prior check
+        results and gains a new result for this check.
+
+        The tolerance parameters (TANGENT_TOL, MATCH_PTS_TOL, DECIMALS) control
+        numerical precision for degenerate near-tangent intersections.  They are
+        escalated automatically on retry when > 2 split points are returned.
+
+        Returns a colour string ('green'/'red') indicating which side of the check
+        boundary the original region (or its inside child) falls on — used only for
+        diagnostic plotting.
+
         TODO rework this logic. Too convoluted!
         TODO THIS FUNCTION IS WAY TOO LONG
         """
+        # Fast-path for Circle checks: by construction, circle centres are level-0
+        # cell corners and therefore always lie outside every region's bounding box
+        # (regions are sub-polygons of the triangle home cell).  When the centre is
+        # outside the bbox in BOTH x and y the closest bbox point to the centre is
+        # always a corner, so checking whether any corner is inside the circle is
+        # equivalent to — and strictly tighter than — a generic bbox-overlap test.
+        # If no corner is inside the circle the circle cannot reach any part of the
+        # region and we skip the expensive get_split_pts entirely.
+        # Not applied to LineSegment checks — those represent half-planes whose
+        # spatial extent exceeds their explicit vtx1/vtx2 endpoints.
+        if intersection_edge.type == 'Circle':
+            cx, cy = intersection_edge.center
+            cr2 = intersection_edge.r ** 2
+            if not any((vx - cx) ** 2 + (vy - cy) ** 2 < cr2
+                       for vx in (self.xmin, self.xmax)
+                       for vy in (self.ymin, self.ymax)):
+                self.add_check_result_no_intersection(intersection_edge, check)
+                return 'green' if self.checks[-1]['result'] else 'red'
+
         splits, vertices_intersected = self.get_split_pts(
             intersection_edge=intersection_edge,
             TANGENT_TOL=TANGENT_TOL,

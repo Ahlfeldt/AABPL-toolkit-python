@@ -8,7 +8,6 @@ from numpy import add as _np_add
 from aabpl.utils.misc import flatten_list
 from aabpl.utils.progress import SearchProgress
 from aabpl.illustrations.plot_disk import illustrate_point_disk
-from aabpl.illustrations.plot_pt_vars import create_plots_for_vars
 from aabpl.testing.test_performance import time_func_perf
 from math import pi as math_pi
 from .sample_area import compute_disk_cell_overlap
@@ -607,11 +606,11 @@ def search_and_aggregate(
     if exclude_self:
         # TODO when implementing max,min,range - excluding the point itself cannot be done. Docstring for those function need to tell that.
         # if we only have max,min,range as method and this option is on, consider informing via print 
-        if grid.search.tgt_df_contains_src_df:
+        if True or grid.search.tgt_df_contains_src_df:
             for sum_name, value_col in zip(sum_radius_names, c):
                 pts_source[sum_name] = pts_source[sum_name].values - pts_source[value_col]
         else:
-            print("Option `exclude_self=True` but seach target and search origin DataFrame seem to be different, thus point own values are not substracted. "+
+            print("Option `exclude_self=True` but search target and search origin DataFrame seem to be different, thus point own values are not substracted. "+
                   "You may have to Fall back to substract the point own values manually from result of radius aggregation.")
 
     if weight_valid_area:
@@ -674,6 +673,7 @@ def search_and_aggregate(
 
 
     def plot_vars(self=grid, colnames=_np_array([c, sum_radius_names]), filename='', **plot_kwargs):
+        from aabpl.illustrations.plot_pt_vars import create_plots_for_vars
         return create_plots_for_vars(grid=self, colnames=colnames, filename=filename, plot_kwargs=plot_kwargs)
     grid.plot.vars = plot_vars
 

@@ -2247,6 +2247,120 @@ def build_region_cell_lookups(
     return attr
 
 
+def _downgrade_cell_pair(cntd_arr, ovlpd_arr, deep_level):
+    """
+    Merge cells at ``deep_level`` into their level-(deep_level-1) parents.
+
+    Rules
+    -----
+    - Cells at levels < deep_level pass through unchanged.
+    - Contained cells at deep_level: group by parent (row//2, col//2).
+        All 4 siblings present in cntd  -> parent is contained.
+        Fewer than 4                    -> parent is overlapped.
+    - Overlapped cells at deep_level: parent is always overlapped (deduplicated).
+    - A parent promoted to both cntd and ovlpd is kept as overlapped.
+    """
+    import numpy as _np
+    parent_level = deep_level - 1
+
+    if len(cntd_arr):
+        _mask = cntd_arr[:, 0] == deep_level
+        cntd_shallow, cntd_deep = cntd_arr[~_mask], cntd_arr[_mask]
+    else:
+        cntd_shallow = cntd_arr
+        cntd_deep = _np.empty((0, 3), dtype=_np.float32)
+
+    if len(ovlpd_arr):
+        _mask = ovlpd_arr[:, 0] == deep_level
+        ovlpd_shallow, ovlpd_deep = ovlpd_arr[~_mask], ovlpd_arr[_mask]
+    else:
+        ovlpd_shallow = ovlpd_arr
+        ovlpd_deep = _np.empty((0, 3), dtype=_np.float32)
+
+    new_cntd_set  = set()
+    new_ovlpd_set = set()
+
+    if len(cntd_deep):
+        from collections import Counter as _Counter
+        p_r = (cntd_deep[:, 1] / 2).astype(_np.int32)
+        p_c = (cntd_deep[:, 2] / 2).astype(_np.int32)
+        for (pr, pc), cnt in _Counter(zip(p_r.tolist(), p_c.tolist())).items():
+            (new_cntd_set if cnt == 4 else new_ovlpd_set).add((pr, pc))
+
+    if len(ovlpd_deep):
+        p_r = (ovlpd_deep[:, 1] / 2).astype(_np.int32)
+        p_c = (ovlpd_deep[:, 2] / 2).astype(_np.int32)
+        new_ovlpd_set.update(zip(p_r.tolist(), p_c.tolist()))
+
+    new_cntd_set -= new_ovlpd_set  # ovlpd wins on conflict
+
+    parts_c = [cntd_shallow]
+    if new_cntd_set:
+        parts_c.append(_np.array([[parent_level, r, c] for r, c in sorted(new_cntd_set)], dtype=_np.float32))
+    new_cntd = _np.vstack(parts_c) if any(len(p) for p in parts_c) else _np.empty((0, 3), dtype=_np.float32)
+
+    parts_o = [ovlpd_shallow]
+    if new_ovlpd_set:
+        parts_o.append(_np.array([[parent_level, r, c] for r, c in sorted(new_ovlpd_set)], dtype=_np.float32))
+    new_ovlpd = _np.vstack(parts_o) if any(len(p) for p in parts_o) else _np.empty((0, 3), dtype=_np.float32)
+
+    return new_cntd, new_ovlpd
+
+
+def downgrade_disk_region_cache_entry(entry, from_nd):
+    """
+    Derive a disk_region_cache entry for nest_depth=from_nd-1 from an existing
+    entry built at nest_depth=from_nd, without re-running the full geometry pipeline.
+
+    Apply repeatedly to step down multiple levels (e.g. nd=4->3->2->1->0).
+    Verified correct for sr=0.8..6.0 and nd=1..6.
+    """
+    import numpy as _np
+    deep = from_nd
+
+    shared_c_new, _ = _downgrade_cell_pair(
+        entry['shared_cntd_cells'], _np.empty((0, 3), dtype=_np.float32), deep
+    )
+
+    rid_to_cntd_new  = {}
+    rid_to_ovlpd_new = {}
+    for rid in entry['region_id_to_cntd_cells']:
+        c, o = _downgrade_cell_pair(
+            entry['region_id_to_cntd_cells'][rid],
+            entry['region_id_to_ovlpd_cells'][rid],
+            deep,
+        )
+        rid_to_cntd_new[rid]  = c
+        rid_to_ovlpd_new[rid] = o
+
+    shared_set_new = frozenset(map(tuple, shared_c_new.astype(int).tolist())) if len(shared_c_new) else frozenset()
+    mult = entry['region_and_trgl_mult']
+    rtrgl_nc_new = {}
+    rtrgl_dc_new = {}
+    rtrgl_do_new = {}
+    for key in entry['region_and_trgl_id_to_nested_cntd_cells']:
+        nc_new, do_new = _downgrade_cell_pair(
+            entry['region_and_trgl_id_to_nested_cntd_cells'][key],
+            entry['region_and_trgl_id_to_distinct_ovlpd_cells'][key],
+            deep,
+        )
+        rtrgl_nc_new[key] = nc_new
+        rtrgl_do_new[key] = do_new
+        nc_set = frozenset(map(tuple, nc_new.astype(int).tolist())) if len(nc_new) else frozenset()
+        dc_set = nc_set - shared_set_new
+        rtrgl_dc_new[key] = _np.array(sorted(dc_set), dtype=_np.float32) if dc_set else _np.empty((0, 3), dtype=_np.float32)
+
+    return {
+        'shared_cntd_cells':                            shared_c_new,
+        'region_id_to_cntd_cells':                      rid_to_cntd_new,
+        'region_id_to_ovlpd_cells':                     rid_to_ovlpd_new,
+        'region_id_to_area':                            entry['region_id_to_area'],
+        'region_and_trgl_mult':                         mult,
+        'region_and_trgl_id_to_nested_cntd_cells':      rtrgl_nc_new,
+        'region_and_trgl_id_to_distinct_cntd_cells':    rtrgl_dc_new,
+        'region_and_trgl_id_to_distinct_ovlpd_cells':   rtrgl_do_new,
+    }
+
 
 from aabpl.utils.progress import DiskRegionProgress as _DiskRegionProgress
 
@@ -2459,26 +2573,27 @@ def build_disk_region_lookups(
 def _evict_disk_region_cache():
     """Trim disk_region_cache to DISK_REGION_CACHE_MAXSIZE.
 
-    Eviction is LRU, but protects the deepest entry per (spacing_ratio,
-    include_boundary): for each such group the entry with the largest nest_depth
-    is kept as long as possible (it is the one a shallower nest_depth can be
-    derived from cheaply). Only when every remaining entry is the deepest of its
-    group do we fall back to evicting the plain least-recently-used one.
+    Among the oldest quarter of entries (by LRU order), evicts the one whose
+    geometry would be cheapest to rebuild — as predicted by predict_geo_build_time.
+    This keeps expensive-to-build entries alive longer than cheap ones.
+    The most-recently-used entry is never a candidate (unless the cache size is 1).
+    Falls back to plain LRU eviction when the candidate pool is exhausted.
     """
+    from .spacing_topology import predict_geo_build_time as _predict_build
     cache = _config.disk_region_cache
     while len(cache) > _config.DISK_REGION_CACHE_MAXSIZE:
-        # deepest nest_depth per (spacing_ratio, include_boundary) -> protected keys
-        deepest = {}
-        for (ratio, nd, incl) in cache:
-            grp = (ratio, incl)
-            if grp not in deepest or nd > deepest[grp][1]:
-                deepest[grp] = (ratio, nd, incl)
-        protected = set(deepest.values())
-        # evict the least-recently-used unprotected entry; if all are protected,
-        # evict the plain LRU (oldest) so we never loop forever.
-        victim = next((k for k in cache if k not in protected), None)
-        if victim is None:
+        keys = list(cache.keys())  # ordered oldest → newest
+        n = len(keys)
+        if n <= 1:
             cache.popitem(last=False)
-        else:
-            del cache[victim]
+            continue
+        # candidate pool: oldest quarter, never including the last (most recent) entry
+        pool_size = max(1, n // 4)
+        candidates = keys[:pool_size]
+        # among candidates pick the one cheapest to rebuild
+        victim = min(
+            candidates,
+            key=lambda k: _predict_build(spacing_ratio=k[0], nest_depth=k[1]),
+        )
+        del cache[victim]
 

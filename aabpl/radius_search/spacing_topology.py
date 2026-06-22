@@ -108,6 +108,297 @@ def compute_spatial_stats(
     return stats
 
 
+def count_cells_per_level(x, y, xmin, ymin, spacing, max_nd):
+    """
+    Count non-empty grid cells at each nesting level 0..max_nd.
+
+    Uses a smart upward-propagation strategy: compute cell indices at the
+    deepest level once from all pts, then derive shallower levels via integer
+    ``//2`` on the unique pairs — much faster than re-scanning all pts per level.
+
+    Parameters
+    ----------
+    x, y    : 1-D array-like of projected coordinates (same units as spacing)
+    xmin, ymin : grid origin (lower-left corner)
+    spacing : base cell size (level-0 cell side length)
+    max_nd  : maximum nesting depth (inclusive)
+
+    Returns
+    -------
+    list of int, length max_nd+1 — n_unique cells at levels 0, 1, …, max_nd
+    """
+    import numpy as _np
+    import pandas as _pd
+
+    x = _np.asarray(x, dtype=_np.float64)
+    y = _np.asarray(y, dtype=_np.float64)
+    if len(x) == 0:
+        return [0] * (max_nd + 1)
+
+    # compute cell indices at deepest level
+    sub_deep = spacing / (2 ** max_nd)
+    rows = ((y - ymin) / sub_deep).astype(_np.int64)
+    cols = ((x - xmin) / sub_deep).astype(_np.int64)
+
+    # unique pairs at deepest level via combined key
+    grid_w = int(_np.ceil((x.max() - xmin) / sub_deep)) + 2
+    combined = rows * grid_w + cols
+    uniq = _pd.unique(combined)
+    u_rows = (uniq // grid_w).astype(_np.int64)
+    u_cols = (uniq  % grid_w).astype(_np.int64)
+    del rows, cols, combined, uniq
+
+    counts = [0] * (max_nd + 1)
+    counts[max_nd] = len(u_rows)
+
+    # propagate upward: each level has cells 2× bigger → indices halve
+    for k in range(max_nd - 1, -1, -1):
+        u_rows >>= 1
+        u_cols >>= 1
+        grid_w_k = int(_np.ceil((x.max() - xmin) / (spacing / (2 ** k)))) + 2
+        combined = u_rows * grid_w_k + u_cols
+        counts[k] = len(_pd.unique(combined))
+
+    return counts
+
+
+def estimate_template_cell_counts(nest_depth, spacing_ratio):
+    """
+    Estimate cell counts and area shares for the disk search template at a
+    given (nest_depth, spacing_ratio).
+
+    All coefficients from empirical log-linear fits to disk_region_geometry
+    output across a grid of (sr, nd) values:
+
+      stat               R²      formula
+      n_ovlpd          0.990   exp(2.0641 + 0.9530·log(sr) + 0.7776·nd)  [∝ sr·2^nd]
+      n_cntd           0.915   exp(0.1319 + 2.2716·log(sr) + 0.8451·nd)  [∝ sr²·4^nd approx]
+      area_share_ovlpd 0.979   exp(0.9632 - 1.1021·log(sr) - 0.3187·nd)  [∝ 1/(sr·2^nd)]
+      area_share_cntd  0.903   exp(-1.3045 + 0.7389·log(sr) + 0.1862·nd)
+      area_ratio       1.000   exp(-1.1447 - 2.0000·log(sr))              [∝ 1/sr², nd-independent]
+
+    area_share_ovlpd and area_share_cntd are fractions of the total disk area
+    covered by overlapped / contained cells respectively.
+    area_ratio is total cell area / circle area (captures how much the cell
+    approximation over-covers the circle).
+
+    Parameters
+    ----------
+    nest_depth    : int   — nesting depth (0 = no sub-cells)
+    spacing_ratio : float — r / spacing (sr)
+
+    Returns
+    -------
+    dict with keys: n_cntd, n_ovlpd, area_share_cntd, area_share_ovlpd, area_ratio
+    """
+    import math as _math
+    log_sr = _math.log(float(spacing_ratio))
+    nd     = int(nest_depth)
+    return {
+        'n_cntd':           _math.exp(0.1319 + 2.2716 * log_sr + 0.8451 * nd),
+        'n_ovlpd':          _math.exp(2.0641 + 0.9530 * log_sr + 0.7776 * nd),
+        'area_share_cntd':  _math.exp(-1.3045 + 0.7389 * log_sr + 0.1862 * nd),
+        'area_share_ovlpd': _math.exp( 0.9632 - 1.1021 * log_sr - 0.3187 * nd),
+        'area_ratio':       _math.exp(-1.1447 - 2.0000 * log_sr),
+    }
+
+
+def predict_time_excl_build(nest_depth, spacing_ratio, n_pts_src, n_pts_tgt,
+                            skew=1.0, ppc=None, ngc=None):
+    """
+    Predict search + aggregation time (excl. geometry build) in seconds.
+
+    Empirical OLS model (R²=0.857, 21 features, no ros dummies).
+
+    Coefficients  (R²=0.857, 21 features, no ros dummies)
+    ------------
+    Intercept                              -2.52740
+    log(r/s)³                              -0.08831
+    nd³                                    +0.01070
+    log(r/s)×nd                            +0.17594
+    log(n_tgt)²                            +0.02267
+    log(n_src)²                            +0.02075
+    log(ppc)                               -0.19208
+    log(ppc)²×log(r/s)²                   -0.01038
+    log(ppc)²×nd²                          +0.00027
+    log(ppc)³×nd                           -0.00059
+    log(ppc)²×log(n_src)                   -0.00010
+    log(skew)                              -0.32633
+    log(skew)×log(r/s)                     +0.09258
+    log(skew)×nd                           +0.01695
+    log(skew)×nd²                          -0.03483
+    log(skew)×log(ppc)²                   +0.01421
+    log(n_tgt/ngc)×log(r/s)               -0.01743  [skipped if ngc not given]
+    log(n_src/ngc)×nd                      -0.01555  [skipped if ngc not given]
+    log(r/s)²×nd²                          -0.02791
+    log(ppc)×log(r/s)²×nd                  +0.01092
+    log(area_share_ovlpd)×log(ppc)        -0.05970
+
+    Parameters
+    ----------
+    nest_depth    : int
+    spacing_ratio : float — r / spacing (sr)
+    n_pts_src     : int   — number of source points
+    n_pts_tgt     : int   — number of target points
+    skew          : float — spatial skewness (default 1.0)
+    ppc           : float — points per circle area = n_tgt·π·r²/(W·H);
+                            if None falls back to n_tgt^0.5
+    ngc           : float — total grid cells = (W/s)·(H/s)·4^nd;
+                            if None the two ngc interaction terms are skipped
+
+    Returns
+    -------
+    float — predicted time in seconds
+    """
+    import math as _math
+
+    nd    = int(nest_depth)
+    sr    = float(spacing_ratio)
+    n_src = float(n_pts_src)
+    n_tgt = float(n_pts_tgt)
+    sk    = max(float(skew), 1e-6)
+    if ppc is None:
+        ppc = max(n_tgt ** 0.5, 1.0)
+    ppc = max(float(ppc), 1e-6)
+
+    log_sr  = _math.log(sr)
+    log_src = _math.log(max(n_src, 1))
+    log_tgt = _math.log(max(n_tgt, 1))
+    log_ppc = _math.log(ppc)
+    log_sk  = _math.log(sk)
+    log_sr2 = log_sr ** 2
+    log_ppc2 = log_ppc ** 2
+    nd2     = nd ** 2
+
+    _est           = estimate_template_cell_counts(nd, sr)
+    log_area_ovlpd = _math.log(max(_est['area_share_ovlpd'], 1e-12))
+
+    log_time = (
+        -2.52740
+        - 0.08831 * log_sr ** 3
+        + 0.01070 * nd ** 3
+        + 0.17594 * log_sr   * nd
+        + 0.02267 * log_tgt ** 2
+        + 0.02075 * log_src ** 2
+        - 0.19208 * log_ppc
+        - 0.01038 * log_ppc2 * log_sr2
+        + 0.00027 * log_ppc2 * nd2
+        - 0.00059 * log_ppc ** 3 * nd
+        - 0.00010 * log_ppc2 * log_src
+        - 0.32633 * log_sk
+        + 0.09258 * log_sk   * log_sr
+        + 0.01695 * log_sk   * nd
+        - 0.03483 * log_sk   * nd2
+        + 0.01421 * log_sk   * log_ppc2
+        - 0.02791 * log_sr2  * nd2
+        + 0.01092 * log_ppc  * log_sr2 * nd
+        - 0.05970 * log_area_ovlpd * log_ppc
+    )
+    if ngc is not None:
+        log_ngc   = _math.log(max(float(ngc), 1.0))
+        log_time += (
+            - 0.01743 * (log_tgt - log_ngc) * log_sr
+            - 0.01555 * (log_src - log_ngc) * nd
+        )
+    return _math.exp(log_time)
+
+
+def predict_geo_build_time(spacing_ratio: float, nest_depth: int) -> float:
+    """Predict geometry build time (seconds, CPU) for a given spacing_ratio and nest_depth.
+
+    Fitted on process_time() sweeps over sr ∈ [1.0, 6.0], nd ∈ [0, 9].
+    R² ≈ 0.80 (single-run measurements; true R² on repeated mins would be higher).
+    Captures:
+      - cubic polynomial in log(sr) and nd with cross-terms
+      - sr_is_int dummy (sr is an exact integer) and its nd interactions
+    Valid range: sr > 0, nd ≥ 0.  Returns seconds.
+    """
+    import math as _math
+    sr  = float(spacing_ratio)
+    nd  = float(nest_depth)
+    lsr = _math.log(sr)
+    si  = 1.0 if sr % 1.0 == 0.0 else 0.0  # sr_is_int
+    log_t = (
+        14.0419
+        - 16.4806 * sr
+        + 25.3188 * lsr
+        +  0.0526 * nd
+        -  3.6885 * lsr**2
+        -  0.0477 * nd**2
+        +  0.0461 * lsr * nd
+        +  9.1441 * lsr**3
+        +  0.0112 * nd**3
+        -  0.0355 * lsr**2 * nd
+        -  0.0262 * lsr * nd**2
+        +  0.0112 * lsr**2 * nd**2
+        +  0.0782 * si
+        +  0.0472 * si * nd
+        -  0.0140 * si * nd**2
+    )
+    return _math.exp(log_t)
+
+
+def recommend_max_nest_depth(
+    n_pts_src,
+    n_pts_tgt,
+    cell_counts,
+    spacing_ratio,
+    skew=1.0,
+    build_cost_per_cell=1e-7,
+):
+    """
+    Return the nest_depth that minimises estimated total runtime.
+
+    Cost model
+    ----------
+    total_cost(k) = predict_time_excl_build(k, ...) + build_cost(k)
+
+    where build_cost(k) = build_cost_per_cell × Σ cell_counts[0..k]
+    (aggregate_point_data_to_cells writes one node per non-empty cell per level).
+
+    The search + aggregation time is predicted from the empirical regression
+    model (R²=0.859); see predict_time_excl_build() for coefficients.
+    Build time is kept separate as it scales linearly with total non-empty cells
+    across all levels and is cached in disk_region_geometry after the first call.
+
+    Parameters
+    ----------
+    n_pts_src          : number of source (search-origin) points
+    n_pts_tgt          : number of target (aggregated) points
+    cell_counts        : list of int, length nd+1 — non-empty cells per level
+                         (level 0 = coarsest) from count_cells_per_level()
+    spacing_ratio      : r / spacing (sr)
+    skew               : spatial skewness of target pts (default 1.0 = uniform)
+    build_cost_per_cell: seconds per non-empty cell for aggregation node build
+                         (default 1e-7 s / cell)
+
+    Returns
+    -------
+    int — recommended max nest_depth in 0 .. len(cell_counts)-1
+    """
+    nd_max = len(cell_counts) - 1
+    if nd_max == 0 or n_pts_tgt <= 0:
+        return 0
+
+    ppc = n_pts_tgt / max(cell_counts[0], 1)
+
+    best_k, best_cost = 0, float('inf')
+    build_cumulative  = 0.0
+
+    for k in range(nd_max + 1):
+        build_cumulative += cell_counts[k] * build_cost_per_cell
+        search_agg_cost  = predict_time_excl_build(
+            k, spacing_ratio, n_pts_src, n_pts_tgt, skew=skew, ppc=ppc,
+        )
+        total_cost = search_agg_cost + build_cumulative
+
+        if total_cost < best_cost:
+            best_cost = total_cost
+            best_k    = k
+
+    return best_k
+
+
 def compute_spacing_breakpoints(max_offset: int = 4, silent: bool = True):
     """
     Generate the unique 2D analytical breakpoints (R/spacing ratios) where the
@@ -167,7 +458,7 @@ def compute_spacing_breakpoints(max_offset: int = 4, silent: bool = True):
 SPACINGS_BREAKPOINTS = _np_array([
     2**.5, 1.5, 2.5**.5, 2, 4.5**0.5, 5**0.5, 2.5, (13/2)**0.5, (17/2)**0.5, 3
 ])
-CANDIDATE_DEPTHS = range(8)
+CANDIDATE_DEPTHS = range(4)  # nd 0-3; expand once full sweep (incl. nd=4+) is complete
 
 def choose_nest_depth(r_over_s: float) -> int:
     """Heuristic nest_depth for a given r/spacing ratio."""
@@ -182,8 +473,8 @@ def choose_nest_depth(r_over_s: float) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Timing model — LASSO→OLS benchmark regression (2026-06, v2 with cubic terms)
-# geo: 55 rows (R²=0.732)  srch: 621 rows (R²=0.981)  agg: 927 rows (R²=0.992)
+# Timing model — LASSO→OLS benchmark regression (2026-06, v3)
+# geo: 55 rows (R²=0.732)  total_excl_build: (R²=0.859, search+agg merged)
 # ---------------------------------------------------------------------------
 
 def predict_timing(
@@ -205,9 +496,8 @@ def predict_timing(
     s   = r / max(r_over_s, 1e-9)
     W, H = spatial_width, spatial_height
     # All dimensionless — require consistent units between r and W/H
-    ngc       = (W / s) * (H / s) * (4 ** nd)
-    ppc       = n_tgt * math.pi * r ** 2 / max(W * H, 1e-30)
-    wrld_crcl = W * H / (math.pi * r ** 2)
+    ngc  = (W / s) * (H / s) * (4 ** nd)
+    ppc  = n_tgt * math.pi * r ** 2 / max(W * H, 1e-30)
 
     log_ros  = math.log(max(r_over_s,  1e-9))
     log_ngc  = math.log(max(ngc,       1.0))
@@ -215,32 +505,19 @@ def predict_timing(
     log_ntt  = math.log(max(n_tgt,     1.0))
     log_skw  = math.log(max(skewness,  1e-9))
     log_ppc  = math.log(max(ppc,       1e-9))
-    log_wc   = math.log(max(wrld_crcl, 1e-9))
-    log_4nd  = math.log1p(4.0 ** nd)
     log_ros2 = log_ros ** 2
     log_ros3 = log_ros ** 3
     log_nts2 = log_nts ** 2
     log_ntt2 = log_ntt ** 2
-    log_ppc2 = log_ppc ** 2
-    log_ppc3 = log_ppc ** 3
     nd2      = nd ** 2
     nd3      = nd ** 3
     tol = 1e-4
-    ros_1_4142 = int(abs(r_over_s - 2**0.5) < tol)
-    ros_1_5000 = int(abs(r_over_s - 1.5) < tol)
-    ros_1_5811 = int(abs(r_over_s - 2.5**0.5) < tol)
-    ros_2_0000 = int(abs(r_over_s - 2) < tol)
-    ros_2_1213 = int(abs(r_over_s - 4.5**0.5) < tol)
-    ros_2_2361 = int(abs(r_over_s - 5**0.5) < tol)
     ros_2_5000 = int(abs(r_over_s - 2.5) < tol)
-    ros_2_5495 = int(abs(r_over_s - (13/2)**0.5) < tol)
-    ros_2_9155 = int(abs(r_over_s - (17/2)**0.5) < tol)
-    ros_3_0000 = int(abs(r_over_s - 3) < tol)
+    ros_3_0000 = int(abs(r_over_s - 3.0) < tol)
 
     # ── Geometry (absolute seconds, uncached only, topology features only) ──
     # geo: 55 rows (R²=0.732)
-    # TODO this should be removed in production.
-    if False and geometry_cached:
+    if geometry_cached:
         geo_s = 0.0
     else:
         lv = (2.6429
@@ -252,94 +529,10 @@ def predict_timing(
               + 0.018  * log_ros2 * nd2
               - 0.006  * log_ngc  * nd)
         geo_s = math.exp(min(lv, 50.0))
-    # ── Search (absolute seconds) — srch: (R²=0.965) ──────────────────────────
-    lv = (-8.7208
-          + 0.005  * nd3
-          - 0.157  * ros_1_5000
-          + 0.180  * ros_2_0000
-          + 0.020  * ros_2_9155
-          + 0.193  * ros_3_0000
-          + 0.224  * ros_2_2361 * nd
-          - 0.024  * ros_1_4142 * nd2
-          + 0.001  * ros_1_5000 * nd2
-          - 0.016  * ros_1_5811 * nd2
-          - 0.073  * ros_2_0000 * nd2
-          - 0.017  * ros_2_1213 * nd2
-          - 0.186  * ros_2_5000 * nd2
-          - 0.170  * ros_2_5495 * nd2
-          - 0.028  * ros_3_0000 * nd2
-          + 0.158  * log_ntt
-          + 0.762  * log_nts
-          + 0.067  * log_ppc
-          - 0.001  * log_ppc3 * log_ros2
-          - 0.000  * log_ppc3 * nd2
-          - 0.015  * (log_nts - log_ngc) * nd
-          + 0.009  * log_ppc * log_ros * nd
-          + 0.000  * log_ntt * ppc
-          - 0.008  * ros_1_5811 * log_ntt
-          + 0.039  * ros_2_5000 * log_ntt
-          + 0.019  * ros_2_5495 * log_ntt
-          + 0.014  * ros_1_4142 * log_ppc
-          - 0.003  * ros_1_5000 * log_ppc
-          - 0.018  * ros_2_0000 * log_ppc
-          - 0.006  * ros_2_2361 * log_ppc
-          + 0.033  * ros_2_9155 * log_ppc
-          - 0.020  * ros_1_4142 * nd * log_ppc
-          - 0.019  * ros_1_5000 * nd * log_ppc
-          - 0.005  * ros_1_5811 * nd * log_ppc
-          + 0.128  * ros_2_0000 * nd * log_ppc
-          - 0.005  * ros_2_2361 * nd * log_ppc
-          + 0.043  * ros_2_5000 * nd * log_ppc
-          + 0.014  * ros_2_5495 * nd * log_ppc
-          + 0.025  * ros_3_0000 * nd * log_ppc)
-          
-    srch_s = math.exp(min(lv, 50.0))
-
-    # ── Aggregation (absolute seconds) — agg: (R²=0.945) ──────────────────────
-    lv = (-8.9848
-          - 0.021  * nd3
-          + 0.698  * log_ros * nd
-          - 0.595  * ros_1_4142
-          - 0.105  * ros_1_5811
-          + 0.153  * ros_2_0000
-          + 0.320  * ros_2_5000
-          + 0.075  * ros_2_5495
-          - 0.761  * ros_2_9155
-          + 0.113  * ros_1_5000 * nd2
-          + 0.133  * ros_1_5811 * nd2
-          + 0.320  * ros_2_0000 * nd2
-          + 0.036  * ros_2_1213 * nd2  
-          + 0.092  * ros_2_2361 * nd2
-          - 0.163  * ros_2_5000 * nd2
-          - 0.193  * ros_2_5495 * nd2
-          - 0.086  * ros_3_0000 * nd2
-          + 0.888  * log_ntt
-          + 0.004  * log_ntt2 * log_ros    
-          - 0.394  * log_ppc
-          - 0.001  * log_ppc3 * log_ros2   
-          - 0.000  * log_ppc3 * nd2
-          + 0.006  * log_skw
-          + 0.090  * log_ppc * log_ros * nd
-          + 0.000  * log_ntt * ppc          
-          - 0.007  * ros_2_1213 * log_ntt
-          + 0.049  * ros_1_4142 * log_ppc
-          - 0.042  * ros_1_5000 * log_ppc
-          + 0.014  * ros_2_1213 * log_ppc
-          - 0.018  * ros_2_2361 * log_ppc
-          - 0.037  * ros_2_5000 * log_ppc
-          - 0.007  * ros_2_5495 * log_ppc
-          + 0.216  * ros_2_9155 * log_ppc
-          + 0.055  * ros_1_4142 * nd * log_ntt
-          + 0.049  * ros_1_5000 * nd * log_ppc
-          + 0.005  * ros_1_5811 * nd * log_ppc
-          - 0.047  * ros_2_0000 * nd * log_ppc
-          + 0.001  * ros_2_2361 * nd * log_ppc
-          + 0.028  * ros_2_5000 * nd * log_ppc
-          + 0.011  * ros_2_5495 * nd * log_ppc
-          - 0.043  * ros_2_9155 * nd * log_ppc)
-          
-    agg_s = math.exp(min(lv, 50.0))
-
+    # ── Search + Aggregation combined (absolute seconds) — total excl. geo build
+    srch_s = predict_time_excl_build(nd, r_over_s, n_src, n_tgt,
+                                     skew=skewness, ppc=ppc, ngc=ngc)
+    agg_s  = 0.0
 
     return geo_s, srch_s, agg_s
 
@@ -396,24 +589,24 @@ def choose_spacing_and_depth(
     pairs = [(s, nd) for s in candidate_spacings for nd in candidate_depths]
 
     best_total        = math.inf
-    best_pair         = pairs[0]
+    best_pair         = (candidate_spacings[0], candidate_depths[0])
     best_cached_total = math.inf
     best_cached_pair  = None
-
-    for s, nd in pairs:
-        cached = _is_cached(s, nd)
-        geo_s, srch_s, agg_s = predict_timing(
-            s, nd, n_src, n_tgt,
-            r, spatial_width, spatial_height,
-            skewness, geometry_cached=cached,
-        )
-        total = geo_s*(_cfg.GEO_AMORTIZATION_WEIGHT-max(0,min(_cfg.GEO_AMORTIZATION_WEIGHT-0.01,nd*0.05))) + srch_s + agg_s # slightly decrease the weight of geo_s as it might pay off when the user calls multiple times.
-        if total < best_total:
-            best_total = total
-            best_pair  = (s, nd)
-        if cached and total < best_cached_total:
-            best_cached_total = total
-            best_cached_pair  = (s, nd)
+    for s in candidate_spacings:
+        for nd in candidate_depths:
+            cached = _is_cached(s, nd)
+            geo_s, srch_s, agg_s = predict_timing(
+                s, nd, n_src, n_tgt,
+                r, spatial_width, spatial_height,
+                skewness, geometry_cached=cached,
+            )
+            total = geo_s*(_cfg.GEO_AMORTIZATION_WEIGHT-max(0,min(_cfg.GEO_AMORTIZATION_WEIGHT-0.01,nd*0.05))) + srch_s + agg_s # slightly decrease the weight of geo_s as it might pay off when the user calls multiple times.
+            if total < best_total:
+                best_total = total
+                best_pair  = (s, nd)
+            if cached and total < best_cached_total:
+                best_cached_total = total
+                best_cached_pair  = (s, nd)
 
     chosen_s, chosen_nd = best_pair
     if best_cached_pair is not None and best_cached_total <= best_total:

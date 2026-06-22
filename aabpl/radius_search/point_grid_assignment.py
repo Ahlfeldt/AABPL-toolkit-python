@@ -136,11 +136,41 @@ def aggregate_point_data_to_cells(
     aggregate_level = 0
 
     # sort by row, then by col = resulting in cell wise sorting
-    # then sort for quadrants 
+    # then sort for quadrants
     cols_for_sort = [row_name, col_name]
     subcell_nr = find_column_name('sc_nr', existing_columns=pts.columns)
 
-    
+    # -- optional: auto-reduce nest_depth when cells are too sparse to benefit --
+    if False and nest_depth > 0:
+        from aabpl.radius_search.spacing_topology import count_cells_per_level, recommend_max_nest_depth
+        _x_arr = pts[x].values
+        _y_arr = pts[y].values
+        _cell_counts = count_cells_per_level(
+            _x_arr, _y_arr,
+            xmin=grid.total_bounds.xmin,
+            ymin=grid.total_bounds.ymin,
+            spacing=grid._search_spacing,
+            max_nd=nest_depth,
+        )
+        _recommended_nd = recommend_max_nest_depth(
+            n_pts_src=getattr(grid, '_n_pts_src', len(pts)),
+            n_pts_tgt=len(pts),
+            cell_counts=_cell_counts,
+            spacing_ratio=getattr(grid, '_spacing_ratio', 2.0),
+        )
+        if _recommended_nd < nest_depth:
+            nest_depth = _recommended_nd
+            if nest_depth == 0:
+                grid.cell_codec = None
+            else:
+                from aabpl.utils.cell_keys import CellKeyCodec
+                grid.cell_codec = CellKeyCodec(
+                    nest_depth=nest_depth,
+                    row_lo=int(grid.row_ids.min()), row_hi=int(grid.row_ids.max()),
+                    col_lo=int(grid.col_ids.min()), col_hi=int(grid.col_ids.max()),
+                    offset_margin=16,
+                )
+
     if nest_depth > 0:
         # offsets normalized to 0-1
         offset_x = 0.5 + ((pts[x]-grid.total_bounds.xmin)%grid._search_spacing - grid._search_spacing/2) / grid._search_spacing
