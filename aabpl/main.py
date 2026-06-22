@@ -1024,6 +1024,7 @@ def detect_cluster_pts(
             grid=grid,
             **plot_kwargs
     ):
+        from .illustrations.distribution_plot import create_distribution_plot
         create_distribution_plot(
             filename=filename,
             plot_kwargs=plot_kwargs,

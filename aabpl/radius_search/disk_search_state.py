@@ -322,7 +322,10 @@ class DiskSearch(object):
             col_name=col_name,
             suffix=suffix,
         )
-        
+        # Snapshot projected coords now so plots work even after keep_cols cleanup drops them.
+        self.source._proj_x_snapshot = pts[x].values.copy() if x in pts.columns else None
+        self.source._proj_y_snapshot = pts[y].values.copy() if y in pts.columns else None
+
         self.tgt_df_contains_src_df = self.check_if_tgt_df_contains_src_df(silent=silent)
 
         if not alr_assg_to_cells:

@@ -410,6 +410,56 @@ check(hasattr(grid, 'clustering'), "detect_cluster_cells_from_labeled_pts: grid 
 print(f"  detect_cluster_cells_from_labeled_pts  OK")
 
 # ═══════════════════════════════════════════════════════════════════════════════
+section("15 · grid.plot.* smoke tests after keep_cols=False cleanup")
+# ═══════════════════════════════════════════════════════════════════════════════
+# Regression: plot_pt_vars.py tried to read 'proj_x'/'proj_y' from pts after
+# keep_cols=False (the default) had already dropped them.  The fix snapshots
+# projected coords in set_source so plots always have access to them.
+import matplotlib
+matplotlib.use('Agg')  # non-interactive backend — no GUI window needed
+
+pts = pts_base.copy()
+grid = aabpl.detect_cluster_cells(
+    pts=pts, crs='', r=R, c=['val'], x='x', y='y',
+    stat='sum', n_random_points=500, random_seed=0,
+    silent=True, _dev=DEV,
+    keep_cols=False,  # default — ensures proj_x/proj_y are dropped from pts
+)
+
+# grid.plot.vars — failed with KeyError: 'proj_x' before the fix
+try:
+    fig = grid.plot.vars(filename=None)
+    import matplotlib.pyplot as plt
+    plt.close('all')
+    print("  grid.plot.vars(keep_cols=False)  OK")
+except Exception as e:
+    raise AssertionError(f"grid.plot.vars raised after keep_cols=False cleanup: {e}")
+
+# grid.plot.clusters — verify it runs without error
+try:
+    fig = grid.plot.clusters(filename=None)
+    plt.close('all')
+    print("  grid.plot.clusters(keep_cols=False)  OK")
+except Exception as e:
+    raise AssertionError(f"grid.plot.clusters raised after keep_cols=False cleanup: {e}")
+
+# grid.plot.cluster_pts
+try:
+    fig = grid.plot.cluster_pts(filename=None)
+    plt.close('all')
+    print("  grid.plot.cluster_pts(keep_cols=False)  OK")
+except Exception as e:
+    raise AssertionError(f"grid.plot.cluster_pts raised after keep_cols=False cleanup: {e}")
+
+# grid.plot.rand_dist
+try:
+    fig = grid.plot.rand_dist(filename=None)
+    plt.close('all')
+    print("  grid.plot.rand_dist(keep_cols=False)  OK")
+except Exception as e:
+    raise AssertionError(f"grid.plot.rand_dist raised after keep_cols=False cleanup: {e}")
+
+# ═══════════════════════════════════════════════════════════════════════════════
 print("\n" + "="*60)
 print("  ALL TESTS PASSED")
 print("="*60 + "\n")

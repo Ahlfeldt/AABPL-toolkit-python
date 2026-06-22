@@ -129,8 +129,10 @@ def create_plots_for_vars(
         xmin, xmax, ymin, ymax = grid.total_bounds.xmin, grid.total_bounds.xmax, grid.total_bounds.ymin, grid.total_bounds.ymax,
     else:    
         xmin, xmax, ymin, ymax = grid.total_bounds.xmin, grid.total_bounds.xmax, grid.total_bounds.ymin, grid.total_bounds.ymax,
-    xs = grid.search.source.pts[grid.search.source.x]
-    ys = grid.search.source.pts[grid.search.source.y]
+    x_col, y_col = grid.search.source.x, grid.search.source.y
+    src = grid.search.source
+    xs = src.pts[x_col] if x_col in src.pts.columns else getattr(src, '_proj_x_snapshot', None)
+    ys = src.pts[y_col] if y_col in src.pts.columns else getattr(src, '_proj_y_snapshot', None)
     for i, colname in enumerate(colnames.flat):
         # SELECT AX (IF MULTIPLE)
         ax = axs.flat[i] if nrows > 1 else axs
