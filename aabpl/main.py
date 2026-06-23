@@ -3,7 +3,7 @@ from warnings import simplefilter
 from pandas.errors import PerformanceWarning as _pd_PerformanceWarning
 from pandas import DataFrame as _pd_DataFrame
 from numpy import array as _np_array, nan as _np_nan
-from shapely.geometry import Polygon as _shapely_Polygon, MultiPolygon as _shapely_MultiPolygon
+from shapely.geometry import Polygon as _shapely_Polygon, MultiPolygon as _shapely_MultiPolygon, GeometryCollection as _shapely_GeometryCollection
 
 simplefilter(action='ignore', category=_pd_PerformanceWarning)
 simplefilter(action='ignore', category=FutureWarning)
@@ -161,6 +161,97 @@ def _validate_kwargs(
 #
 
 
+def _unpack_contingency(v):
+    if isinstance(v, (tuple, list)):
+        return int(v[0]), int(v[1])
+    v = int(v)
+    return v, v
+
+def _unpack_merge_dist(v):
+    if v is None:
+        return None, None
+    if isinstance(v, (tuple, list)):
+        return v[0], v[1]
+    f = float(v)
+    return f, f
+
+def _unpack_min_cluster_share(v):
+    if isinstance(v, (tuple, list)):
+        return float(v[0]), float(v[1]), float(v[2])
+    f = float(v)
+    return f, f, f
+
+def _parse_sample_area_spec(spec):
+    "Parse 'method,key=val,key=val' into (method, {key: val})."
+    if ',' not in spec or '=' not in spec:
+        return _SAMPLE_AREA_ALIASES.get(spec, spec), {}
+    parts = spec.split(',')
+    method = _SAMPLE_AREA_ALIASES.get(parts[0].strip(), parts[0].strip())
+    params = {}
+    for part in parts[1:]:
+        if '=' in part:
+            k, v = part.split('=', 1)
+            params[k.strip()] = v.strip()
+    return method, params
+
+_SAMPLE_AREA_ALIASES = {
+    'buff_cells':     'buff_cells_min_pts',
+    'buff_non_empty': 'buff_non_empty_cells',
+    'concave_hull':   'concave',
+    'convex_hull':    'convex',
+    'bbox':           'bounding_box',
+}
+
+_SAMPLE_AREA_SPEC_DOCS = (
+    "sample_area spec string:  'method'  or  'method,key=val,key=val'\n"
+    "\n"
+    "Methods and parameters\n"
+    "----------------------------------------------------------------------\n"
+    "buff_non_empty_cells / buff_non_empty  [DEPRECATED - use buff_cells]\n"
+    "    Buffer around all non-empty grid cells.\n"
+    "    buf=<float>       Buffer radius in CRS units (default: search radius r).\n"
+    "\n"
+    "buff_cells_min_pts / buff_cells\n"
+    "    Buffer around cells that contain >= min_pts data points.\n"
+    "    min_pts=<int>     Minimum points per cell (default: 1 = non-empty).\n"
+    "    buf=<float>       Buffer radius (default: r).\n"
+    "\n"
+    "buff_pts\n"
+    "    Buffer around every individual point. (!) Slow for large datasets.\n"
+    "    buf=<float>       Buffer radius (default: r).\n"
+    "\n"
+    "concave / concave_hull\n"
+    "    Concave hull of all points + buffer.\n"
+    "    concavity=<float> Shape tightness: 0=very concave, large=convex (default: 1).\n"
+    "    buf=<float>       Buffer radius (default: r).\n"
+    "    tol=<float>       Douglas-Peucker simplification tolerance (default: None).\n"
+    "\n"
+    "convex / convex_hull\n"
+    "    Convex hull of all points + buffer.\n"
+    "    buf=<float>       Buffer radius (default: r).\n"
+    "    tol=<float>       Simplification tolerance (default: None).\n"
+    "\n"
+    "bounding_box / bbox\n"
+    "    Axis-aligned bounding box of all points + buffer.\n"
+    "    buf=<float>       Buffer radius (default: r).\n"
+    "\n"
+    "grid\n"
+    "    Full grid extent (no parameters).\n"
+    "\n"
+    "----------------------------------------------------------------------\n"
+    "Examples\n"
+    "    sample_area='buff_cells'\n"
+    "    sample_area='buff_cells,min_pts=2,buf=500'\n"
+    "    sample_area='buff_cells_min_pts,min_pts=1,buf=53.3'\n"
+    "    sample_area='concave,concavity=0.5,buf=1000,tol=50'\n"
+    "    sample_area='convex'\n"
+    "    sample_area='bounding_box'\n"
+    "\n"
+    "You can also pass a Shapely Polygon or MultiPolygon directly (must be\n"
+    "in the same projected CRS as the pts coordinates).\n"
+)
+
+
 @time_func_perf
 def resolve_sample_area(
     pts:_pd_DataFrame,
@@ -185,29 +276,66 @@ def resolve_sample_area(
     if sample_area is None:
         sample_area = 'grid'
     if type(sample_area) == str:
-        if no_plot:
-            progress_print("Creating sample area with method '"+sample_area+"' and buffer=tolerance="+str(r)+". Use 'grid.sample_area' to inspect.")
+        hull_type, parsed = _parse_sample_area_spec(sample_area)
+
+        if hull_type == 'buff_non_empty_cells':
+            progress_print("sample_area='buff_non_empty_cells' is deprecated. Use sample_area='buff_cells' instead.")
+            hull_type = 'buff_cells_min_pts'
+            parsed.setdefault('min_pts', '1')
+
+        _buf       = float(parsed['buf'])       if 'buf'       in parsed else r
+        _tol       = float(parsed['tol'])       if 'tol'       in parsed else None
+        _concavity = float(parsed['concavity']) if 'concavity' in parsed else 1
+        if 'min_pts' in parsed:
+            _min_pts = int(parsed['min_pts'])
+        elif min_pts_to_sample_cell != 0:
+            _min_pts = min_pts_to_sample_cell
+        else:
+            _min_pts = 1
+
+        _tol_resolved = _tol if _tol is not None else _buf
+        def _fmt(v): return str(int(v)) if v == int(v) else str(v)
+
+        _param_parts = []
+        if hull_type in ('buff_cells_min_pts', 'buff_pts', 'concave', 'convex', 'bounding_box', 'grid'):
+            if hull_type != 'grid':
+                _param_parts.append(f'buf={_fmt(_buf)}')
+        if hull_type == 'buff_cells_min_pts':
+            _param_parts.append(f'min_pts={_min_pts}')
+        if hull_type in ('concave', 'convex', 'buff_pts'):
+            _param_parts.append(f'tol={_fmt(_tol_resolved)}')
+        if hull_type == 'concave':
+            _param_parts.append(f'concavity={_fmt(_concavity)}')
+        _params_str = (', '.join(_param_parts) + '. ') if _param_parts else ''
+        progress_print(f"Creating sample area: method='{hull_type}', {_params_str}Use 'grid.sample_area' to inspect.")
+
         sample_area = infer_sample_area_from_pts(
             pts=pts,
             grid=grid,
             x=x,
             y=y,
-            hull_type=sample_area,
-            buffer=r,
-            min_pts_to_sample_cell=min_pts_to_sample_cell,
+            hull_type=hull_type,
+            buffer=_buf,
+            min_pts_to_sample_cell=_min_pts,
             plot_sample_area=None,
         )
-        # sample_area = subtract_invalid_area(sample_area, invalid_areas=_shapely_Polygon([]))
 
-    elif type(sample_area) in [_shapely_Polygon, _shapely_MultiPolygon]:
+    elif isinstance(sample_area, (_shapely_Polygon, _shapely_MultiPolygon, _shapely_GeometryCollection)):
         if crs and local_crs and crs != local_crs:
             sample_area = convert_MultiPolygon_crs(multipoly=sample_area, initial_crs=crs, target_crs=local_crs)
     else:
-        raise ValueError('sample_area must parameter most be one of ["str","Poylgon","MultiPolygon"] instead of type', type(sample_area))
+        raise ValueError(
+            f"sample_area must be a str spec, shapely Polygon, or shapely MultiPolygon; got {type(sample_area).__name__}. "
+            "Call resolve_sample_area.params() for valid string spec options."
+        )
     
     
     
     return sample_area
+
+def _resolve_sample_area_params():
+    print(_SAMPLE_AREA_SPEC_DOCS)
+resolve_sample_area.params = _resolve_sample_area_params
 
 # TODO remove cell_region from kwargs
 @time_func_perf
@@ -450,8 +578,10 @@ def radius_search(
             - ``'buffer'``: buffer around individual points (slow for large datasets)
             - ``'bounding_box'``: axis-aligned bounding box
             - ``'grid'`` or ``None``: full grid extent
-        Alternatively pass any Shapely ``Polygon`` or ``MultiPolygon`` directly. If passing a
-        Shapely geometry directly, it must be in the same CRS as the ``pts`` coordinates (i.e. ``crs``).
+        Alternatively pass any Shapely ``Polygon`` or ``MultiPolygon`` directly. The geometry
+        is assumed to be in ``crs`` and is reprojected to ``local_crs`` automatically. If your
+        geometry is already in the projected CRS (``local_crs``), pass ``crs=local_crs`` to
+        prevent a double reprojection.
         See ``infer_sample_area_from_pts`` for finer control (default=False).
     suffix (str):
         Suffix appended to each column name in ``c`` to form the result column names.
@@ -823,9 +953,9 @@ def radius_search(
 
     if not keep_cols:
         if keep_cols is None:
-            _keep_extra = {grid.output_row_name, grid.output_col_name}
+            _keep_extra = {grid.output_row_name, grid.output_col_name, x, y}
         else:
-            _keep_extra = {}
+            _keep_extra = {x, y}
         _to_drop = [
             clmn for clmn in pts.columns
             if clmn not in _cols_before and clmn not in _output_cols and clmn not in _keep_extra
@@ -906,7 +1036,6 @@ def detect_cluster_pts(
     stat:str=['sum','count','mean','variance','std','cv','skewness','kurtosis'][0],
     exclude_self:bool=True,
     sample_area='buff_cells_min_pts',
-    min_pts_to_sample_cell:int=0,
     weight_valid_area:str=None,
     k_th_percentile:float=99.5,
     n_random_points:int=int(1e5),
@@ -916,14 +1045,10 @@ def detect_cluster_pts(
     y:str='lat',
     row_name:str='id_y',
     col_name:str='id_x',
-    suffix:str='_750m',
-    cluster_suffix:str='_cluster',
+    suffix:str=None,
+    cluster_suffix:str=None,
     proj_crs:str='auto',
     pts_target:_pd_DataFrame=None,
-    x_tgt:str=None,
-    y_tgt:str=None,
-    row_name_tgt:str=None,
-    col_name_tgt:str=None,
     spacing:float=None,
     plot_distribution:dict=None,
     plot_cluster_points:dict=None,
@@ -932,6 +1057,7 @@ def detect_cluster_pts(
     exclude_pt_itself:bool=None,   # deprecated alias for exclude_self
     _dev:dict=None,
     silent:bool=None,
+    **kwargs,
 ):
     """
     For all points in a DataFrame it searches for all other points (potentially of another DataFrame) within the specified radius and aggregate the values for specified column(s).
@@ -950,6 +1076,21 @@ def detect_cluster_pts(
         ``aabpl.draw_random_coords()`` with the already-projected ``grid.sample_area`` to generate
         compatible coordinates, or project your own points beforehand.
     """
+    if 'min_pts_to_sample_cell' in kwargs:
+        min_pts_to_sample_cell = kwargs.pop('min_pts_to_sample_cell')
+        progress_print(
+            "DeprecationWarning: min_pts_to_sample_cell= is deprecated. Pass it inline via sample_area= instead, "
+            "e.g. sample_area='buff_cells,min_pts=1'. "
+            "Call resolve_sample_area.params() for all options."
+        )
+    else:
+        min_pts_to_sample_cell = 0
+    x_tgt        = kwargs.pop('x_tgt', None)
+    y_tgt        = kwargs.pop('y_tgt', None)
+    row_name_tgt = kwargs.pop('row_name_tgt', None)
+    col_name_tgt = kwargs.pop('col_name_tgt', None)
+    if kwargs:
+        raise TypeError(f"detect_cluster_pts() got unexpected keyword argument(s): {sorted(kwargs)}")
     # ── multi-radius delegation ───────────────────────────────────────────────
     # When r is not a scalar, run a search per unique radius, then build the
     # null distribution across all bands and label cluster points.
@@ -977,6 +1118,9 @@ def detect_cluster_pts(
         x, y, stat = vk.x, vk.y, vk.stat
         pts_target, x_tgt, y_tgt = vk.pts_target, vk.x_tgt, vk.y_tgt
         row_name_tgt, col_name_tgt = vk.row_name_tgt, vk.col_name_tgt
+        # For multi-radius, output cols already embed _{stat}_{r}; append _cluster only.
+        if cluster_suffix is None:
+            cluster_suffix = '_cluster'
 
         # Run the multi-radius search (one radius_search call per unique radius).
         # keep_cols=True so the output columns are available for null-distribution labelling.
@@ -1049,6 +1193,10 @@ def detect_cluster_pts(
     c, x, y, suffix = vk.c, vk.x, vk.y, vk.suffix
     pts_target, x_tgt, y_tgt = vk.pts_target, vk.x_tgt, vk.y_tgt
     row_name_tgt, col_name_tgt, grid, stat = vk.row_name_tgt, vk.col_name_tgt, vk.grid, vk.stat
+    if suffix is None:
+        suffix = _default_suffix(stat, r)
+    if cluster_suffix is None:
+        cluster_suffix = f'_cluster{_default_suffix(stat, r)}'
     c = list(c)
     orig_cols = list(c)
     _output_cols = set(str(col)+suffix for col in orig_cols) | set(str(col)+cluster_suffix for col in orig_cols)
@@ -1226,7 +1374,7 @@ def detect_cluster_pts(
         grid.plot.cluster_pts(**plot_cluster_points)
 
     if not keep_cols:
-        _keep_extra = {grid.output_row_name, grid.output_col_name, init_sort}
+        _keep_extra = {grid.output_row_name, grid.output_col_name, init_sort, x, y}
         _to_drop = [
             col for col in pts.columns
             if col not in _cols_before and col not in _output_cols and col not in _keep_extra
@@ -1253,38 +1401,30 @@ def detect_cluster_cells(
     exclude_self:bool=True,
     spacing:float=None,
     sample_area='buff_cells_min_pts',
-    min_pts_to_sample_cell:int=0,
     weight_valid_area:str=None,
     k_th_percentile:float=99.5,
     n_random_points:int=int(1e5),
     random_seed:int=None,
     null_distribution=None,
-    queen_contingency:int=1,
-    rook_contingency:int=1,
-    centroid_dist_threshold:float=None,
-    border_dist_threshold:float=None,
-    min_cluster_share_after_contingency:float=0.05,
-    min_cluster_share_after_centroid_dist:float=0.00,
-    min_cluster_share_after_convex:float=0.00,
+    contingency=1,
+    merge_dist=None,
+    min_cluster_share=(0.05, 0.0, 0.0),
     make_convex:bool=True,
     x:str='lon',
     y:str='lat',
     row_name:str='id_y',
     col_name:str='id_x',
-    suffix:str='_750m',
-    cluster_suffix:str='_cluster',
+    suffix:str=None,
+    cluster_suffix:str=None,
     proj_crs:str='auto',
     pts_target:_pd_DataFrame=None,
-    x_tgt:str=None,
-    y_tgt:str=None,
-    row_name_tgt:str=None,
-    col_name_tgt:str=None,
     plot_distribution:dict=None,
     plot_cluster_points:dict=None,
     keep_cols:bool=False,
     overwrite:bool=False,
     _dev:dict=None,
     silent:bool=None,
+    **kwargs,
 ):
     """
     For all points in a DataFrame it searches for all other points (potentially of another DataFrame) within the specified radius and aggregate the values for specified column(s).
@@ -1346,8 +1486,10 @@ def detect_cluster_cells(
             - ``'buffer'``: buffer around individual points (slow for large datasets)
             - ``'bounding_box'``: axis-aligned bounding box
             - ``'grid'`` or ``None``: full grid extent
-        Alternatively pass any Shapely ``Polygon`` or ``MultiPolygon`` directly. If passing a
-        Shapely geometry directly, it must be in the same CRS as the ``pts`` coordinates (i.e. ``crs``).
+        Alternatively pass any Shapely ``Polygon`` or ``MultiPolygon`` directly. The geometry
+        is assumed to be in ``crs`` and is reprojected to ``local_crs`` automatically. If your
+        geometry is already in the projected CRS (``local_crs``), pass ``crs=local_crs`` to
+        prevent a double reprojection.
         See ``infer_sample_area_from_pts`` for finer control (default='buff_non_empty_cells').
     min_pts_to_sample_cell (int):
         Minimum number of data points a grid cell must contain for random points to be drawn in it (default=0).
@@ -1407,9 +1549,10 @@ def detect_cluster_cells(
         Name for the grid column-index column appended to ``pts`` (default=``'id_x'``).
     suffix (str):
         Suffix appended to each column name in ``c`` to form the radius-aggregate column names.
-        When None, defaults to ``'_{r}m'`` (e.g. ``'_750m'`` for ``r=750``) (default='_750m').
+        When None (default), auto-generates ``'_{stat}_{r}'`` (e.g. ``'_sum_750'`` for ``stat='sum', r=750``).
     cluster_suffix (str):
-        Suffix appended to each column name in ``c`` to form the boolean cluster indicator column names (default=``'_cluster'``).
+        Suffix appended to each column name in ``c`` to form the boolean cluster indicator column names.
+        When None (default), auto-generates ``'_cluster_{stat}_{r}'`` (e.g. ``'_cluster_sum_750'``).
     proj_crs (str):
         Metric CRS used internally. ``'auto'`` selects the appropriate UTM zone from the data extent.
         Pass an explicit EPSG string (e.g. ``'EPSG:32632'``) to override, or ``None`` to skip
@@ -1448,6 +1591,46 @@ def detect_cluster_cells(
         ``grid.clustering``. Boolean cluster columns ``{c}{cluster_suffix}`` and radius
         aggregates ``{c}{suffix}`` are appended to ``pts``.
     """
+    if 'min_pts_to_sample_cell' in kwargs:
+        min_pts_to_sample_cell = kwargs.pop('min_pts_to_sample_cell')
+        progress_print(
+            "DeprecationWarning: min_pts_to_sample_cell= is deprecated. Pass it inline via sample_area= instead, "
+            "e.g. sample_area='buff_cells,min_pts=1'. "
+            "Call resolve_sample_area.params() for all options."
+        )
+    else:
+        min_pts_to_sample_cell = 0
+    x_tgt             = kwargs.pop('x_tgt', None)
+    y_tgt             = kwargs.pop('y_tgt', None)
+    row_name_tgt      = kwargs.pop('row_name_tgt', None)
+    col_name_tgt      = kwargs.pop('col_name_tgt', None)
+    exclude_pt_itself = kwargs.pop('exclude_pt_itself', None)
+    queen_contingency, rook_contingency = _unpack_contingency(contingency)
+    centroid_dist_threshold, border_dist_threshold = _unpack_merge_dist(merge_dist)
+    (min_cluster_share_after_contingency,
+     min_cluster_share_after_centroid_dist,
+     min_cluster_share_after_convex) = _unpack_min_cluster_share(min_cluster_share)
+    _dep_cluster = {k: kwargs.pop(k) for k in (
+        'queen_contingency', 'rook_contingency',
+        'centroid_dist_threshold', 'border_dist_threshold',
+        'min_cluster_share_after_contingency',
+        'min_cluster_share_after_centroid_dist',
+        'min_cluster_share_after_convex',
+    ) if k in kwargs}
+    if _dep_cluster:
+        progress_print(
+            f"DeprecationWarning: kwarg(s) {sorted(_dep_cluster)} are deprecated. "
+            "Use contingency=, merge_dist=, min_cluster_share= instead. See docstring."
+        )
+        if 'queen_contingency'                     in _dep_cluster: queen_contingency                     = int(_dep_cluster['queen_contingency'])
+        if 'rook_contingency'                      in _dep_cluster: rook_contingency                      = int(_dep_cluster['rook_contingency'])
+        if 'centroid_dist_threshold'               in _dep_cluster: centroid_dist_threshold               = _dep_cluster['centroid_dist_threshold']
+        if 'border_dist_threshold'                 in _dep_cluster: border_dist_threshold                 = _dep_cluster['border_dist_threshold']
+        if 'min_cluster_share_after_contingency'   in _dep_cluster: min_cluster_share_after_contingency   = float(_dep_cluster['min_cluster_share_after_contingency'])
+        if 'min_cluster_share_after_centroid_dist' in _dep_cluster: min_cluster_share_after_centroid_dist = float(_dep_cluster['min_cluster_share_after_centroid_dist'])
+        if 'min_cluster_share_after_convex'        in _dep_cluster: min_cluster_share_after_convex        = float(_dep_cluster['min_cluster_share_after_convex'])
+    if kwargs:
+        raise TypeError(f"detect_cluster_cells() got unexpected keyword argument(s): {sorted(kwargs)}")
     _cols_before = set(pts.columns)
     vk = _validate_kwargs(
         pts=pts, crs=crs, r=r, c=c, stat=stat,
@@ -1460,6 +1643,10 @@ def detect_cluster_cells(
     c, x, y, suffix = vk.c, vk.x, vk.y, vk.suffix
     pts_target, x_tgt, y_tgt = vk.pts_target, vk.x_tgt, vk.y_tgt
     row_name_tgt, col_name_tgt, stat = vk.row_name_tgt, vk.col_name_tgt, vk.stat
+    if suffix is None:
+        suffix = _default_suffix(stat, r)
+    if cluster_suffix is None:
+        cluster_suffix = f'_cluster{_default_suffix(stat, r)}'
     if centroid_dist_threshold is None:
         centroid_dist_threshold = r * 10/3
     if border_dist_threshold is None:
@@ -1475,7 +1662,6 @@ def detect_cluster_cells(
         exclude_pt_itself=exclude_pt_itself,
         weight_valid_area=weight_valid_area,
         sample_area=sample_area,
-        min_pts_to_sample_cell=min_pts_to_sample_cell,
         k_th_percentile=k_th_percentile,
         n_random_points=n_random_points,
         random_seed=random_seed,
@@ -1524,12 +1710,34 @@ def detect_cluster_cells(
         cluster_suffix=cluster_suffix,
         )
 
+    if not grid._silent:
+        grid.update_spacing()
+        nr, nc = len(grid.row_ids), len(grid.col_ids)
+        n_nonempty = len(grid.id_to_sums)
+        s = grid._search_spacing
+        out_s  = grid.output_spacing
+        out_sy = getattr(grid, 'output_spacing_y', None) or out_s
+        ratio_x = max(1, round(out_s  / s))
+        ratio_y = max(1, round(out_sy / s))
+        n_clusters = sum(len(col_cl.clusters) for col_cl in grid.clustering.by_column.values())
+        n_cluster_cells = sum(
+            len(set((row // ratio_y, col // ratio_x) for row, col in cl.cells))
+            for col_cl in grid.clustering.by_column.values()
+            for cl in col_cl.clusters
+        )
+        progress_print(
+            f'Built output grid: {nr}*{nc}={nr*nc} cells with spacing {grid.output_spacing} '
+            f'({n_nonempty} non-empty) — {n_clusters} cluster(s) across {n_cluster_cells} output cells'
+        )
+
     if not keep_cols:
+        _cluster_id_suffix = cluster_suffix.replace('_cluster_', '_cluster_id_', 1)
         _outer_output_cols = (
             set(str(col)+suffix for col in c) |
-            set(str(col)+cluster_suffix for col in c)
+            set(str(col)+cluster_suffix for col in c) |
+            set(str(col)+_cluster_id_suffix for col in c)
         )
-        _keep_extra = {grid.output_row_name, grid.output_col_name}
+        _keep_extra = {grid.output_row_name, grid.output_col_name, x, y}
         _to_drop = [
             col for col in pts.columns
             if col not in _cols_before and col not in _outer_output_cols and col not in _keep_extra
@@ -1556,13 +1764,9 @@ def detect_cluster_cells_from_labeled_pts(
     y:str='lat',
     row_name:str='id_y',
     col_name:str='id_x',
-    queen_contingency:int=1,
-    rook_contingency:int=1,
-    centroid_dist_threshold:float=None,
-    border_dist_threshold:float=None,
-    min_cluster_share_after_contingency:float=0.0,
-    min_cluster_share_after_centroid_dist:float=0.0,
-    min_cluster_share_after_convex:float=0.0,
+    contingency=1,
+    merge_dist=None,
+    min_cluster_share=(0.0, 0.0, 0.0),
     make_convex:bool=True,
     spacing:float=None,
     suffix:str=None,
@@ -1570,6 +1774,7 @@ def detect_cluster_cells_from_labeled_pts(
     keep_cols:bool=False,
     overwrite:bool=False,
     silent:bool=None,
+    **kwargs,
 ):
     """
     Build spatial cell-clusters from points that are ALREADY labelled as clustered.
@@ -1587,6 +1792,32 @@ def detect_cluster_cells_from_labeled_pts(
 
     Returns the Grid with cluster polygons at ``grid.clustering``.
     """
+    queen_contingency, rook_contingency = _unpack_contingency(contingency)
+    centroid_dist_threshold, border_dist_threshold = _unpack_merge_dist(merge_dist)
+    (min_cluster_share_after_contingency,
+     min_cluster_share_after_centroid_dist,
+     min_cluster_share_after_convex) = _unpack_min_cluster_share(min_cluster_share)
+    _dep_cluster = {k: kwargs.pop(k) for k in (
+        'queen_contingency', 'rook_contingency',
+        'centroid_dist_threshold', 'border_dist_threshold',
+        'min_cluster_share_after_contingency',
+        'min_cluster_share_after_centroid_dist',
+        'min_cluster_share_after_convex',
+    ) if k in kwargs}
+    if _dep_cluster:
+        progress_print(
+            f"DeprecationWarning: kwarg(s) {sorted(_dep_cluster)} are deprecated. "
+            "Use contingency=, merge_dist=, min_cluster_share= instead. See docstring."
+        )
+        if 'queen_contingency'                     in _dep_cluster: queen_contingency                     = int(_dep_cluster['queen_contingency'])
+        if 'rook_contingency'                      in _dep_cluster: rook_contingency                      = int(_dep_cluster['rook_contingency'])
+        if 'centroid_dist_threshold'               in _dep_cluster: centroid_dist_threshold               = _dep_cluster['centroid_dist_threshold']
+        if 'border_dist_threshold'                 in _dep_cluster: border_dist_threshold                 = _dep_cluster['border_dist_threshold']
+        if 'min_cluster_share_after_contingency'   in _dep_cluster: min_cluster_share_after_contingency   = float(_dep_cluster['min_cluster_share_after_contingency'])
+        if 'min_cluster_share_after_centroid_dist' in _dep_cluster: min_cluster_share_after_centroid_dist = float(_dep_cluster['min_cluster_share_after_centroid_dist'])
+        if 'min_cluster_share_after_convex'        in _dep_cluster: min_cluster_share_after_convex        = float(_dep_cluster['min_cluster_share_after_convex'])
+    if kwargs:
+        raise TypeError(f"detect_cluster_cells_from_labeled_pts() got unexpected keyword argument(s): {sorted(kwargs)}")
     if is_cluster_column not in pts.columns:
         raise ValueError(f"`is_cluster_column` '{is_cluster_column}' is not a column of pts.")
     # Without an explicit value column the cluster mass is the count of clustered
@@ -1659,7 +1890,7 @@ def detect_cluster_cells_from_labeled_pts(
     )
 
     if not keep_cols:
-        _keep_extra = {grid.output_row_name, grid.output_col_name, init_sort}
+        _keep_extra = {grid.output_row_name, grid.output_col_name, init_sort, x, y}
         _to_drop = [
             col for col in pts.columns
             if col not in _cols_before and col not in _output_cols and col not in _keep_extra

@@ -8,6 +8,7 @@ from numpy import (
 )
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
+from mpl_toolkits.axes_grid1 import make_axes_locatable as _make_axes_locatable
 from matplotlib.pyplot import close as _plt_close
 from matplotlib.colors import LogNorm as _plt_LogNorm, Normalize as _plt_Normalize, LinearSegmentedColormap as _plt_LinearSegmentedColormap, ListedColormap as _plt_ListedColormap
 from matplotlib.pyplot import (subplots as _plt_subplots, colorbar as _plt_colorbar, get_cmap as _plt_get_cmap)
@@ -75,13 +76,22 @@ def create_distribution_plot(
     matplotlib.figure.Figure
     """
     x_coord_name, y_coord_name = x, y
-    # Projected coord columns may have been dropped by keep_cols cleanup.
-    # Fall back to snapshots stored before cleanup when available.
-    src = getattr(getattr(grid, 'search', None), 'source', None)
-    _pts_x = pts[x_coord_name] if x_coord_name in pts.columns else getattr(src, '_proj_x_snapshot', None)
-    _pts_y = pts[y_coord_name] if y_coord_name in pts.columns else getattr(src, '_proj_y_snapshot', None)
-    _rnd_x = rndm_pts[x_coord_name] if x_coord_name in rndm_pts.columns else getattr(grid, '_rndm_pts_x_snapshot', None)
-    _rnd_y = rndm_pts[y_coord_name] if y_coord_name in rndm_pts.columns else getattr(grid, '_rndm_pts_y_snapshot', None)
+    for _df, _col, _label in [
+        (pts, x_coord_name, 'pts'), (pts, y_coord_name, 'pts'),
+        (rndm_pts, x_coord_name, 'rndm_pts'), (rndm_pts, y_coord_name, 'rndm_pts'),
+    ]:
+        if _col not in _df.columns:
+            raise KeyError(
+                f"Coordinate column '{_col}' not found in {_label}. "
+                f"The column must be the local-projection coordinate (in metres). "
+                f"Pass the correct column name via x= / y= to the plot call, "
+                f"or check that keep_cols did not drop it. "
+                f"Available columns: {list(_df.columns)}"
+            )
+    _pts_x = pts[x_coord_name]
+    _pts_y = pts[y_coord_name]
+    _rnd_x = rndm_pts[x_coord_name]
+    _rnd_y = rndm_pts[y_coord_name]
     disk_sums_for_random_points = rndm_pts[radius_sum_columns]
     (n_random_points, ncols) = disk_sums_for_random_points.shape
     # specify default plot kwargs and add defaults
@@ -126,7 +136,7 @@ def create_distribution_plot(
 
     if fig is None or axs is None:
         fig = plt.figure(figsize=figsize, dpi=display_dpi, constrained_layout=True)
-        outer = gridspec.GridSpec(ncols, 1, figure=fig, hspace=0.35)
+        outer = gridspec.GridSpec(ncols, 1, figure=fig, hspace=0.08)
 
     _auto_title = "Aggregate for indicator" + ("" if ncols==1 else "s") + " within " + str(r) + " meters"
     _suptitle = title_override.replace('{auto}', _auto_title) if title_override else _auto_title
@@ -150,12 +160,12 @@ def create_distribution_plot(
         # Map orientation: side-by-side when portrait (H > 1.2*W), stacked when landscape/flat
         map_w = max((_pts_x.max() if hasattr(_pts_x, 'max') else max(_pts_x)) - (_pts_x.min() if hasattr(_pts_x, 'min') else min(_pts_x)), 1e-9)
         map_h = max((_pts_y.max() if hasattr(_pts_y, 'max') else max(_pts_y)) - (_pts_y.min() if hasattr(_pts_y, 'min') else min(_pts_y)), 1e-9)
-        maps_side_by_side = map_h > 1.2 * map_w
-        panel = gridspec.GridSpecFromSubplotSpec(2, 1, subplot_spec=outer[i], hspace=0.35, height_ratios=[1, 4])
+        maps_side_by_side = map_h > 1.05 * map_w
+        panel = gridspec.GridSpecFromSubplotSpec(2, 1, subplot_spec=outer[i], hspace=0.12, height_ratios=[1, 4])
         if maps_side_by_side:
             bottom_gs = gridspec.GridSpecFromSubplotSpec(1, 2, subplot_spec=panel[1], wspace=0.08)
         else:
-            bottom_gs = gridspec.GridSpecFromSubplotSpec(2, 1, subplot_spec=panel[1], hspace=0.15)
+            bottom_gs = gridspec.GridSpecFromSubplotSpec(2, 1, subplot_spec=panel[1], hspace=0.08)
 
         # CUMULATIVE DISTRIBUTIONS — both series on a single merged axis
         ys_rnd = _np_sort(random_vals[:,i])
@@ -179,6 +189,7 @@ def create_distribution_plot(
         ), 100)
 
         ax_dist = fig.add_subplot(panel[0])
+        # ax_title = ax_titles.get('rand_dist', "{{col}}: {{k}}th-percentile threshold = {thresh:.6g}")
         ax_title = ax_titles.get('rand_dist', "{col}: {k}th-percentile threshold = {thresh}")
         ax_title = ax_title.format(col=colname, k=k, thresh=round(cluster_threshold_value, sufficient_digits), r=r, n=len(rndm_pts))
         ax_dist.set_title(ax_title, fontdict={'fontsize': 6})
@@ -202,14 +213,15 @@ def create_distribution_plot(
         ax_dist.vlines(x=k, ymin=ymin, ymax=ymax, **kwargs['vlines'])
 
         # both distribution series
-        rnd_color = plot_kwargs.get('color', '#eaa')
-        ax_dist.scatter(x=xs_random_pts, y=ys_rnd, label=f"Random pts (n={len(rndm_pts):,})", **plot_kwargs)
-        _pts_color = '#6ab'
-        ax_dist.scatter(x=xs_pts, y=ys_pts, color=_pts_color, s=plot_kwargs.get('s', 0.8), marker='.', label=f"Dataset pts (n={len(pts):,})")
+        _s = plot_kwargs.get('s', 0.8)
+        rnd_color = plot_kwargs.get('color', '#eeaaaa')
+        ax_dist.scatter(x=xs_random_pts, y=ys_rnd, s=_s, marker='.', label=f"Random pts (n={len(rndm_pts):,})", **{k: v for k, v in plot_kwargs.items() if k != 's'})
+        _pts_color = '#66aabb'
+        ax_dist.scatter(x=xs_pts, y=ys_pts, color=_pts_color, s=_s, marker='.', label=f"Dataset pts (n={len(pts):,})")
         ax_dist.set_xlim([pct_xmin, pct_xmax])
         if ymin != ymax:
             ax_dist.set_ylim([ymin, ymax])
-        ax_dist.legend(fontsize=6, markerscale=4)
+        ax_dist.legend(fontsize=6, markerscale=2)
 
         # MAP COLORMAP SETUP
         map_xmin = min(_pts_x.min(), _rnd_x.min())
@@ -283,7 +295,7 @@ def create_distribution_plot(
         plot_polygon(ax=ax_rnd, poly=non_valid_area, facecolor=non_valid_area_color, edgecolor='black', linewidth=sample_area_lw)
         sc = ax_rnd.scatter(x=_rnd_x, y=_rnd_y, c=random_vals[:,i], s=s, marker='.', norm=norm, cmap=cmap_scatter, linewidths=0.3)
         plot_polygon(ax=ax_rnd, poly=grid.sample_area, facecolor="none", edgecolor='black', linewidth=sample_area_lw)
-        set_map_frame(ax=ax_rnd, xmin=map_xmin, xmax=map_xmax, ymin=map_ymin, ymax=map_ymax)
+        set_map_frame(ax=ax_rnd, xmin=map_xmin, xmax=map_xmax, ymin=map_ymin, ymax=map_ymax, r=r)
 
         # MAP — dataset points (second map panel)
         ax_pts = fig.add_subplot(bottom_gs[1])
@@ -293,10 +305,16 @@ def create_distribution_plot(
             ax_pts.imshow(X=X, interpolation='none', cmap=cmap_binary, extent=extent)
         plot_polygon(ax=ax_pts, poly=non_valid_area, facecolor=non_valid_area_color, edgecolor='black', linewidth=sample_area_lw)
         sc_pts = ax_pts.scatter(x=_pts_x, y=_pts_y, c=pts_vals[:,i], s=s, marker='.', norm=norm, cmap=cmap_scatter, linewidths=0.3)
-        set_map_frame(ax=ax_pts, xmin=map_xmin, xmax=map_xmax, ymin=map_ymin, ymax=map_ymax)
+        set_map_frame(ax=ax_pts, xmin=map_xmin, xmax=map_xmax, ymin=map_ymin, ymax=map_ymax, r=r)
 
-        # shared colorbar — extend='max' shows the above-threshold over-color as a distinct cap
-        fig.colorbar(sc_pts, ax=[ax_rnd, ax_pts], extend='max', fraction=0.025, pad=0.04)
+        # shared colorbar spanning the combined height of both map panels
+        # make_axes_locatable respects set_aspect so the bar height matches the rendered maps
+        if maps_side_by_side:
+            _div = _make_axes_locatable(ax_pts)
+            _cax = _div.append_axes("right", size="3%", pad=0.05)
+            fig.colorbar(sc_pts, cax=_cax, extend='max')
+        else:
+            fig.colorbar(sc_pts, ax=[ax_rnd, ax_pts], extend='max', fraction=0.03, pad=0.02)
 
     if filename:
         fig.savefig(filename, dpi=300, bbox_inches="tight")

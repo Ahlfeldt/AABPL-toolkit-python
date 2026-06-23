@@ -11,6 +11,7 @@ from matplotlib.pyplot import close as _plt_close
 from matplotlib.patches import (Rectangle as _plt_Rectangle, Polygon as _plt_Polygon, Circle as _plt_Circle)
 from matplotlib.collections import PatchCollection as _plt_PatchCollection
 from matplotlib.colors import LogNorm as _plt_LogNorm, Normalize as _plt_Normalize
+from mpl_toolkits.axes_grid1 import make_axes_locatable as _make_axes_locatable
 from aabpl.illustrations.plot_utils import truncate_colormap, map_2D_to_rgb, get_2D_rgb_colobar_kwargs, add_color_bar_ax, set_map_frame
 from aabpl.illustrations.plot_pt_vars import create_plots_for_vars
 
@@ -69,7 +70,8 @@ class GridPlots(object):
         import numpy as np
         if colnames is None:
             colnames = np.array(self.grid.search.target.c)
-        return create_plots_for_vars(grid=self.grid, colnames=colnames, filename=filename, plot_kwargs=plot_kwargs)
+        _r = getattr(self.grid, '_r', None)
+        return create_plots_for_vars(grid=self.grid, colnames=colnames, filename=filename, plot_kwargs=plot_kwargs, r=_r)
 
     def cell_aggregates(
         self,
@@ -148,7 +150,7 @@ class GridPlots(object):
             ax.set_xlabel('x/lon')
             ax.set_ylabel('y/lat')
             ax.title.set_text('Aggregated value per cell for '+str(column))
-            set_map_frame(ax=ax, xmin=extent[0], xmax=extent[1], ymin=extent[3], ymax=extent[2])
+            set_map_frame(ax=ax, xmin=extent[0], xmax=extent[1], ymin=extent[3], ymax=extent[2], r=getattr(self.grid, '_r', None))
         if not fig is None:
             if filename:
                 fig.savefig(filename, **save_kwargs)
@@ -236,14 +238,19 @@ class GridPlots(object):
                 pc = _plt_PatchCollection(rects, cmap=cmap, norm=norm)
                 pc.set_array(vals)
                 ax.add_collection(pc)
-                cb = _plt_colorbar(pc, cax=add_color_bar_ax(fig,ax))
             for cluster in clusters:
                 geoms = [cluster.geometry] if hasattr(cluster.geometry, 'exterior') else cluster.geometry.geoms
                 for geom in geoms:
                     ax.add_patch(_plt_Polygon(xy=geom.exterior.coords, hatch='////', facecolor='#f000', edgecolor='#f00'))
                 ax.annotate(cluster.id, xy=cluster.centroid, fontsize=15, weight='bold', color='red')
 
-            set_map_frame(ax=ax,xmin=self.grid._search_x_steps.min(),xmax=self.grid._search_x_steps.max(),ymin=self.grid._search_y_steps.min(),ymax=self.grid._search_y_steps.max())
+            _r = getattr(self.grid, '_r', None)
+            set_map_frame(ax=ax, xmin=self.grid._search_x_steps.min(), xmax=self.grid._search_x_steps.max(),
+                          ymin=self.grid._search_y_steps.min(), ymax=self.grid._search_y_steps.max(), r=_r)
+            if len(vals) > 0:
+                _divider = _make_axes_locatable(ax)
+                _cax = _divider.append_axes("right", size="3%", pad=0.05)
+                _plt_colorbar(pc, cax=_cax)
 
         if not fig is None:
             if filename:

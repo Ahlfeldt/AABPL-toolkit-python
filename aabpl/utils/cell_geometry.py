@@ -514,10 +514,10 @@ def get_cells_by_lvl_ovlpd_by_cell_buffer(
     cntd_cells, ovlpd_cells = [],[]
     for row,col in unassigned_cells_in_max_steps_square:
         row_abs, col_abs = abs(row), abs(col)
-        closest_dist = (max(0,row_abs-1))**2 + (max(0,col_abs-1)**2)**.5 * grid_spacing
+        closest_dist = ((max(0,row_abs-1))**2 + (max(0,col_abs-1))**2)**0.5 * grid_spacing
         if closest_dist > r:
             continue
-        farthest_dist = ((row_abs)**2 + (col_abs)**2)**.5 * grid_spacing
+        farthest_dist = ((row_abs)**2 + (col_abs)**2)**0.5 * grid_spacing
         if farthest_dist <= r:
             cntd_cells.append((0,(row,col)))
         else:

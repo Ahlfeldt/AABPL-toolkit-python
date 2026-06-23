@@ -411,7 +411,7 @@ class DiskSearch(object):
             plot_pt_disk:dict=None,
             silent:bool=False,
     ):
-        return search_and_aggregate(
+        result = search_and_aggregate(
             grid=self.grid,
             pts_source=self.source.pts,
             pts_target=self.target.pts,
@@ -430,6 +430,16 @@ class DiskSearch(object):
             plot_pt_disk=plot_pt_disk,
             silent=silent,
         )
+        # Re-snapshot coordinates after search_and_aggregate sorts pts_source in-place.
+        # The earlier snapshot in set_source was pre-sort; this keeps it aligned with
+        # the sorted order of the sum columns written to pts.
+        _x, _y = self.source.x, self.source.y
+        _pts = self.source.pts
+        if _x in _pts.columns:
+            self.source._proj_x_snapshot = _pts[_x].values.copy()
+        if _y in _pts.columns:
+            self.source._proj_y_snapshot = _pts[_y].values.copy()
+        return result
     #
 #
     

@@ -48,7 +48,7 @@ def convert_coords_to_local_crs(
         silent:bool=False,
 ) -> str:
     """Reprojects coordinates into target crs. Modifies DataFrame and returns string of local_crs. If non specified it chooses best crs based on the mean coordinate.
-    
+
     """
     tgt_was_auto = target_crs == 'auto'
     if tgt_was_auto:
@@ -69,6 +69,17 @@ def convert_coords_to_local_crs(
     return local_crs
 #
 
+def _find_matching_col(pts, values):
+    """Return the name of the first column in pts whose float64 values exactly match `values`, or None."""
+    import numpy as _np
+    for col in pts.columns:
+        try:
+            if pts[col].values.dtype.kind in ('f', 'i', 'u') and _np.array_equal(pts[col].values.astype(float), values):
+                return col
+        except Exception:
+            pass
+    return None
+
 def convert_pts_to_crs(
     pts:_pd_DataFrame=None,
     x:str='lon',
@@ -77,18 +88,53 @@ def convert_pts_to_crs(
     target_crs:str='auto',
     silent:bool=False,
 ):
-        
-    proj_x = next(('proj_x'+str(i) for i in ['']+list(range(len(pts.columns))) if 'proj_x'+str(i) not in pts.columns))
-    proj_y = next(('proj_y'+str(i) for i in ['']+list(range(len(pts.columns))) if 'proj_y'+str(i) not in pts.columns))
-    if not target_crs is None:
-        local_crs = convert_coords_to_local_crs(pts=pts, initial_crs=initial_crs, target_crs=target_crs, x=x, y=y, proj_x=proj_x, proj_y=proj_y,silent=silent)
-        if local_crs == initial_crs:
-            pts.drop(columns=[proj_x, proj_y], inplace=True)
+    if target_crs is None:
+        return x, y, initial_crs
+
+    # Determine local_crs without writing to pts yet.
+    tgt_was_auto = target_crs == 'auto'
+    if tgt_was_auto:
+        if initial_crs != "EPSG:4326":
+            transformer_wgs = _pyproj_Transformer.from_crs(crs_from=initial_crs, crs_to="EPSG:4326", always_xy=True)
+            x_wgs, y_wgs = transformer_wgs.transform(pts[x], pts[y])
+            local_crs = 'EPSG:' + str(convert_wgs_to_utm(sum(x_wgs)/len(x_wgs), sum(y_wgs)/len(y_wgs)))
         else:
-            x = proj_x
-            y = proj_y
-        return x,y,local_crs
-    return x,y,initial_crs
+            local_crs = 'EPSG:' + str(convert_wgs_to_utm(*pts[[x, y]].mean(axis=0)))
+    else:
+        local_crs = target_crs
+
+    if local_crs == initial_crs:
+        # Coords are already in the target CRS — x/y are usable as-is.
+        return x, y, local_crs
+
+    # Compute projected values so we can check whether they already exist in pts.
+    from numpy import array as _np_array
+    transformer = _pyproj_Transformer.from_crs(crs_from=initial_crs, crs_to=local_crs, always_xy=True)
+    x_proj, y_proj = transformer.transform(pts[x].values, pts[y].values)
+    x_proj = _np_array(x_proj, dtype=float)
+    y_proj = _np_array(y_proj, dtype=float)
+
+    # Reuse an existing column if it already contains the exact projected values.
+    existing_x = _find_matching_col(pts, x_proj)
+    existing_y = _find_matching_col(pts, y_proj)
+
+    if existing_x is None:
+        proj_x = next(('proj_x' + str(i) for i in [''] + list(range(len(pts.columns))) if 'proj_x' + str(i) not in pts.columns))
+        pts[proj_x] = x_proj
+    else:
+        proj_x = existing_x
+
+    if existing_y is None:
+        proj_y = next(('proj_y' + str(i) for i in [''] + list(range(len(pts.columns))) if 'proj_y' + str(i) not in pts.columns))
+        pts[proj_y] = y_proj
+    else:
+        proj_y = existing_y
+
+    if not silent or tgt_was_auto:
+        from aabpl.utils.progress import progress_print
+        progress_print("Reproject from " + str(initial_crs) + ' to ' + local_crs)
+
+    return proj_x, proj_y, local_crs
 #
 
 def convert_bounds_to_local_crs(

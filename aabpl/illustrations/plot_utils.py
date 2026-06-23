@@ -60,15 +60,44 @@ from shapely.geometry import (Polygon as _shapely_Polygon, MultiPolygon as _shap
 #                        pad=0.6,sep=4, linekw=dict(color="crimson"),) 
 # ax.add_artist(ob)
 
-def set_map_frame(ax, xmin:float, xmax:float, ymin:float, ymax:float):
+def set_map_frame(ax, xmin:float, xmax:float, ymin:float, ymax:float, r:float=None):
     pad_x, pad_y = (xmax-xmin)/50, (ymax-ymin)/50
-    ax.set_xlim([xmin-pad_x,xmax+pad_x])
-    ax.set_ylim([ymin-pad_y,ymax+pad_y])
+    ax.set_aspect('equal', adjustable='box')
+    ax.set_xlim([xmin-pad_x, xmax+pad_x])
+    ax.set_ylim([ymin-pad_y, ymax+pad_y])
     xticks = [xmin, (xmin+xmax)/2, xmax]
     yticks = [ymin, (ymin+ymax)/2, ymax]
     ndigits = int(max([0, _math_log10(100/(xticks[1]-xticks[0])), _math_log10(100/(yticks[1]-yticks[0]))]))
     ax.set_xticks(xticks, labels=[int(round(t,ndigits)) if ndigits==0 else round(t,ndigits) for t in xticks])
     ax.set_yticks(yticks, labels=[int(round(t,ndigits)) if ndigits==0 else round(t,ndigits) for t in yticks])
+
+    if r is not None:
+        x_range = xmax - xmin
+        y_range = ymax - ymin
+        r_label = str(int(r)) if r == int(r) else repr(r)
+        use_x_axis = x_range >= y_range  # more horizontal space → horizontal bar at bottom
+        if use_x_axis:
+            # between middle and last x-tick, just outside the bottom of the map
+            cx = (xmin + 3 * xmax) / 4
+            cy = ymin - y_range * 0.07
+            tick_h = y_range * 0.012
+            ax.set_ylim(bottom=cy - y_range * 0.03)
+            ax.plot([cx - r, cx + r], [cy, cy], '-', color='k', lw=0.6)
+            ax.plot([cx - r, cx - r], [cy - tick_h, cy + tick_h], '-', color='k', lw=0.6)
+            ax.plot([cx + r, cx + r], [cy - tick_h, cy + tick_h], '-', color='k', lw=0.6)
+            ax.plot([cx], [cy], '+', color='k', ms=4, mew=0.5)
+            ax.text(cx, cy - tick_h * 2, f'r={r_label}', ha='center', va='top', fontsize=5)
+        else:
+            # lower quarter of the right margin, between last and middle y-tick
+            cy = (3 * ymin + ymax) / 4
+            rx = xmax + x_range * 0.09
+            tick_w = x_range * 0.012
+            ax.set_xlim(right=rx + x_range * 0.05)
+            ax.plot([rx, rx], [cy - r, cy + r], '-', color='k', lw=0.6)
+            ax.plot([rx - tick_w, rx + tick_w], [cy - r, cy - r], '-', color='k', lw=0.6)
+            ax.plot([rx - tick_w, rx + tick_w], [cy + r, cy + r], '-', color='k', lw=0.6)
+            ax.plot([rx], [cy], '+', color='k', ms=4, mew=0.5)
+            ax.text(rx + tick_w * 2, cy, f'r={r_label}', ha='left', va='center', fontsize=5)
     
 
 # def _plt_colorbar(sc, extend='min', cax=add_color_bar_ax(fig,ax))

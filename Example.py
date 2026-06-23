@@ -28,25 +28,27 @@ pts = read_csv(path_to_your_csv, sep=",", header=None)
 pts.columns = ["eid", "employment", "industry", "lat", "lon", "moved"]
 
 ### Detect employment clusters
+# Result columns appended to pts:
+#   employment_sum_15000        — radius-sum aggregate (auto-named: {col}_{stat}_{r})
+#   employment_cluster_sum_15000 — True/False cluster label (auto-named: {col}_cluster_{stat}_{r})
 grid = detect_cluster_cells(
     pts=pts,
     crs=crs_of_your_csv,
-    r=750,                                  # search radius in CRS units (metres after reprojection)
-    c='employment',                         # column(s) to aggregate within radius; list for multiple
-    stat='sum',                             # aggregation: sum|count|mean|variance|std|cv|skewness|kurtosis
-    exclude_self=True,                      # exclude the point itself from its own neighbourhood sum
-    sample_area='buff_cells_min_pts',       # sample-area: 'concave'|'convex'|'buffer'|'bounding_box'|'grid'|None or a Shapely Polygon/MultiPolygon
-    min_pts_to_sample_cell=1,               # min points a cell must contain to be part of the sample area
-    weight_valid_area=None,                 # correct edge effects: None|'estimate'|'precise'
-    k_th_percentile=99.5,                   # null-distribution percentile used as cluster threshold
-    n_random_points=100000,                 # random points drawn to build the null distribution
-    random_seed=0,                          # set for reproducibility; None for random
-    queen_contingency=1,                    # merge adjacent clusters within this many cells (0 = no merge)
-    centroid_dist_threshold=2500,           # merge clusters whose centroids are within this distance (CRS units)
-    border_dist_threshold=1000,             # merge clusters whose borders are within this distance (CRS units)
-    min_cluster_share_after_contingency=0.05, # drop clusters smaller than this share of the largest cluster
-    make_convex=True,                       # replace each cluster polygon with its convex hull
-    spacing=250,                            # output grid cell size in metres (always projected); defaults to r/3
+    r=15000,                        # search radius in metres (after reprojection); also accepts r=[500,750] or r=[(0,500),(500,750)]
+    c='employment',                 # column(s) to aggregate within radius; list for multiple
+    stat='sum',                     # aggregation: sum|count|mean|variance|std|cv|skewness|kurtosis
+    exclude_self=True,              # exclude the point itself from its own neighbourhood sum
+    sample_area='buff_cells,min_pts=1',  # sampling region for null distribution; call resolve_sample_area.params() for all options
+                                    # alternatives: 'concave,concavity=0.5' | 'convex' | 'bbox' | 'grid' | Shapely Polygon/MultiPolygon
+    weight_valid_area=None,         # edge-effect correction: None|'estimate'|'precise'
+    k_th_percentile=99.5,           # null-distribution percentile used as cluster threshold
+    n_random_points=100000,         # random points drawn to build the null distribution
+    random_seed=0,                  # set for reproducibility; None for random
+    contingency=1,                  # merge adjacent clusters within this many cells (0 = no merge)
+    merge_dist=(25000, 10000),      # (centroid_dist, border_dist): merge clusters closer than these distances
+    min_cluster_share=(0.05, 0.0, 0.0),  # drop clusters smaller than this share of the largest (after contingency, centroid, convex steps)
+    make_convex=True,               # replace each cluster polygon with its convex hull
+    spacing=15000,                  # output grid cell size in metres; defaults to r/3
 )
 
 ### Save outputs
@@ -64,7 +66,7 @@ df_sparse_grid = grid.save_sparse_grid(filename=output_data_folder+'sparse_grid'
 pts.to_csv(output_data_folder+'pts_df_w_clusters.csv')
 
 ### Plots
-grid.plot.clusters(  output_maps_folder+'clusters_employment_750m_995th')
+grid.plot.clusters(  output_maps_folder+'clusters_employment_995th')
 grid.plot.vars(      filename=output_maps_folder+'employment_vars')
 grid.plot.cluster_pts(filename=output_maps_folder+'employment_cluster_pts')
 grid.plot.rand_dist( filename=output_maps_folder+'rand_dist_employment')
@@ -73,8 +75,8 @@ grid.plot.rand_dist( filename=output_maps_folder+'rand_dist_employment')
 grid = radius_sum(
     pts=pts,
     crs=crs_of_your_csv,
-    r=750,
-    c='employment',   # column(s) to sum
+    r=15000,
+    c='employment',   # column(s) to sum; result appended as employment_sum_15000
     exclude_self=True,
 )
 

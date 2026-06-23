@@ -47,6 +47,7 @@ def create_plots_for_vars(
         plot_kwargs:dict={},
         show:bool=True,
         display_dpi:int=100,
+        r:float=None,
 ):
     """
     Scatter plot of source points coloured by the value of one or more columns.
@@ -121,7 +122,9 @@ def create_plots_for_vars(
     cmap = truncate_colormap(_plt_get_cmap(cmap_name), 0.1, 1)
     if fig is None or axs is None:
         fig, axs = _plt_subplots(nrows, ncols, figsize=figsize, dpi=display_dpi,
-                                  constrained_layout=True)
+                                  constrained_layout=True,
+                                  sharex=(ncols == 1 and nrows > 1),
+                                  sharey=(nrows == 1 and ncols > 1))
     if not grid.sample_grid_bounds is None and not grid.sample_area is None:
         non_valid_area = _shapely_Polygon([
             (grid.sample_grid_bounds[0], grid.sample_grid_bounds[1]),
@@ -139,10 +142,19 @@ def create_plots_for_vars(
     for i, colname in enumerate(colnames.flat):
         # SELECT AX (IF MULTIPLE)
         ax = axs.flat[i] if nrows > 1 else axs
-        
+        row_idx = i // ncols
+        col_idx = i % ncols
+
         # SET TITLE
         ax_title = (colname)
         ax.set_title(ax_title)
+        # suppress redundant axis labels on shared axes
+        if ncols == 1 and nrows > 1 and row_idx < nrows - 1:
+            ax.set_xlabel('')
+            ax.tick_params(labelbottom=False)
+        if nrows == 1 and ncols > 1 and col_idx > 0:
+            ax.set_ylabel('')
+            ax.tick_params(labelleft=False)
         # CPOLOR NON SAMPLE AREA
         if not grid.sample_grid_bounds is None and not grid.sample_area is None:
             ax.set_facecolor(sample_area_color)
@@ -170,9 +182,10 @@ def create_plots_for_vars(
             cmap_binary = _plt_ListedColormap([sample_area_color, non_valid_area_color])
             extent = [grid.sample_grid_bounds[0],grid.sample_grid_bounds[2],grid.sample_grid_bounds[1],grid.sample_grid_bounds[3]]
             p = ax.imshow(X=X, interpolation='none', cmap=cmap_binary, extent=extent)#, To-Do the extent is imprecise as it does not cover the full grid only its points
-            non_valid_patch = _plt_Patch(facecolor=non_valid_area_color, label='Non-valid area', edgecolor='black')
-            sample_patch = _plt_Patch(facecolor=sample_area_color, label='Sample area', edgecolor='black')
-            ax.legend(handles=[non_valid_patch, sample_patch], loc='best')
+            non_valid_patch = _plt_Patch(facecolor=non_valid_area_color, label='Non-valid area', edgecolor=non_valid_area_color)
+            sample_patch = _plt_Patch(facecolor=sample_area_color, label='Sample area', edgecolor=sample_area_color)
+            ax.legend(handles=[non_valid_patch, sample_patch], loc='best',
+                      handlelength=0.8, handleheight=0.8, fontsize=8, borderpad=0.5)
             plot_polygon(poly=non_valid_area, ax=ax, facecolor=non_valid_area_color, edgecolor='black', linewidth=sample_area_lw)
         # ADD DISTRIBUTION PLOT
         c = grid.search.source.pts[colname]
@@ -189,7 +202,9 @@ def create_plots_for_vars(
             _sorted = sorted(int(v) for v in _unique_vals)
             _n = len(_sorted)
             _qual_cmap = _plt_get_cmap('tab10' if _n <= 10 else 'tab20')
-            _disc_cmap = _plt_ListedColormap([_qual_cmap(i / max(_n - 1, 1)) for i in range(_n)])
+            _colors = ['#cccccc'] + [_qual_cmap(i / max(_n - 2, 1)) for i in range(_n - 1)]
+            _disc_cmap = _plt_ListedColormap(_colors)
+
             _bounds = [v - 0.5 for v in _sorted] + [_sorted[-1] + 0.5]
             _disc_norm = _plt_BoundaryNorm(_bounds, _disc_cmap.N)
             scttr = ax.scatter(x=xs, y=ys, c=c, norm=_disc_norm, cmap=_disc_cmap, rasterized=True, linewidths=0.3, **scatter_kwargs)
@@ -203,7 +218,9 @@ def create_plots_for_vars(
             scttr = ax.scatter(x=xs, y=ys, c=c, norm=norm, cmap=cmap, rasterized=True, linewidths=0.3, **scatter_kwargs)
             fig.colorbar(scttr, ax=ax, fraction=0.046, pad=0.04)
         plot_polygon(poly=non_valid_area, ax=ax, facecolor="none", edgecolor='black', linewidth=sample_area_lw)
-        set_map_frame(ax=ax,xmin=xmin,xmax=xmax,ymin=ymin,ymax=ymax)
+        is_last = (i == colnames.size - 1)
+        set_map_frame(ax=ax, xmin=xmin, xmax=xmax, ymin=ymin, ymax=ymax,
+                      r=r if is_last else None)
 
     if not fig is None:
         if filename:

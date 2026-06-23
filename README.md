@@ -1,6 +1,6 @@
 ﻿# AABPL-toolkit-python (beta version)
 
-(c) Gabriel M. Ahlfeldt, Thilo N. H. Albers, Kristian Behrens, [Max von Mylius](https://github.com/maximylius), Version 0.3.5, 2024-10
+(c) Gabriel M. Ahlfeldt, Thilo N. H. Albers, Kristian Behrens, [Max von Mylius](https://github.com/maximylius), Version 0.3.6.0, 2024-10
 
 
 
@@ -8,19 +8,18 @@
 
 ## About
 
-This repository is part of the **[Toolkit of Prime Locations (AABPL)](https://github.com/Ahlfeldt/AABPL-toolkit/blob/main/README.md)**. It contains a Python version of the prime locations delineation algorithm developed by Ahlfeldt, Albers, and Behrens (2024). It is designed to be more readily accessible than the C++/Stata hybrid version used by Ahlfeldt, Albers, and Behrens (2024). The algorithm uses arbitrary spatial point patterns as input and returns a gridded version of the data along with polygons of the delineated spatial clusters as outputs.
+This repository is part of the **[Toolkit of Prime Locations (AABPL)](https://github.com/Ahlfeldt/AABPL-toolkit/blob/main/README.md)**. It contains a Python version of the prime locations delineation algorithm developed by Ahlfeldt, Albers, and Behrens (2024). The algorithm uses arbitrary spatial point patterns as input and returns a gridded version of the data along with polygons of the delineated spatial clusters as outputs.
 
+When using the algorithm in your work, **please cite Ahlfeldt, Albers, Behrens (2024): Prime locations. American Economic Review: Insights, forthcoming.**
 
+<details>
+<summary>Differences from the published version and replication notes</summary>
 
-Note that while this implementation of the algorithm follows the same basic steps as the one used by Ahlfeldt, Albers, and Behrens (2024), it will not necessarily generate exactly the same results. The Python package is designed to enhance usability. There are subtle differences in the way counterfactual distributions are generated, establishments are assigned to grid cells, clusters are aggregated, and convex hulls are generated. Importantly, the current version of the algorithm samples from a bounding box built around the establishments input into the algorithm, whereas Ahlfeldt, Albers, and Behrens (2024) condition on the presence of employment. Therefore, the parameter values that need to be defined in the program syntax cannot be directly transferred from Ahlfeldt, Albers, and Behrens (2024). 
-
-
+Note that while this implementation of the algorithm follows the same basic steps as the one used by Ahlfeldt, Albers, and Behrens (2024), it will not necessarily generate exactly the same results. The Python package is designed to enhance usability. There are subtle differences in the way counterfactual distributions are generated, establishments are assigned to grid cells, clusters are aggregated, and convex hulls are generated. Importantly, the current version of the algorithm samples from a bounding box built around the establishments input into the algorithm, whereas Ahlfeldt, Albers, and Behrens (2024) condition on the presence of employment. Therefore, the parameter values that need to be defined in the program syntax cannot be directly transferred from Ahlfeldt, Albers, and Behrens (2024).
 
 We recommend that users find their own preferred values depending on the context and purpose of the clustering. We aim to allow for a user-specified sampling area so that users can, akin to Ahlfeldt, Albers, and Behrens (2024), exclude arbitrary areas when generating counterfactual establishment distributions. For replication of the results reported in Ahlfeldt, Albers, and Behrens (2024), we refer to the official replication directory.
 
- 
-
-When using the algorithm in your work, **please cite Ahlfeldt, Albers, Behrens (2024): Prime locations. American Economic Review: Insights, forthcoming.**
+</details>
 
 
 
@@ -44,7 +43,7 @@ Alternatively you can also install it from within your python script:
 
 import subprocess, sys
 
-subprocess.check_call([sys.executable, "-m", "pip", "install", 'aabpl'])
+subprocess.check_call([sys.executable, "-m", "pip", "install", 'aabpl', "--upgrade"])
 
 ```
 
@@ -90,37 +89,12 @@ pip install --upgrade setuptools==70.0.0
 
 ## Usage
 
-You may then load the package by running:
-
 ```python
-
-import aabpl
-
-```
-
-Or if you prefer alternatively import the function and testdata explicitly:
-
-```python
-
-# imports 
-
 from pandas import read_csv
-
-from aabpl import (
-
-    radius_search, radius_sum, radius_count, radius_mean,
-
-    detect_cluster_pts, detect_cluster_cells
-
-)
-
+from aabpl import detect_cluster_cells, radius_search
 ```
 
-
-
-### Program syntax
-
-All parameters are documented inline. To see what a parameter does without leaving your script:
+All parameters are documented inline — no need to leave your script:
 
 ```python
 import aabpl
@@ -128,28 +102,7 @@ aabpl.radius_search.params.r          # description of the r parameter
 aabpl.detect_cluster_cells.params     # list all parameters
 ```
 
-The core parameters are:
-
-| Parameter | Functions | Description |
-|:---|:---|:---|
-| `pts` | all | `pd.DataFrame` of points. Results are appended in-place. |
-| `crs` | all | CRS string e.g. `'EPSG:4326'`. Pass `''` for already-projected data. |
-| `r` | all | Search radius in metres (after reprojection). Also accepts a list of radii `[500, 750]`, distance bands `[(0,500),(500,750)]`, or weighted bands `[(0,500,1),(500,750,2)]`. |
-| `c` | all | Column name(s) to aggregate, e.g. `'employment'` or `['employment','revenue']`. |
-| `stat` | `radius_search` | Aggregation statistic: `'sum'` (default), `'count'`, `'mean'`, `'variance'`, `'std'`, `'cv'`, `'skewness'`, `'kurtosis'`. |
-| `k_th_percentile` | cluster functions | Null-distribution percentile used as cluster threshold (default `99.5`). |
-| `sample_area` | all | Restrict where random comparison points are drawn. String shortcuts (`'concave'`, `'convex'`, `'bounding_box'`, …) or a Shapely Polygon/MultiPolygon. |
-| `exclude_self` | all | Exclude the point's own value from its neighbourhood aggregate (default `True`). |
-
-
-
 ### Examples
-
-
-
-See [`Example.py`](https://github.com/Ahlfeldt/AABPL-toolkit-python/blob/main/Example.py) (or [`Example.ipynb`](https://github.com/Ahlfeldt/AABPL-toolkit-python/blob/main/Example.ipynb)) for a full ready-to-run script. The core call looks like this:
-
-
 
 ```python
 from pandas import read_csv
@@ -160,25 +113,27 @@ crs_of_your_csv  = "EPSG:4326"                       # coordinate system of lat/
 pts = read_csv(path_to_your_csv, sep=",", header=None)
 pts.columns = ["eid", "employment", "industry", "lat", "lon", "moved"]
 
+# Result columns appended to pts:
+#   employment_sum_15000         — radius-sum aggregate  (auto-named: {col}_{stat}_{r})
+#   employment_cluster_sum_15000 — True/False cluster label (auto-named: {col}_cluster_{stat}_{r})
 grid = detect_cluster_cells(
     pts=pts,
     crs=crs_of_your_csv,
-    r=750,                                   # search radius in CRS units (metres after reprojection); also accepts r=[500,750] or r=[(0,500),(500,750)]
-    c='employment',                          # column(s) to aggregate; list for multiple
-    stat='sum',                              # sum|count|mean|variance|std|cv|skewness|kurtosis
-    exclude_self=True,                       # exclude point from its own neighbourhood
-    sample_area='buff_cells_min_pts',        # sample-area: 'concave'|'convex'|'buffer'|'bounding_box'|'grid'|None or a Shapely Polygon/MultiPolygon
-    min_pts_to_sample_cell=1,                # min points a cell needs to be included in the sample area
-    weight_valid_area=None,                  # edge-effect correction: None|'estimate'|'precise'
-    k_th_percentile=99.5,                    # null-distribution percentile used as cluster threshold
-    n_random_points=100000,                  # random points drawn to build the null distribution
-    random_seed=0,                           # set for reproducibility; None for random
-    queen_contingency=1,                     # merge adjacent clusters within this many cells (0 = off)
-    centroid_dist_threshold=2500,            # merge clusters whose centroids are within this distance
-    border_dist_threshold=1000,              # merge clusters whose borders are within this distance
-    min_cluster_share_after_contingency=0.05, # drop clusters smaller than this share of the largest
-    make_convex=True,                        # replace cluster polygons with their convex hulls
-    spacing=250,                             # output grid cell size in metres (always projected); defaults to r/3
+    r=15000,                        # search radius in metres (after reprojection); also accepts r=[500,750] or r=[(0,500),(500,750)]
+    c='employment',                 # column(s) to aggregate; list for multiple
+    stat='sum',                     # sum|count|mean|variance|std|cv|skewness|kurtosis
+    exclude_self=True,              # exclude point from its own neighbourhood
+    sample_area='buff_cells,min_pts=1',  # sampling region; call resolve_sample_area.params() for all options
+                                    # alternatives: 'concave,concavity=0.5' | 'convex' | 'bbox' | 'grid' | Shapely Polygon/MultiPolygon
+    weight_valid_area=None,         # edge-effect correction: None|'estimate'|'precise'
+    k_th_percentile=99.5,           # null-distribution percentile used as cluster threshold
+    n_random_points=100000,         # random points drawn to build the null distribution
+    random_seed=0,                  # set for reproducibility; None for random
+    contingency=1,                  # merge adjacent clusters within this many cells (0 = off)
+    merge_dist=(25000, 10000),      # (centroid_dist, border_dist): merge clusters closer than these distances
+    min_cluster_share=(0.05, 0.0, 0.0),  # drop clusters smaller than this share of the largest
+    make_convex=True,               # replace cluster polygons with their convex hulls
+    spacing=15000,                  # output grid cell size in metres; defaults to r/3
 )
 
 # Save outputs
@@ -187,18 +142,22 @@ df_sparse_grid = grid.save_sparse_grid( filename='output_gis/sparse_grid', file_
 pts.to_csv('output_data/pts_df_w_clusters.csv')
 
 # Plots
-grid.plot.clusters(  'output_maps/clusters_employment_750m_995th')
+grid.plot.clusters(  'output_maps/clusters_employment_995th')
 grid.plot.vars(      filename='output_maps/employment_vars')
 grid.plot.cluster_pts(filename='output_maps/employment_cluster_pts')
 grid.plot.rand_dist( filename='output_maps/rand_dist_employment')
 
 # Radius search only (no clustering)
-grid = radius_sum(pts=pts, crs=crs_of_your_csv, r=750, c='employment', exclude_self=True)
+# Appends employment_sum_15000 to pts
+grid = radius_sum(pts=pts, crs=crs_of_your_csv, r=15000, c='employment', exclude_self=True)
 ```
 
 
 
 
+
+<details>
+<summary><strong>Ready-to-use script</strong> — If you are new to Python, you may find it useful to execute the Example.py (or Example.ipynb) script saved in this folder...</summary>
 
 ### Ready-to-use script
 
@@ -211,6 +170,11 @@ If you are new to Python, you may find it useful to execute the [`Example.py`](h
 You have many options for executing the `Example.py` script. One convenient option is to open the script in Sypder, a development environment that can be launched from the Anaconda Navigator. Spyder will automatically set the working directory to the folder to which you have copied the 'Example.py' file. If you name you name your input file `plants.txt` and save it in an  `input_data` subfolder, you will not have to make any adjustments to the script. For a first trial, we recommend that you just copy the `input_data` (with its content) to the same directory where you save `Example.py` file and then run the script from Spyder.
 
 
+
+</details>
+
+<details>
+<summary><strong>Inputs</strong> — The compulsory input is a file containing spatial point pattern data (establishments, buildings, individuals, etc.) with geographic coordinates and an importance weight...</summary>
 
 ### Inputs
 
@@ -244,9 +208,14 @@ Variable names will then be assigned by the script. Of course, with some adjustm
 
 
 
-An **optional input** is a shapefile (or Shapely Polygon/MultiPolygon) that defines the sampling area of the counterfactual distribution, passed via the `sample_area` parameter. Ahlfeldt, Albers, and Behrens (2024) exclude residential and undevelopable areas. Such a shapefile could also restrict the sampling area for counterfactual spatial distributions to inhabitable areas or to areas zoned for the development of tall buildings.
+An **optional input** is a shapefile (or Shapely Polygon/MultiPolygon) that defines the sampling area of the counterfactual distribution, passed via the `sample_area` parameter. Ahlfeldt, Albers, and Behrens (2024) exclude residential and undevelopable areas. Such a shapefile could also restrict the sampling area for counterfactual spatial distributions to inhabitable areas or to areas zoned for the development of tall buildings. The parameter also accepts a method name string with optional inline parameters, e.g. `'buff_cells,min_pts=1'` or `'concave,concavity=0.5,buf=1000'`. Call `aabpl.resolve_sample_area.params()` at any time for a full list of methods and their parameters.
 
 
+
+</details>
+
+<details>
+<summary><strong>Outputs</strong> — The package creates output_data, output_gis, and output_maps folders with CSVs, shapefiles, and maps...</summary>
 
 ### Outputs
 
@@ -263,7 +232,7 @@ The package will create the a number of folders in your working directory into w
 | output_data | `pts_df_w_clusters.csv` | CSV file containing the plants with the input data and, in addition, an identifier for the cluster to which a plant belongs. You may choose another file name in the 'Example.py' script. |
 | output_gis | `grid_clusters.*` | Shapefile of the gridded data set including the same information as in  `grid_clusters.csv`. You may choose another file name in the 'Example.py' script. |
 | output_gis | `clusters.*` | Shapefile of final output, i.e. aggregated clusters (in our case prime locations) along with the same information as in 'clusters.csv'. You may choose another file name in the 'Example.py' script.  |
-| output_maps | `clusters_employment_750m_995th.png` | Map showing the boundaries of the final output, i.e. clusters after aggregation (in our case to prime locations), with the density of the selected importance weight (in our case employment) in the background. You may choose another file name in the 'Example.py' script.  |
+| output_maps | `clusters_employment_995th.png` | Map showing the boundaries of the final output, i.e. clusters after aggregation (in our case to prime locations), with the density of the selected importance weight (in our case employment) in the background. You may choose another file name in the 'Example.py' script.  |
 | output_maps | `employment_cluster_pts.png` | Map showing the plants and how clustered they are. You may choose another file name in the 'Example.py' script.  |
 | output_maps | `rand_dist_employment.png` | Technical output to inform the choice of the p-value. You may choose another file name in the 'Example.py' script.  |
 
@@ -273,11 +242,18 @@ Other outputs can be generated by activating the respective lines (by removing t
 
 
 
+</details>
+
+<details>
+<summary><strong>Recommendations</strong> — The default parameter values are calibrated for a dataset covering roughly a large city...</summary>
+
 ### Recommendations
 
 
 
 The results of the clustering algorithm naturally depend on the chosen parameter values. The recommended baseline parameter values have been tested for areas that in terms of geography coverage conform roughly to a large city. For example, if you obtain establishments as point-pattern data for an area that covers roughly New York City (the New York grid in the Global Cities sample in the Prime Locations research paper), you will likely obtain two prime locations (in Midtown and Wallstreet). If your point-pattern data covers a much larger area (e.g. the state of New York), there will many emty areas that affect the counterfactual distributions. Dense places will be in relative terms denser, and, hence, a greater p-value might be required to obtain the same to two prime locations (else, the algorithm may return many more prime locations). You would also have to use more than 100,000 points to have decent coverage of such a large area.
+
+</details>
 
 ## User-facing functions
 
@@ -290,6 +266,11 @@ All functions are available directly on the `aabpl` module after `import aabpl`.
 | Function | Description |
 |:---|:---|
 | **`radius_search(pts, crs, r, c, stat, ...)`** | **Core function.** For every point in `pts`, aggregates values of neighbouring points within radius `r` (or distance bands). Adds the result as a new column. Supports `stat` in `{sum, count, mean, variance, std, cv, skewness, kurtosis}`. |
+| **`detect_cluster_cells(pts, crs, r, c, ...)`** | **Core function.** Full pipeline: runs `radius_search`, builds a null distribution from random points, delineates contiguous clustered cells into cluster polygons. Returns a `Grid` object; polygons at `grid.clustering`. |
+| `detect_cluster_pts(pts, crs, r, c, ...)` | Labels each point as clustered or not. Same pipeline as `detect_cluster_cells` but skips the output grid and polygon steps. |
+| `detect_cluster_cells_from_labeled_pts(pts, crs, r, ...)` | Delineates cluster polygons from points with a pre-existing cluster label column, skipping the radius search and null distribution. |
+| `infer_sample_area_from_pts(pts, grid, ...)` | Derives the valid sample area polygon from the point pattern. Used internally; available for inspection. |
+| `draw_random_coords(n_pts, sample_area, crs, ...)` | Draws `n_pts` random coordinate pairs. `sample_area` accepts a Shapely Polygon/MultiPolygon or a plain coordinate list; coordinates outside it are rejected. Set `crs` to reproject the geometry from a geographic CRS (e.g. `'EPSG:4326'`) into the best UTM zone automatically — the same reprojection used internally by `detect_cluster_pts`. Pass `sample_area=None` with a custom `coord_generator(n, rng)` to accept all produced coordinates. Returns a two-column DataFrame ready to pass as `null_distribution` to `detect_cluster_pts` / `detect_cluster_cells`. |
 | `radius_sum(pts, crs, r, c, ...)` | Shorthand for `radius_search(..., stat='sum')`. |
 | `radius_count(pts, crs, r, c, ...)` | Shorthand for `radius_search(..., stat='count')`. |
 | `radius_mean(pts, crs, r, c, ...)` | Shorthand for `radius_search(..., stat='mean')`. |
@@ -298,11 +279,6 @@ All functions are available directly on the `aabpl` module after `import aabpl`.
 | `radius_cv(pts, crs, r, c, ...)` | Shorthand for `radius_search(..., stat='cv')` (coefficient of variation). |
 | `radius_skewness(pts, crs, r, c, ...)` | Shorthand for `radius_search(..., stat='skewness')`. |
 | `radius_kurtosis(pts, crs, r, c, ...)` | Shorthand for `radius_search(..., stat='kurtosis')`. |
-| **`detect_cluster_cells(pts, crs, r, c, ...)`** | **Core function.** Full pipeline: runs `radius_search`, builds a null distribution from random points, delineates contiguous clustered cells into cluster polygons. Returns a `Grid` object; polygons at `grid.clustering`. |
-| `detect_cluster_pts(pts, crs, r, c, ...)` | Labels each point as clustered or not. Same pipeline as `detect_cluster_cells` but skips the output grid and polygon steps. |
-| `detect_cluster_cells_from_labeled_pts(pts, crs, r, ...)` | Delineates cluster polygons from points with a pre-existing cluster label column, skipping the radius search and null distribution. |
-| `infer_sample_area_from_pts(pts, grid, ...)` | Derives the valid sample area polygon from the point pattern. Used internally; available for inspection. |
-| `draw_random_coords(n_pts, sample_area, crs, ...)` | Draws `n_pts` random coordinate pairs. `sample_area` accepts a Shapely Polygon/MultiPolygon or a plain coordinate list; coordinates outside it are rejected. Set `crs` to reproject the geometry from a geographic CRS (e.g. `'EPSG:4326'`) into the best UTM zone automatically — the same reprojection used internally by `detect_cluster_pts`. Pass `sample_area=None` with a custom `coord_generator(n, rng)` to accept all produced coordinates. Returns a two-column DataFrame ready to pass as `null_distribution` to `detect_cluster_pts` / `detect_cluster_cells`. |
 | `aggregate_to_grid(pts, grid, ...)` | Aggregates point-level values onto the output grid cells of an existing `Grid` object. |
 
 
@@ -415,6 +391,9 @@ pts ──► radius_search ──► agg_i per point
 
 
 
+<details>
+<summary><strong>Grid and offset regions / Adaptive spacing / Nest depth</strong> — Internal implementation details; not needed for normal usage.</summary>
+
 ### Grid and offset regions
 
 
@@ -459,11 +438,10 @@ The grid spacing is not fixed — it is chosen automatically relative to the sea
 
 
 
-### Boundary precision and nest depth
+### Boundary cells and nest depth
 
+Cells that lie entirely inside the search radius are aggregated in bulk using nested cell sums — no individual point lookups needed. Cells that straddle the boundary cannot be bulk-aggregated; their points are checked individually against the radius.
 
+The `nest_depth` parameter controls how aggressively boundary cells are pre-aggregated before that individual check. At `nest_depth=0` every point in a boundary cell is checked one by one. At `nest_depth=d` each boundary cell is recursively subdivided into a 2^d × 2^d sub-grid: sub-cells fully inside the radius are bulk-summed, and only the remaining sub-cells (a thin ring near the circle edge) fall through to point-level checks. Higher nest depth means fewer individual point lookups at the cost of more sub-cell traversals. The optimal value depends on point density and cell size, which is why `nest_depth` is chosen jointly with grid spacing by the adaptive timing model.
 
-Boundary cells introduce approximation error. The `nest_depth` parameter controls how finely boundary cells are subdivided: at `nest_depth=0` each boundary cell is treated as either fully in or fully out; at `nest_depth=d` each boundary cell is recursively split into a 2^d × 2^d sub-grid and the overlap fraction is computed at that finer resolution. Higher nest depth reduces boundary error at the cost of more sub-cell lookups. This trade-off is also folded into the adaptive spacing selection.
-
-
-
+</details>

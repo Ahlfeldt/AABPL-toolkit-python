@@ -50,6 +50,36 @@ from aabpl import config as _cfg
 #     return _decimal_Decimal(xmax-xmin)/_decimal_Decimal(n_steps)
 
 
+class _DFList(list):
+    """list of GeoDataFrames that also supports dict-style lookup by cluster column name.
+
+    Backwards-compatible: existing code using ``dfs[0]``, ``for df in dfs``, ``len(dfs)``
+    continues to work unchanged. New code can use ``dfs['employment_cluster_sum_750']``
+    or iterate via ``dfs.keys()`` / ``dfs.items()``.
+    """
+    def __init__(self):
+        super().__init__()
+        self._by_column = {}
+
+    def _append(self, key, df):
+        self.append(df)
+        self._by_column[key] = df
+
+    def __getitem__(self, item):
+        if isinstance(item, str):
+            return self._by_column[item]
+        return super().__getitem__(item)
+
+    def keys(self):
+        return self._by_column.keys()
+
+    def values(self):
+        return self._by_column.values()
+
+    def items(self):
+        return self._by_column.items()
+
+
 class Bounds(object):
     __slots__ = ('xmin', 'xmax', 'ymin', 'ymax', 'np_array_of_bounds') # use this syntax to save some memory. also only create vars that are really neccessary
     def __init__(self, xmin:float, xmax:float, ymin:float, ymax:float):
@@ -66,58 +96,60 @@ class Bounds(object):
 
 class Grid(object):
     """
-    A grid used to facilitate radius search and to delineate point clusters
-    It store attributes from radius_search / clustering methods, like aggregates per cell 
+    Result object returned by ``detect_cluster_pts`` and ``detect_cluster_cells``.
 
-    ...
+    Coordinates and geometries are in ``local_crs`` (a projected CRS, typically UTM).
 
-    Attributes:
-    ----------
-    clustering (str): 
-        custom class exhibiting methods to map clustered points to cells, merge cluster cells and making clusters convex and adding attributes. For more info help(Clustering)
-    plot (aabpl.GridPlots):
-        custom class exhibiting methods to create plots. For more info help(aabpl.GridPlots)
-    initial_crs (str):
-        initial crs of points DataFrame supplied to radius_search, detect_cluster_pts or detect_cluster_cells
-    local_crs (str):
-        crs automatically choosen by algorithm based on center coordinate of bounding box covering input point data coordinates
-    total_bounds (aabpl.Bounds):
-        object contaning xmin, xmax, ymin, ymax of full grid  
-    spacing (float): 
-        the length and width of each grid cell (in meters if no custom projection is used)
-    x_steps (numpy.ndarray):
-        all x values of grid from xmin to xmax with step size of spacing. Its length is one more than the number of columns of grid.
-    y_steps (numpy.ndarray):
-        all y values of grid from ymin to ymax with step size of spacing. Its length is one more than the number of rows of grid.
-    row_ids (numpy.ndarray):
-        ids for grid starting at 0
-    col_ids (numpy.ndarray):
-        ids for grid starting at 0
-    ids (tuple):
-        tuple containing all tuple of each cell (row_id, col_id). Sorted row-wise going starting row 0, column 0->n_cols, row 1, column 0->n_cols, ..., row n_rows, column 0->n_cols
-    n_cells (int):
-        number of cells in grid (=n_rows*n_cols) 
-    centroids (numpy.ndarray):
-        2D array containing cell centroids. (sorted row-wise)
-    row_col_to_centroid (dict):
-        dictionary to look up the cells centroid by their row/col index tuple(row_id,col_id)
-    row_col_to_bounds (dict):
-        dictionary to look up the cells bounds (tuple(tuple(xmin,ymin),tuple(xmax,ymax))) by their row/col index tuple(row_id,col_id)
-    
-    Methods:
-    -------
-    create_full_grid_df(target_crs:str=['initial','local','EPSG:4326'][0], max_column_name_length:int=10)
-        returns geopandas.GeoDataFrame with entry for each grid cell. Attributes: row, col, geometry, centroid_xy, aggregate of indicator(s), and cluster_id
-    create_sparse_grid_df(target_crs:str=['initial','local','EPSG:4326'][0], max_column_name_length:int=10)
-        returns geopandas.GeoDataFrame with entry for grid cells that contain a point or is part of a cluster. Attributes: row, col, geometry, centroid_xy, aggregate of indicator(s), and cluster_id
-    create_clusters_df_for_column(cluster_column:str, target_crs:str=['initial','local','EPSG:4326'][0], max_column_name_length:int=10)
-        returns geopandas.GeoDataFrame with entry for grid cells that either has points inside or is part of a cluster with attributes on their Polygon, centroid, sum of indicator(s), and cluster id
-    save_full_grid(filename:str="full_grid", file_format:str=['shp','csv'][0], target_crs:str=['initial','local','EPSG:4326'][0])
-        returns and saves geopandas.GeoDataFrame with entry for each grid cell. Attributes: row, col, geometry, centroid_xy, aggregate of indicator(s), and cluster_id
-    save_sparse_grid(filename:str="sparse_grid",file_format:str=['shp','csv'][0], target_crs:str=['initial','local','EPSG:4326'][0])
-        returns and saves with entry for grid cells that contain a point or is part of a cluster. Attributes: row, col, geometry, centroid_xy, aggregate of indicator(s), and cluster_id
-    save_cell_clusters(filename:str="grid_clusters", file_format:str=['shp','csv'][0], target_crs:str=['initial','local','EPSG:4326'][0])
-        save each cluster with the Polygon, centroid, sum of indicator(s), area, and cluster id
+    Key attributes
+    --------------
+    plot : GridPlots
+        Visualisation methods. All return a ``matplotlib.Figure``.
+
+        - ``grid.plot.clusters(filename)``   — map of cluster polygons over the aggregated grid
+        - ``grid.plot.vars(filename)``        — choropleth map of radius-sum values per output cell
+        - ``grid.plot.cluster_pts(filename)`` — scatter of points coloured by radius-sum, clusters highlighted
+        - ``grid.plot.rand_dist(filename)``   — distribution plot comparing observed vs. random radius-sums
+
+    clustering : Clustering
+        Cluster results, populated after ``detect_cluster_cells``.
+
+        - ``grid.clustering.by_column``  — dict ``{cluster_col_name: ColumnClustering}``
+        - Each ``ColumnClustering.clusters`` is a list of ``Cluster`` objects with:
+            - ``.id``         — integer cluster id
+            - ``.cells``      — set of ``(row, col)`` search-grid cell indices
+            - ``.geometry``   — Shapely polygon/multipolygon in ``local_crs``
+            - ``.centroid``   — ``(x, y)`` centroid in ``local_crs``
+        - ``grid.clustering.save_cell_clusters(filename)`` — save cluster polygons as shapefile/CSV
+
+    local_crs : str
+        Projected CRS used internally (e.g. ``'EPSG:32618'``). All coordinates and
+        geometries on this object are in this CRS.
+
+    initial_crs : str
+        Original CRS of the input ``pts`` DataFrame.
+
+    sample_area : shapely.Polygon or MultiPolygon
+        The valid sampling area used for the null distribution (in ``local_crs``).
+
+    rndm_pts : numpy.ndarray, shape (n, 2)
+        Random point coordinates drawn for the null distribution (in ``local_crs``).
+
+    _r : float
+        Search radius used (in the units of ``local_crs``, typically metres).
+
+    output_spacing : float
+        Cell size of the display/output grid (may differ from the internal search spacing).
+
+    Export methods
+    --------------
+    grid.clustering.create_clusters_df_for_column(cluster_column)
+        GeoDataFrame with one row per cluster polygon.
+    grid.clustering.save_cell_clusters(filename, file_format='shp', target_crs='initial')
+        Save cluster polygons to shapefile or CSV.
+    grid.clustering.create_sparse_grid_df(target_crs='initial')
+        GeoDataFrame of non-empty grid cells with aggregated values and cluster ids.
+    grid.clustering.save_sparse_grid(filename, file_format='shp', target_crs='initial')
+        Save the sparse grid to shapefile or CSV.
     """
     @time_func_perf
     def __init__(
@@ -589,11 +621,6 @@ class Grid(object):
                     if _oc in snap.columns:
                         tgt.pts[_oc] = snap[_oc].reindex(tgt.pts.index)
         self._spacing_computed = True
-        if not self._silent:
-            from aabpl.utils.progress import progress_print
-            nr, nc = len(self.row_ids), len(self.col_ids)
-            progress_print('Built output grid: ' + str(nr) + '*' + str(nc) + '=' + str(nr * nc) +
-                           ' cells with spacing ' + str(self.output_spacing))
         return self
 
     @time_func_perf
@@ -1021,14 +1048,16 @@ class Grid(object):
             crs in which data shall be projected. If 'initial' then it will be projected in same crs as input data. If 'local' a local projection will be used. Otherwise specify the target crs directly like 'EPSG:4326' (default='initial') 
         
         Returns:
-        dfs (list)
-            list that for each cluster column contains a geopandas.GeoDataFrame with one entry for each cluster 
+        dfs (_DFList)
+            List of GeoDataFrames, one per cluster column. Also supports dict-style access by
+            cluster column name: ``dfs['employment_cluster_sum_750']``, ``dfs.keys()``, ``dfs.items()``.
+            Existing code using ``dfs[0]`` or ``for df in dfs`` is unchanged.
         """
-        dfs = []
+        dfs = _DFList()
         filenames = filename if type(filename) == list else [filename + (("_"+cluster_column) if len(self.clustering.by_column) > 1 else '') for cluster_column in self.clustering.by_column]
         for (cluster_column, clusters), filename in zip(self.clustering.by_column.items(), filenames):
             df = self.save_cell_clusters_for_column(cluster_column=cluster_column, filename=filename, file_format=file_format, target_crs=target_crs)
-            dfs.append(df)
+            dfs._append(cluster_column, df)
         return dfs
     #
     #

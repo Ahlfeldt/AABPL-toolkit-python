@@ -5,6 +5,10 @@ from numpy import (
 )
 from numpy.random import ( random as _np_random,  randint as _np_randint, seed as _np_seed, )
 from shapely.geometry import Polygon as _shapely_Polygon, Point as _shapely_Point
+try:
+    from shapely import contains_xy as _shapely_contains_xy
+except ImportError:
+    from shapely.vectorized import contains as _shapely_contains_xy
 from aabpl.utils.misc import flatten_list
 from aabpl.testing.test_performance import time_func_perf
 
@@ -150,7 +154,7 @@ def draw_random_points_in_sample_area(
             (grid.total_bounds.xmin,grid.total_bounds.ymax),
     ])
     
-    sample_area_contains_grid = grid_bbox.area == sample_area.intersection(grid_bbox).area
+    sample_area_contains_grid = sample_area.contains(grid_bbox)
     # estimate the share of invalid area to draw additionally to create points (as some get discarded when they fall in invalid area)
     share_of_invalid_cells = .0 if all_cells_eligible else  sum(
         [2**(2*-lvl) for lvl, (row, col) in cells_partly_valid_ref]
@@ -202,29 +206,26 @@ def draw_random_points_in_sample_area(
             new_random_point_coordinates_in_sample_area = new_random_point_coordinates
             # 
         else: # filter out points in invalid area
-            # lookup which rndm cells are fully valid as checking whether sample_area.covers for all points is slow
             rndm_cells_fully_valid = _np_array([
                 (int(lvl),(
                 (int if lvl >= 0 else float)(row),
                 (int if lvl >= 0 else float)(col)
                 )) in cells_fully_valid_ref  for lvl,row,col in rndm_cells])
-            
-            new_random_point_coordinates_in_sample_area =_np_array(
-                [
-                coords for coords in new_random_point_coordinates[rndm_cells_fully_valid]
-                if sample_area.covers(_shapely_Point(coords))
-             ] +
-            [
-                coords for coords,(lvl,row,col) in zip(
-                    new_random_point_coordinates[~rndm_cells_fully_valid],
-                    rndm_cells[~rndm_cells_fully_valid]
-                )
-                if sample_area.covers(_shapely_Point(coords))
-            ] #+
-            # [
-            #     coords for coords in new_random_point_coordinates[~rndm_cells_fully_valid]
-            #     if sample_area.covers(_shapely_Point(coords)) 
-            # ]
+
+            # Points from fully-valid cells are guaranteed inside sample_area — no geometry check needed.
+            pts_from_full_cells = new_random_point_coordinates[rndm_cells_fully_valid]
+
+            # Points from partial cells need a geometry check; use vectorised contains for speed.
+            pts_from_partial = new_random_point_coordinates[~rndm_cells_fully_valid]
+            if len(pts_from_partial):
+                in_area = _shapely_contains_xy(sample_area, pts_from_partial[:, 0], pts_from_partial[:, 1])
+                pts_from_partial = pts_from_partial[in_area]
+
+            new_random_point_coordinates_in_sample_area = (
+                _np_vstack([pts_from_full_cells, pts_from_partial])
+                if len(pts_from_full_cells) and len(pts_from_partial)
+                else pts_from_full_cells if len(pts_from_full_cells)
+                else pts_from_partial
             )
             grid.new_random_point_coordinates_partly_valid = new_random_point_coordinates[~rndm_cells_fully_valid]
             grid.rndm_cells_partly_valid = rndm_cells[~rndm_cells_fully_valid]
@@ -324,9 +325,6 @@ def compute_null_distribution(
         )
 
     grid.rndm_pts = rndm_pts
-    # Snapshot coords before perform_search cleanup drops them from rndm_pts.
-    grid._rndm_pts_x_snapshot = rndm_pts[x].values.copy()
-    grid._rndm_pts_y_snapshot = rndm_pts[y].values.copy()
 
     cols_c = [c] if isinstance(c, str) else list(c)
 
@@ -370,7 +368,10 @@ def compute_null_distribution(
                         pts=pts, c=cols_c, x=x, y=y,
                         row_name=row_name, col_name=col_name, silent=silent,
                     )
+                    _excl_orig = grid_i.search.exclude_self
+                    grid_i.search.exclude_self = False
                     grid_i.search.perform_search(silent=True)
+                    grid_i.search.exclude_self = _excl_orig
 
             # build output columns and thresholds
             thresholds: dict = {}
@@ -440,7 +441,14 @@ def compute_null_distribution(
         silent=silent,
     )
 
+    # Random points have no "self" to exclude — suppress exclude_self for this search.
+    _exclude_self_orig = grid.search.exclude_self
+    grid.search.exclude_self = False
     grid.search.perform_search(silent=True,)
+    grid.search.exclude_self = _exclude_self_orig
+    # Snapshot after search so coords are in the same sorted order as the sum columns.
+    grid._rndm_pts_x_snapshot = rndm_pts[x].values.copy() if x in rndm_pts.columns else None
+    grid._rndm_pts_y_snapshot = rndm_pts[y].values.copy() if y in rndm_pts.columns else None
 
     sum_radius_names = [(cname+suffix) for cname in c]
     disk_sums_for_random_points = rndm_pts[sum_radius_names].values

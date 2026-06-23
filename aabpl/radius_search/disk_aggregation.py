@@ -477,7 +477,6 @@ def search_and_aggregate(
         suffix = '_' + str(r)
     sum_radius_names = [cname + suffix for cname in c]
     pts_source[sum_radius_names] = 0
-    column_dtypes = pts_target[c].dtypes
 
     pts_source.sort_values([row_name, col_name, 'region_and_trgl_id'], inplace=True)
     point_xy = pts_source[[x, y]].values
@@ -605,9 +604,8 @@ def search_and_aggregate(
             except Exception as plot_error:
                 progress_print(f"plot_pt_disk skipped (pt_id={target_id}): {type(plot_error).__name__}: {plot_error}")
 
-    # ---- write results back, fix dtypes, exclude self, apply edge weighting -----
+    # ---- write results back, exclude self, apply edge weighting -----
     pts_source[sum_radius_names] = pts_source[sum_radius_names].values + sums_within_disks
-    pts_source = pts_source.astype({name: dt for name, dt in zip(sum_radius_names, column_dtypes)})
 
     if exclude_self:
         # TODO when implementing max,min,range - excluding the point itself cannot be done. Docstring for those function need to tell that.

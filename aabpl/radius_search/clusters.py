@@ -106,7 +106,7 @@ class Clustering(object):
         make_convex:bool=True,
         row_name:str='id_y',
         col_name:str='id_x',
-        cluster_suffix:str='_750m',
+        cluster_suffix:str='_cluster',
     ):
         """
         Detects all grid cells containing a point that is labeled as clusters. those cells are then labeled as cluster cells. 
@@ -336,26 +336,17 @@ class Clustering(object):
                 grid_xmin:float,
                 grid_ymin:float,
                 spacing:float,
+                spacing_y:float=None,
         ):
             """add shapely polygon unaray union geometry"""
-            # there are more efficient methods
-            
+            if spacing_y is None:
+                spacing_y = spacing
             self.geometry = unary_union([
                 Polygon([
-                    (grid_xmin+col*spacing, grid_ymin+row*spacing),
-                    (grid_xmin+(col+1)*spacing, grid_ymin+row*spacing),
-                    (grid_xmin+(col+1)*spacing, grid_ymin+(row+1)*spacing),
-                    (grid_xmin+col*spacing, grid_ymin+(row+1)*spacing)
-                    ])
-                for row,col in self.cells]
-            )
-
-            self.geometry = unary_union([
-                Polygon([
-                    (grid_xmin+col*spacing, grid_ymin+row*spacing),
-                    (grid_xmin+(col+1)*spacing, grid_ymin+row*spacing),
-                    (grid_xmin+(col+1)*spacing, grid_ymin+(row+1)*spacing),
-                    (grid_xmin+col*spacing, grid_ymin+(row+1)*spacing)
+                    (grid_xmin+col*spacing,   grid_ymin+row*spacing_y),
+                    (grid_xmin+(col+1)*spacing, grid_ymin+row*spacing_y),
+                    (grid_xmin+(col+1)*spacing, grid_ymin+(row+1)*spacing_y),
+                    (grid_xmin+col*spacing,   grid_ymin+(row+1)*spacing_y)
                     ])
                 for row,col in self.cells]
             )
@@ -516,9 +507,30 @@ class Clustering(object):
         def add_geom_to_clusters(self):
             grid_xmin = self.grid.total_bounds.xmin
             grid_ymin = self.grid.total_bounds.ymin
-            spacing = self.grid._search_spacing
+            s = self.grid._search_spacing
+            out_s  = getattr(self.grid, 'output_spacing',   None) or s
+            out_sy = getattr(self.grid, 'output_spacing_y', None) or out_s
+            ratio_x = max(1, round(out_s  / s))
+            ratio_y = max(1, round(out_sy / s))
             for cluster in self.clusters:
-                cluster.add_geometry(grid_xmin, grid_ymin, spacing)
+                if ratio_x == 1 and ratio_y == 1:
+                    cluster.add_geometry(grid_xmin, grid_ymin, s)
+                else:
+                    # Snap each search cell to its parent output cell so the polygon
+                    # aligns with the output grid shown in plot.clusters().
+                    out_cells = set(
+                        (row // ratio_y, col // ratio_x)
+                        for row, col in cluster.cells
+                    )
+                    cluster.geometry = unary_union([
+                        Polygon([
+                            (grid_xmin +  col      * out_s,  grid_ymin +  row      * out_sy),
+                            (grid_xmin + (col + 1) * out_s,  grid_ymin +  row      * out_sy),
+                            (grid_xmin + (col + 1) * out_s,  grid_ymin + (row + 1) * out_sy),
+                            (grid_xmin +  col      * out_s,  grid_ymin + (row + 1) * out_sy),
+                        ])
+                        for row, col in out_cells
+                    ])
             
         def add_area_to_clusters(self):
             for cluster in self.clusters:
@@ -526,16 +538,24 @@ class Clustering(object):
         #
 
         def add_cluster_id_to_pts(self, column, cluster_column):
+            # cluster_column stays as the strict per-point boolean (sum > threshold).
+            # Cluster polygon membership (which may include convex hull / contingency cells)
+            # is written to a separate cluster_id column so the two semantics stay distinct.
             cell_to_cluster = self.cell_to_cluster_id
             pts = self.grid.search.source.pts
-            vals = _np_zeros(len(pts),int)#-1
+            vals = _np_zeros(len(pts), int)
             for i,(row,col) in enumerate(pts[[
                 self.grid.search.source.row_name,
                 self.grid.search.source.col_name,
             ]].values):
-                if (row, col) in cell_to_cluster: 
+                if (row, col) in cell_to_cluster:
                     vals[i] = cell_to_cluster[(row, col)]
-            pts[cluster_column] = vals
+            # derive cluster_id column name from cluster_column: insert '_id' before the suffix
+            # e.g. employment_cluster_sum_5000 → employment_cluster_id_sum_5000
+            # cluster_id column: 0 = not in any cluster polygon, positive int = cluster ID
+            # (polygon may include convex hull / contingency cells beyond threshold seeds)
+            cluster_id_column = cluster_column.replace('_cluster_', '_cluster_id_', 1)
+            pts[cluster_id_column] = vals
         #
     #
 #

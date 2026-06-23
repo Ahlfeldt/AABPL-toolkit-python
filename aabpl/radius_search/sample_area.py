@@ -547,13 +547,14 @@ def infer_sample_area_from_pts(
                 if min_pts_to_sample_cell != 1:
                     progress_print("sample_area hull_type 'buff_non_empty_cells' used together with min_pts_to_sample_cell != 1. min_pts_to_sample_cell will be set = 1. Use 'buff_cells_min_pts' to specify different value.")
                 min_pts_to_sample_cell = 1
-            # Build the valid-area footprint from non-empty *output* grid cells
-            # (cell size = grid.output_spacing), so the buffered sample area depends
-            # on the user-facing output spacing rather than the internal search grid.
+            # Build the valid-area footprint from search-grid cells (size =
+            # grid._search_spacing = r/3). Using output_spacing would produce cells
+            # much larger than r after update_spacing() runs (e.g. 25 000 m cells
+            # with a 15 000 m buffer), making the buffer zone negligibly thin.
             from numpy import floor as _np_floor
             from collections import Counter as _Counter
-            sx = grid.output_spacing
-            sy = grid.output_spacing_y
+            sx = grid._search_spacing
+            sy = grid._search_spacing
             # output_x_steps[0] == total_bounds.xmin, but the output arrays are built
             # lazily (update_spacing) and the sample area is constructed during the
             # search, before that — so read the origin from total_bounds directly.
