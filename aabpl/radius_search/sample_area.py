@@ -21,6 +21,7 @@ from aabpl.utils.crs_transformation import convert_pts_to_crs as _convert_pts_to
 from aabpl.utils.intersections import circle_line_segment_intersection
 from aabpl.utils.cell_geometry import (classify_disk_cells, get_cells_by_lvl_ovlpd_by_cell_buffer)
 from aabpl.testing.test_performance import time_func_perf
+from aabpl.utils.progress import progress_print
 # TODO make individual function for each hull type?
 # TODO make clever use of buffered cells s.t. polygon check is only performed in edge cases
 
@@ -444,10 +445,10 @@ def infer_sample_area_from_pts(
     area_missing_from_hull = 1
     
     if hull_type=='buffer':
-        print("sample_area hull_type 'buffer' deprectated. Use 'buff_pts' instead.")
+        progress_print("sample_area hull_type 'buffer' deprectated. Use 'buff_pts' instead.")
         hull_type='buff_pts'
     elif hull_type == 'buffered_cells':
-        print("sample_area hull_type 'buffered_cells' deprectated. Use 'buff_non_empty_cells' or 'buff_cells_min_pts' instead.")
+        progress_print("sample_area hull_type 'buffered_cells' deprectated. Use 'buff_non_empty_cells' or 'buff_cells_min_pts' instead.")
         hull_type='buff_cells_min_pts'
     
     if hull_type == 'bounding_box':
@@ -479,7 +480,7 @@ def infer_sample_area_from_pts(
         )
     elif hull_type == 'buff_pts':
         if len(pts)>10000:
-            print("WARNING: creating a buffer around each point might cause long computation times for "+str(len(pts))+" points. Consider using hull_type='buff_non_empty_cells' or hull_type='concave' as more efficient method.")
+            progress_print("WARNING: creating a buffer around each point might cause long computation times for "+str(len(pts))+" points. Consider using hull_type='buff_non_empty_cells' or hull_type='concave' as more efficient method.")
         
         q=max(1,-(-2*buffer/tolerance)//1)
         sample_poly = _shapely_MultiPoint(pts[[x,y]].values).buffer(distance=buffer, quad_segs=q).simplify(tolerance)
@@ -544,7 +545,7 @@ def infer_sample_area_from_pts(
         else:
             if hull_type == 'buff_non_empty_cells':
                 if min_pts_to_sample_cell != 1:
-                    print("sample_area hull_type 'buff_non_empty_cells' used together with min_pts_to_sample_cell != 1. min_pts_to_sample_cell will be set = 1. Use 'buff_cells_min_pts' to specify different value.")
+                    progress_print("sample_area hull_type 'buff_non_empty_cells' used together with min_pts_to_sample_cell != 1. min_pts_to_sample_cell will be set = 1. Use 'buff_cells_min_pts' to specify different value.")
                 min_pts_to_sample_cell = 1
             # Build the valid-area footprint from non-empty *output* grid cells
             # (cell size = grid.output_spacing), so the buffered sample area depends

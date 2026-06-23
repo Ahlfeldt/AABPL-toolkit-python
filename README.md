@@ -1,6 +1,6 @@
 ﻿# AABPL-toolkit-python (beta version)
 
-(c) Gabriel M. Ahlfeldt, Thilo N. H. Albers, Kristian Behrens, [Max von Mylius](https://github.com/maximylius), Version 0.1.0, 2024-10
+(c) Gabriel M. Ahlfeldt, Thilo N. H. Albers, Kristian Behrens, [Max von Mylius](https://github.com/maximylius), Version 0.3.5, 2024-10
 
 
 
@@ -120,9 +120,26 @@ from aabpl import (
 
 ### Program syntax
 
+All parameters are documented inline. To see what a parameter does without leaving your script:
 
+```python
+import aabpl
+aabpl.radius_search.params.r          # description of the r parameter
+aabpl.detect_cluster_cells.params     # list all parameters
+```
 
-Explain the syntax with its arguments here
+The core parameters are:
+
+| Parameter | Functions | Description |
+|:---|:---|:---|
+| `pts` | all | `pd.DataFrame` of points. Results are appended in-place. |
+| `crs` | all | CRS string e.g. `'EPSG:4326'`. Pass `''` for already-projected data. |
+| `r` | all | Search radius in metres (after reprojection). Also accepts a list of radii `[500, 750]`, distance bands `[(0,500),(500,750)]`, or weighted bands `[(0,500,1),(500,750,2)]`. |
+| `c` | all | Column name(s) to aggregate, e.g. `'employment'` or `['employment','revenue']`. |
+| `stat` | `radius_search` | Aggregation statistic: `'sum'` (default), `'count'`, `'mean'`, `'variance'`, `'std'`, `'cv'`, `'skewness'`, `'kurtosis'`. |
+| `k_th_percentile` | cluster functions | Null-distribution percentile used as cluster threshold (default `99.5`). |
+| `sample_area` | all | Restrict where random comparison points are drawn. String shortcuts (`'concave'`, `'convex'`, `'bounding_box'`, …) or a Shapely Polygon/MultiPolygon. |
+| `exclude_self` | all | Exclude the point's own value from its neighbourhood aggregate (default `True`). |
 
 
 
@@ -146,7 +163,7 @@ pts.columns = ["eid", "employment", "industry", "lat", "lon", "moved"]
 grid = detect_cluster_cells(
     pts=pts,
     crs=crs_of_your_csv,
-    r=750,                                   # search radius in CRS units (metres after reprojection)
+    r=750,                                   # search radius in CRS units (metres after reprojection); also accepts r=[500,750] or r=[(0,500),(500,750)]
     c='employment',                          # column(s) to aggregate; list for multiple
     stat='sum',                              # sum|count|mean|variance|std|cv|skewness|kurtosis
     exclude_self=True,                       # exclude point from its own neighbourhood
@@ -227,7 +244,7 @@ Variable names will then be assigned by the script. Of course, with some adjustm
 
 
 
-For future versions of the package, we aim to allow for a shapefile that defines the sampling area of the counterfactual distribution as an **optional input**. This shapefile must be projected within the WGS1984 geographic coordinate system. Ahlfeldt, Albers, and Behrens (2024) exclude residential and undevelopable areas. Such a shapefile could also restrict the sampling area for counterfactual spatial distributions to inhabitable areas or to areas zoned for the development of tall buildings.
+An **optional input** is a shapefile (or Shapely Polygon/MultiPolygon) that defines the sampling area of the counterfactual distribution, passed via the `sample_area` parameter. Ahlfeldt, Albers, and Behrens (2024) exclude residential and undevelopable areas. Such a shapefile could also restrict the sampling area for counterfactual spatial distributions to inhabitable areas or to areas zoned for the development of tall buildings.
 
 
 
@@ -240,23 +257,14 @@ The package will create the a number of folders in your working directory into w
 
 
 | Folder | File | Description |
-
 |:---|:---|:---|
-
 | output_data | `clusters.csv` | CSV file containing information on the final delineated clusters, including geographic coordinates in decimal degrees, a cluster id that corresponds to the rank in the distribution of total mass within the cluster (in our case employment), the number of cells within the cluster, the total area of the cluster (in square meters). You may choose another file name in the 'Example.py' script. |
-
 | output_data | `grid_clusters.csv` | CSV file containing a gridded version of the data set, including groups of clustered grid cells identified by the cluster id, geographic coordinates in decimal degrees, and the total mass in the grid cell (in our case employment). You may choose another file name in the 'Example.py' script.   |
-
 | output_data | `pts_df_w_clusters.csv` | CSV file containing the plants with the input data and, in addition, an identifier for the cluster to which a plant belongs. You may choose another file name in the 'Example.py' script. |
-
 | output_gis | `grid_clusters.*` | Shapefile of the gridded data set including the same information as in  `grid_clusters.csv`. You may choose another file name in the 'Example.py' script. |
-
 | output_gis | `clusters.*` | Shapefile of final output, i.e. aggregated clusters (in our case prime locations) along with the same information as in 'clusters.csv'. You may choose another file name in the 'Example.py' script.  |
-
 | output_maps | `clusters_employment_750m_995th.png` | Map showing the boundaries of the final output, i.e. clusters after aggregation (in our case to prime locations), with the density of the selected importance weight (in our case employment) in the background. You may choose another file name in the 'Example.py' script.  |
-
 | output_maps | `employment_cluster_pts.png` | Map showing the plants and how clustered they are. You may choose another file name in the 'Example.py' script.  |
-
 | output_maps | `rand_dist_employment.png` | Technical output to inform the choice of the p-value. You may choose another file name in the 'Example.py' script.  |
 
 
@@ -280,37 +288,21 @@ All functions are available directly on the `aabpl` module after `import aabpl`.
 
 
 | Function | Description |
-
 |:---|:---|
-
-| **`radius_search(pts, crs, r, c, stat, ...)`** | **Core function.** For every point in `pts`, aggregates values of neighbouring points within radius `r`. Adds the result as a new column. Supports `stat` in `{sum, count, mean, variance, std, cv, skewness, kurtosis}`. |
-
+| **`radius_search(pts, crs, r, c, stat, ...)`** | **Core function.** For every point in `pts`, aggregates values of neighbouring points within radius `r` (or distance bands). Adds the result as a new column. Supports `stat` in `{sum, count, mean, variance, std, cv, skewness, kurtosis}`. |
 | `radius_sum(pts, crs, r, c, ...)` | Shorthand for `radius_search(..., stat='sum')`. |
-
 | `radius_count(pts, crs, r, c, ...)` | Shorthand for `radius_search(..., stat='count')`. |
-
 | `radius_mean(pts, crs, r, c, ...)` | Shorthand for `radius_search(..., stat='mean')`. |
-
 | `radius_variance(pts, crs, r, c, ...)` | Shorthand for `radius_search(..., stat='variance')`. |
-
 | `radius_std(pts, crs, r, c, ...)` | Shorthand for `radius_search(..., stat='std')`. |
-
 | `radius_cv(pts, crs, r, c, ...)` | Shorthand for `radius_search(..., stat='cv')` (coefficient of variation). |
-
 | `radius_skewness(pts, crs, r, c, ...)` | Shorthand for `radius_search(..., stat='skewness')`. |
-
 | `radius_kurtosis(pts, crs, r, c, ...)` | Shorthand for `radius_search(..., stat='kurtosis')`. |
-
 | **`detect_cluster_cells(pts, crs, r, c, ...)`** | **Core function.** Full pipeline: runs `radius_search`, builds a null distribution from random points, delineates contiguous clustered cells into cluster polygons. Returns a `Grid` object; polygons at `grid.clustering`. |
-
 | `detect_cluster_pts(pts, crs, r, c, ...)` | Labels each point as clustered or not. Same pipeline as `detect_cluster_cells` but skips the output grid and polygon steps. |
-
 | `detect_cluster_cells_from_labeled_pts(pts, crs, r, ...)` | Delineates cluster polygons from points with a pre-existing cluster label column, skipping the radius search and null distribution. |
-
 | `infer_sample_area_from_pts(pts, grid, ...)` | Derives the valid sample area polygon from the point pattern. Used internally; available for inspection. |
-
 | `draw_random_coords(n_pts, sample_area, crs, ...)` | Draws `n_pts` random coordinate pairs. `sample_area` accepts a Shapely Polygon/MultiPolygon or a plain coordinate list; coordinates outside it are rejected. Set `crs` to reproject the geometry from a geographic CRS (e.g. `'EPSG:4326'`) into the best UTM zone automatically — the same reprojection used internally by `detect_cluster_pts`. Pass `sample_area=None` with a custom `coord_generator(n, rng)` to accept all produced coordinates. Returns a two-column DataFrame ready to pass as `null_distribution` to `detect_cluster_pts` / `detect_cluster_cells`. |
-
 | `aggregate_to_grid(pts, grid, ...)` | Aggregates point-level values onto the output grid cells of an existing `Grid` object. |
 
 
@@ -320,9 +312,7 @@ All functions are available directly on the `aabpl` module after `import aabpl`.
 
 
 | | File | Description |
-
 |:---|:---|:---|
-
 | [-](https://github.com/Ahlfeldt/ABRSQOL-toolkit) | `AABPL-Codebook.pdf` | **Codebook** laying out the **structure of the delineation algorithm in pseudo code**. |
 
 
@@ -410,29 +400,17 @@ Each final cluster is dissolved from its constituent cells into a single polygon
 
 
 ```
-
-pts  â”€â”€► radius_search â”€â”€► agg_i per point
-
-                                â”‚
-
-         n random pts â”€â”€► agg_j per random point â”€â”€► k-th percentile = τ
-
-                                â”‚
-
-                          agg_i > τ ? â”€â”€► cluster_i (point label)
-
-                                â”‚
-
+pts ──► radius_search ──► agg_i per point
+                                │
+         n random pts ──► agg_j per random point ──► k-th percentile = τ
+                                │
+                          agg_i > τ ? ──► cluster_i (point label)
+                                │
                      aggregate to output grid cells
-
-                                â”‚
-
-                     contiguous cell patches â”€â”€► merge â”€â”€► convexify
-
-                                â”‚
-
+                                │
+                     contiguous cell patches ──► merge ──► convexify
+                                │
                          cluster polygons
-
 ```
 
 

@@ -257,6 +257,8 @@ def compute_null_distribution(
     random_seed:int=None,
     silent:bool=False,
     null_distribution=None,
+    r=None,
+    stat:str='sum',
 ):
     """Draws n_random_points within sample_area and aggregates data from points within search radius.
     From those values it calculates the k_th_percentile threshold value for the variable(s). This
@@ -321,6 +323,102 @@ def compute_null_distribution(
             columns=[x, y]
         )
 
+    grid.rndm_pts = rndm_pts
+    # Snapshot coords before perform_search cleanup drops them from rndm_pts.
+    grid._rndm_pts_x_snapshot = rndm_pts[x].values.copy()
+    grid._rndm_pts_y_snapshot = rndm_pts[y].values.copy()
+
+    cols_c = [c] if isinstance(c, str) else list(c)
+
+    # ── multi-radius path ─────────────────────────────────────────────────────
+    _mr_grids = getattr(grid, '_mr_grids', None)
+    if r is not None and _mr_grids is not None:
+        from aabpl.radius_search.multi_radius import _parse_r_spec, _fmt_r, _AGG_ABBR
+        spec_type, data = _parse_r_spec(r)
+
+        if spec_type != 'single':
+            stat_str = _AGG_ABBR.get(stat, stat)
+            _INT = '__mrnull__'
+
+            if spec_type == 'list':
+                unique_radii = sorted(set(data))
+                bands = None
+            else:
+                bands = data
+                unique_radii = sorted(set(rv for a, b, *_ in bands for rv in (a, b)))
+
+            # aggregate rndm_pts at each unique radius using the pre-built grids
+            for ri in unique_radii:
+                int_sfx = f'{_INT}{_fmt_r(ri)}'
+                if ri == 0.0:
+                    # No real pts share random point coords → r=0 contribution is zero
+                    for col in cols_c:
+                        rndm_pts[f'{col}{int_sfx}'] = 0.0
+                else:
+                    grid_i = _mr_grids.get(ri)
+                    if grid_i is None:
+                        raise ValueError(
+                            f"No grid for radius {ri} in grid._mr_grids. "
+                            "Ensure multi_radius_search was called before compute_null_distribution."
+                        )
+                    grid_i.search.set_source(
+                        pts=rndm_pts, c=cols_c, x=x, y=y,
+                        row_name=row_name, col_name=col_name,
+                        suffix=int_sfx, silent=True,
+                    )
+                    grid_i.search.set_target(
+                        pts=pts, c=cols_c, x=x, y=y,
+                        row_name=row_name, col_name=col_name, silent=silent,
+                    )
+                    grid_i.search.perform_search(silent=True)
+
+            # build output columns and thresholds
+            thresholds: dict = {}
+            band_cols_tmp: list = []
+
+            if spec_type == 'list':
+                for i, ri in enumerate(data):
+                    for col in cols_c:
+                        src = f'{col}{_INT}{_fmt_r(ri)}'
+                        final = f'{col}_{stat_str}_r{i}'
+                        rndm_pts[final] = rndm_pts[src].values
+                        ki = k_th_percentiles[cols_c.index(col)]
+                        thresholds[final] = _np_percentile(rndm_pts[final].values, ki, axis=0)
+            else:
+                for i, band in enumerate(bands):
+                    r_in, r_out = band[0], band[1]
+                    for col in cols_c:
+                        outer = f'{col}{_INT}{_fmt_r(r_out)}'
+                        inner = f'{col}{_INT}{_fmt_r(r_in)}'
+                        bname = f'{col}_{stat_str}_b{i}'
+                        rndm_pts[bname] = rndm_pts[outer].values - rndm_pts[inner].values
+                        band_cols_tmp.append(bname)
+                        if spec_type == 'bands':
+                            ki = k_th_percentiles[cols_c.index(col)]
+                            thresholds[bname] = _np_percentile(rndm_pts[bname].values, ki, axis=0)
+
+                if spec_type == 'wbands':
+                    total_w = sum(band[2] for band in bands)
+                    for col in cols_c:
+                        arr = _np_empty(len(rndm_pts))
+                        arr[:] = 0.0
+                        for i, band in enumerate(bands):
+                            r_in, r_out, w = band
+                            bname = f'{col}_{stat_str}_b{i}'
+                            arr += (w / total_w) * rndm_pts[bname].values
+                        wgt_col = f'{col}_{stat_str}_wgt'
+                        rndm_pts[wgt_col] = arr
+                        ki = k_th_percentiles[cols_c.index(col)]
+                        thresholds[wgt_col] = _np_percentile(rndm_pts[wgt_col].values, ki, axis=0)
+
+            # clean up temp __mrnull__ cols
+            for tmp_col in list(rndm_pts.columns):
+                if _INT in tmp_col:
+                    rndm_pts.drop(columns=[tmp_col], inplace=True)
+
+            return (thresholds, rndm_pts)
+
+    # ── single-radius path (original) ────────────────────────────────────────
     grid.search.set_source(
         pts=rndm_pts,
         c=c,
@@ -341,21 +439,16 @@ def compute_null_distribution(
         col_name=col_name,
         silent=silent,
     )
-    
-    grid.rndm_pts = rndm_pts
-    # Snapshot coords before perform_search cleanup drops them from rndm_pts.
-    grid._rndm_pts_x_snapshot = rndm_pts[x].values.copy()
-    grid._rndm_pts_y_snapshot = rndm_pts[y].values.copy()
 
     grid.search.perform_search(silent=True,)
 
     sum_radius_names = [(cname+suffix) for cname in c]
     disk_sums_for_random_points = rndm_pts[sum_radius_names].values
 
-    cluster_threshold_values  = [_np_percentile(disk_sums_for_random_points[:,i], k_th_percentile,axis=0) for i, k_th_percentile in enumerate(k_th_percentiles)]
+    thresholds = {name: _np_percentile(disk_sums_for_random_points[:,i], k_th_percentiles[i], axis=0)
+                  for i, name in enumerate(sum_radius_names)}
 
-
-    return (cluster_threshold_values, rndm_pts)
+    return (thresholds, rndm_pts)
 
 
 def draw_random_coords(

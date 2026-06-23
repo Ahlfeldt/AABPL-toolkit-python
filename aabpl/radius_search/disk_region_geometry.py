@@ -3,7 +3,7 @@ from numpy import array as _np_array, sign as _np_sign, arange as _np_arange, in
 from numpy.linalg import norm as _np_linalg_norm
 import numpy as _np
 from aabpl import config as _config
-from aabpl.utils.progress import _OUTER_PROGRESS as _outer_progress
+from aabpl.utils.progress import _OUTER_PROGRESS as _outer_progress, progress_print as _progress_print
 from math import log10 as _math_log10, pi as _math_pi, floor as _math_floor
 from matplotlib import pyplot as plt
 from aabpl.utils.misc import make_bins_from_vals, get_vals_from_bins
@@ -2407,7 +2407,7 @@ def build_disk_region_lookups(
     _cache_key = (round(r / grid_spacing, 8), nest_depth, include_boundary)
     if _cache_key in _config.disk_region_cache and plot_offset_checks is None and plot_offset_regions is None and plot_offset_raster is None:
         if not silent and _outer_progress.get() is None:
-            print("Reusing cached disk region lookups for r/spacing="+str(round(r/grid_spacing, 6))+" nest_depth="+str(nest_depth))
+            _progress_print("Reusing cached disk region lookups for r/spacing="+str(round(r/grid_spacing, 6))+" nest_depth="+str(nest_depth))
         # LRU: mark this entry most-recently-used so eviction (popitem(last=False))
         # drops the genuinely least-recently-used config, not the oldest-inserted.
         _config.disk_region_cache.move_to_end(_cache_key)

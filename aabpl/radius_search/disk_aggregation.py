@@ -6,7 +6,7 @@ from numpy import (
 from numpy.linalg import norm as np_norm
 from numpy import add as _np_add
 from aabpl.utils.misc import flatten_list
-from aabpl.utils.progress import SearchProgress
+from aabpl.utils.progress import SearchProgress, progress_print
 from aabpl.illustrations.plot_disk import illustrate_point_disk
 from aabpl.testing.test_performance import time_func_perf
 from math import pi as math_pi
@@ -99,7 +99,7 @@ def search_and_aggregate(
     if isinstance(cells_rndm_sample, bool) and cells_rndm_sample:
         weight_valid_area = False  # every cell is sampled -> the whole disk is valid
     if weight_valid_area not in ('precise', 'estimate', False, None):
-        print("Value for 'weight_valid_area' must be in ['precise', 'estimate', False]. "
+        progress_print("Value for 'weight_valid_area' must be in ['precise', 'estimate', False]. "
               f"Instead {weight_valid_area!r} was provided.")
         weight_valid_area = False
 
@@ -452,7 +452,7 @@ def search_and_aggregate(
 
         if weight_valid_area == 'precise':
             if r2 < 2 * grid_spacing ** 2:
-                print("WARNING: the precise valid-area method assumes r >= sqrt(2)*grid_spacing; "
+                progress_print("WARNING: the precise valid-area method assumes r >= sqrt(2)*grid_spacing; "
                       "for smaller radii the valid area may be inaccurate.")
 
             def overlap_invalid_area(point_offset, point_xy, point_row, point_col, cells):
@@ -603,7 +603,7 @@ def search_and_aggregate(
                     **plot_pt_disk,
                 )
             except Exception as plot_error:
-                print(f"plot_pt_disk skipped (pt_id={target_id}): {type(plot_error).__name__}: {plot_error}")
+                progress_print(f"plot_pt_disk skipped (pt_id={target_id}): {type(plot_error).__name__}: {plot_error}")
 
     # ---- write results back, fix dtypes, exclude self, apply edge weighting -----
     pts_source[sum_radius_names] = pts_source[sum_radius_names].values + sums_within_disks
@@ -616,7 +616,7 @@ def search_and_aggregate(
             for sum_name, value_col in zip(sum_radius_names, c):
                 pts_source[sum_name] = pts_source[sum_name].values - pts_source[value_col]
         else:
-            print("Option `exclude_self=True` but search target and search origin DataFrame seem to be different, thus point own values are not substracted. "+
+            progress_print("Option `exclude_self=True` but search target and search origin DataFrame seem to be different, thus point own values are not substracted. "+
                   "You may have to Fall back to substract the point own values manually from result of radius aggregation.")
 
     if weight_valid_area:
@@ -625,10 +625,10 @@ def search_and_aggregate(
         for sum_name in sum_radius_names:
             pts_source[sum_name] = pts_source[sum_name].values / pts_source[share_name].values
         if not silent:
-            print("Appended radius sum" + ("" if n_cols <= 1 else "s") + " (r=" + str(r) + ") for "
+            progress_print("Appended radius sum" + ("" if n_cols <= 1 else "s") + " (r=" + str(r) + ") for "
                   + ', '.join(f"'{cname}' as '{sname}'" for cname, sname in zip(c, sum_radius_names))
                   + " to pts DataFrame. (Sum names can be controlled by setting suffix='...')")
-            print("Appended valid area share as '" + share_name + "' to pts DataFrame.")
+            progress_print("Appended valid area share as '" + share_name + "' to pts DataFrame.")
 
     if not validate and not _cfg.VALIDATE:
         return pts_source[sum_radius_names]
@@ -670,12 +670,12 @@ def search_and_aggregate(
             errors.append((rep_idx, cr, brute_sums, algo_sums, diff, own_vals))
             
     if errors:
-        print(f"VALIDATION FAILED: {len(errors)}/{len(rep_indices)} cell_region(s) have wrong sums:")
+        progress_print(f"VALIDATION FAILED: {len(errors)}/{len(rep_indices)} cell_region(s) have wrong sums:")
         # FIX: Unpack own_vals from the error tuple here
         for rep_idx, cr, bf, algo, diff, item_own_vals in errors:
-            print(f"  pt_id={rep_idx} cell_region={cr} brute={bf} algo={algo} diff={diff} own_vals={item_own_vals}")
+            progress_print(f"  pt_id={rep_idx} cell_region={cr} brute={bf} algo={algo} diff={diff} own_vals={item_own_vals}")
     else:
-        print(f"VALIDATION OK: all {len(rep_indices)} cell_region(s) correct.")
+        progress_print(f"VALIDATION OK: all {len(rep_indices)} cell_region(s) correct.")
 
 
     def plot_vars(self=grid, colnames=_np_array([c, sum_radius_names]), filename='', **plot_kwargs):

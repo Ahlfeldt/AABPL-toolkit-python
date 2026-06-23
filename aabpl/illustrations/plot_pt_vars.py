@@ -1,7 +1,7 @@
 from matplotlib.pyplot import (subplots as _plt_subplots)
 from matplotlib.pyplot import get_cmap as _plt_get_cmap
 from matplotlib.pyplot import close as _plt_close
-from matplotlib.colors import LogNorm as _plt_LogNorm, Normalize as _plt_Normalize, LinearSegmentedColormap as _plt_LinearSegmentedColormap, ListedColormap as _plt_ListedColormap
+from matplotlib.colors import LogNorm as _plt_LogNorm, Normalize as _plt_Normalize, LinearSegmentedColormap as _plt_LinearSegmentedColormap, ListedColormap as _plt_ListedColormap, BoundaryNorm as _plt_BoundaryNorm
 from matplotlib.patches import Patch as _plt_Patch
 from numpy import array as _np_array, zeros as _np_zeros
 from aabpl.illustrations.plot_utils import truncate_colormap, set_map_frame, plot_polygon
@@ -69,7 +69,7 @@ def create_plots_for_vars(
         - ``s`` : float — scatter marker size (default auto)
         - ``vmin``, ``vmax`` : float — colormap range
         - ``sample_area_colors`` : list[str, str] — colours for [valid, excluded] area
-        - ``sample_area_linewidth`` : float — border linewidth of the valid-area polygon (default ``0.5``)
+        - ``sample_area_linewidth`` : float — border linewidth of the valid-area polygon (default ``0.2``)
         - ``fig``, ``axs`` — existing Figure/Axes to draw into
     show : bool
         Display the figure (default ``True``).
@@ -101,7 +101,7 @@ def create_plots_for_vars(
         'figsize': (10*ncols, 5*nrows),
         'additional_varnames':[],
         'sample_area_colors': ["#ffffff",  "#bedbe6"],
-        'sample_area_linewidth': 0.5,
+        'sample_area_linewidth': 0.2,
     }, **plot_kwargs)
     save_kwargs = {'dpi':300, 'bbox_inches':"tight", **save_kwargs}
     
@@ -174,15 +174,35 @@ def create_plots_for_vars(
             sample_patch = _plt_Patch(facecolor=sample_area_color, label='Sample area', edgecolor='black')
             ax.legend(handles=[non_valid_patch, sample_patch], loc='best')
             plot_polygon(poly=non_valid_area, ax=ax, facecolor=non_valid_area_color, edgecolor='black', linewidth=sample_area_lw)
-        # ADD DISTRIUBTION PLOT
+        # ADD DISTRIBUTION PLOT
         c = grid.search.source.pts[colname]
-        vmin=plot_kwargs['vmin'] if 'vmin' in plot_kwargs else c.min()
-        vmax=plot_kwargs['vmax'] if 'vmax' in plot_kwargs else c.max(),
-        # norm = plot_kwargs['norm'] if 'norm' in plot_kwargs else _plt_LogNorm(vmin=c.min(),vmax=c.max()) if (c.min() > 0) else _plt_LogNorm()
-        norm = plot_kwargs['norm'] if 'norm' in plot_kwargs else _plt_LogNorm(vmin=c.min(),vmax=c.max()) if (c.min() > 0) else 'linear'
-        scttr = ax.scatter(x=xs, y=ys, c=c, norm=norm, cmap=cmap, rasterized=True, linewidths=0.3, **plot_kwargs)
+        scatter_kwargs = {k: v for k, v in plot_kwargs.items() if k not in ('vmin', 'vmax', 'norm')}
+
+        # Detect discrete integer columns (e.g. cluster IDs): ≤20 unique integer values
+        _unique_vals = c.dropna().unique()
+        _is_discrete = (
+            len(_unique_vals) <= 20 and
+            all(float(v) == int(v) for v in _unique_vals if v == v)
+        )
+
+        if _is_discrete:
+            _sorted = sorted(int(v) for v in _unique_vals)
+            _n = len(_sorted)
+            _qual_cmap = _plt_get_cmap('tab10' if _n <= 10 else 'tab20')
+            _disc_cmap = _plt_ListedColormap([_qual_cmap(i / max(_n - 1, 1)) for i in range(_n)])
+            _bounds = [v - 0.5 for v in _sorted] + [_sorted[-1] + 0.5]
+            _disc_norm = _plt_BoundaryNorm(_bounds, _disc_cmap.N)
+            scttr = ax.scatter(x=xs, y=ys, c=c, norm=_disc_norm, cmap=_disc_cmap, rasterized=True, linewidths=0.3, **scatter_kwargs)
+            cbar = fig.colorbar(scttr, ax=ax, fraction=0.046, pad=0.04)
+            cbar.set_ticks(_sorted)
+            cbar.set_ticklabels([str(v) for v in _sorted])
+        else:
+            vmin = plot_kwargs.get('vmin', c.min())
+            vmax = plot_kwargs.get('vmax', c.max())
+            norm = plot_kwargs.get('norm', _plt_LogNorm(vmin=vmin, vmax=vmax) if vmin > 0 else _plt_Normalize(vmin=vmin, vmax=vmax))
+            scttr = ax.scatter(x=xs, y=ys, c=c, norm=norm, cmap=cmap, rasterized=True, linewidths=0.3, **scatter_kwargs)
+            fig.colorbar(scttr, ax=ax, fraction=0.046, pad=0.04)
         plot_polygon(poly=non_valid_area, ax=ax, facecolor="none", edgecolor='black', linewidth=sample_area_lw)
-        fig.colorbar(scttr, ax=ax, fraction=0.046, pad=0.04)
         set_map_frame(ax=ax,xmin=xmin,xmax=xmax,ymin=ymin,ymax=ymax)
 
     if not fig is None:
