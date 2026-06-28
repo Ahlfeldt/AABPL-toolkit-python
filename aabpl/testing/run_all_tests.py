@@ -480,9 +480,9 @@ for label, sa in [('Polygon', poly_a), ('MultiPolygon', multi)]:
         n_random_points=2000, random_seed=0,
         silent=True, _dev=DEV,
     )
-    xs = grid_sa._rndm_pts_x_snapshot
-    ys = grid_sa._rndm_pts_y_snapshot
-    check(xs is not None, f"{label}: _rndm_pts_x_snapshot is None")
+    nd = grid_sa.null_distribution
+    xs = nd['x'].values
+    ys = nd['y'].values
     n_outside = sum(
         not sa.covers(Point(x, y)) for x, y in zip(xs, ys)
     )

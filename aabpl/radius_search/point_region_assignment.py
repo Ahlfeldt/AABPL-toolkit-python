@@ -146,8 +146,8 @@ def get_pt_to_cell_centroid_triangle_offset(
     @time_func_perf
     def new_way2(n):
         for i in range(n):
-            pts['offset_x2'] = pts[x]%grid._search_spacing-grid._search_spacing/2
-            pts['offset_y2'] = pts[y]%grid._search_spacing-grid._search_spacing/2
+            pts['offset_x2'] = pts[x]%grid._search_internals.spacing-grid._search_internals.spacing/2
+            pts['offset_y2'] = pts[y]%grid._search_internals.spacing-grid._search_internals.spacing/2
     
     @time_func_perf
     def old_way2(n):
@@ -249,22 +249,22 @@ def create_cell_region(
     TODO explain
     """
 
-    disk_contains_cells = combined_disk_check_result[:grid.search.weak_order_tree.n_checks_if_cntd]
-    disk_overlaps_cells = combined_disk_check_result[grid.search.weak_order_tree.n_checks_if_cntd:]
+    disk_contains_cells = combined_disk_check_result[:grid._search_class.weak_order_tree.n_checks_if_cntd]
+    disk_overlaps_cells = combined_disk_check_result[grid._search_class.weak_order_tree.n_checks_if_cntd:]
 
     # get row, col for cells cntd
-    region_cntd_cells = grid.search.weak_order_tree.check_if_cntd_order[disk_contains_cells]
+    region_cntd_cells = grid._search_class.weak_order_tree.check_if_cntd_order[disk_contains_cells]
     # add cells that are always inside
     if len(region_cntd_cells) > 0:
-        region_cntd_cells = _np_concatenate([region_cntd_cells, grid.search.cells_cntd_in_all_trgl_disks])
+        region_cntd_cells = _np_concatenate([region_cntd_cells, grid._search_class.cells_cntd_in_all_trgl_disks])
     else: # handle case for no fully covered cells
-        region_cntd_cells = grid.search.cells_cntd_in_all_trgl_disks
+        region_cntd_cells = grid._search_class.cells_cntd_in_all_trgl_disks
     # get row, col for cells ovlpd
-    region_ovlpd_cells = grid.search.weak_order_tree.check_if_ovlpd_order[disk_overlaps_cells] if disk_overlaps_cells.any() else _np_ndarray(shape=(0,2))
+    region_ovlpd_cells = grid._search_class.weak_order_tree.check_if_ovlpd_order[disk_overlaps_cells] if disk_overlaps_cells.any() else _np_ndarray(shape=(0,2))
     
     # add cells that were not checked for overlap as they are always ovlpd
     additional_always_ovlpd_cells = [
-        cell for cell in grid.search.weak_order_tree.cells_ovlpd_by_all_trgl1_disks 
+        cell for cell in grid._search_class.weak_order_tree.cells_ovlpd_by_all_trgl1_disks 
         if not any((region_cntd_cells[:]==cell).all(1))
     ]
     if len(additional_always_ovlpd_cells) > 0:
@@ -322,11 +322,11 @@ def assign_points_to_cell_regions(
 
     pts['triangle_id'] = triangle_ids # TODO remove this
     # intialize 2D matrices to store results  
-    disks_by_cells_contains = _np_zeros((n_pts, grid.search.weak_order_tree.n_checks_if_cntd),dtype=bool)
-    disks_by_cells_overlaps = _np_zeros((n_pts, grid.search.weak_order_tree.n_checks_if_ovlpd),dtype=bool)
+    disks_by_cells_contains = _np_zeros((n_pts, grid._search_class.weak_order_tree.n_checks_if_cntd),dtype=bool)
+    disks_by_cells_overlaps = _np_zeros((n_pts, grid._search_class.weak_order_tree.n_checks_if_ovlpd),dtype=bool)
     
     # apply recursive checks on cells (defined in family_tree_flat) on whether disks around pts fully or partially contain them 
-    scaled_to_grid_cntrd_trngl_offset_xy = cntrd_trngl_offset_xy / grid._search_spacing
+    scaled_to_grid_cntrd_trngl_offset_xy = cntrd_trngl_offset_xy / grid._search_internals.spacing
     pts['scaled_cntrd_trngl_offset_x']=scaled_to_grid_cntrd_trngl_offset_xy[:,0]
     pts['scaled_cntrd_trngl_offset_y']=scaled_to_grid_cntrd_trngl_offset_xy[:,1]
     recursive_cell_region_inference(
@@ -335,8 +335,8 @@ def assign_points_to_cell_regions(
         reference_ids=_np_arange(n_pts),
         disks_by_cells_contains=disks_by_cells_contains,
         disks_by_cells_overlaps=disks_by_cells_overlaps,
-        family_tree_pos=grid.search.weak_order_tree.root,
-        grid_spacing=grid._search_spacing,
+        family_tree_pos=grid._search_class.weak_order_tree.root,
+        grid_spacing=grid._search_internals.spacing,
         r=r,
         include_boundary=include_boundary,
     )
@@ -349,13 +349,13 @@ def assign_points_to_cell_regions(
 
     # initialize, update in loop
     region_ids = _np_zeros(n_pts,dtype=int)-1
-    grid.search.region_id_to_cntd_cells = {}
-    grid.search.region_id_to_ovlpd_cells = {}
+    grid._search_class.region_id_to_cntd_cells = {}
+    grid._search_class.region_id_to_ovlpd_cells = {}
     region_id = 0 
     # region id shall consist of contain_region_id * mult + overlap_region_id
     # how to get number of overlap patterns? its bounded above by _np_unique(disks_by_cells_overlaps, axis=1)*8
     print("_np_unique(disks_by_cells_overlaps, axis=1)",len(_np_unique(disks_by_cells_overlaps, axis=0)), (_np_unique(disks_by_cells_overlaps, axis=0).shape))
-    grid.search.contain_region_mult =  10**(int(_math_log10(len(_np_unique(disks_by_cells_overlaps, axis=0))*8))+1)
+    grid._search_class.contain_region_mult =  10**(int(_math_log10(len(_np_unique(disks_by_cells_overlaps, axis=0))*8))+1)
 
     contain_region_ids = dict()
     overlap_region_ids = dict()
@@ -384,12 +384,12 @@ def assign_points_to_cell_regions(
 
             contain_region_id = contain_region_ids[tuple(cntd_regions_rotated_i)]
             overlap_region_id = overlap_region_ids[tuple(ovlpd_regions_rotated_i)]
-            region_id_i = contain_region_id * grid.search.contain_region_mult + overlap_region_id
+            region_id_i = contain_region_id * grid._search_class.contain_region_mult + overlap_region_id
 
-            if not region_id_i in grid.search.region_id_to_cntd_cells:
-                grid.search.region_id_to_cntd_cells[region_id_i] = cntd_regions_rotated_i
-            if not region_id_i in grid.search.region_id_to_ovlpd_cells:
-                grid.search.region_id_to_ovlpd_cells[region_id_i] = ovlpd_regions_rotated_i
+            if not region_id_i in grid._search_class.region_id_to_cntd_cells:
+                grid._search_class.region_id_to_cntd_cells[region_id_i] = cntd_regions_rotated_i
+            if not region_id_i in grid._search_class.region_id_to_ovlpd_cells:
+                grid._search_class.region_id_to_ovlpd_cells[region_id_i] = ovlpd_regions_rotated_i
             trgl_i_to_region_id[i] = region_id_i
 
         region_ids[filter_pts_in_region] = _np_array([
@@ -399,10 +399,10 @@ def assign_points_to_cell_regions(
         # print("triangle_id_to_new_cell_region",triangle_id_to_new_cell_region)
         # # save pattern and its rotated variations in dict
         # for (i, region_id_i) in triangle_id_to_new_cell_region.items():
-        #     if not region_id_i in grid.search.region_id_to_cntd_cells:
-        #         grid.search.region_id_to_cntd_cells[region_id_i] = arr_to_tpls(transform_cell_pattern(region_cntd_cells, i),int)
-        #     if not region_id_i in grid.search.region_id_to_ovlpd_cells:
-        #         grid.search.region_id_to_ovlpd_cells[region_id_i] = arr_to_tpls(transform_cell_pattern(region_ovlpd_cells, i),int)
+        #     if not region_id_i in grid._search_class.region_id_to_cntd_cells:
+        #         grid._search_class.region_id_to_cntd_cells[region_id_i] = arr_to_tpls(transform_cell_pattern(region_cntd_cells, i),int)
+        #     if not region_id_i in grid._search_class.region_id_to_ovlpd_cells:
+        #         grid._search_class.region_id_to_ovlpd_cells[region_id_i] = arr_to_tpls(transform_cell_pattern(region_ovlpd_cells, i),int)
         #     #
         # #
         # # save cell regions ids to vector entries for pts in current cell region
@@ -434,11 +434,11 @@ def assign_points_to_cell_regions(
     # TODO MAKE PRINTS SMALLER
     if not silent:
         print(
-            len(grid.search.cells_maybe_overlapping_a_disk),'cells are potentially within radius of a point within cell. For a point in cell region:',
-            round(_np_array([len(v) for v in grid.search.region_id_to_ovlpd_cells.values()]).mean(),1),
+            len(grid._search_class.cells_maybe_overlapping_a_disk),'cells are potentially within radius of a point within cell. For a point in cell region:',
+            round(_np_array([len(v) for v in grid._search_class.region_id_to_ovlpd_cells.values()]).mean(),1),
             ' are potentially within radius',
-            round(_np_array([len(v) for v in grid.search.region_id_to_cntd_cells.values()]).mean(),1),
-            ' are fully cntd additional to',len(grid.search.cells_cntd_in_all_disks),'that are cntd for any cell.'
+            round(_np_array([len(v) for v in grid._search_class.region_id_to_cntd_cells.values()]).mean(),1),
+            ' are fully cntd additional to',len(grid._search_class.cells_cntd_in_all_disks),'that are cntd for any cell.'
         )
         print(
             str(len(pts.index) - _np_logical_or(pts[col_name]==-1, pts[row_name]==-1).sum())+
@@ -496,15 +496,15 @@ def assign_points_to_mirco_regions(
     #     off_x = find_column_name('offset_x'+str(i), existing_columns=pts.columns)
     #     off_y = find_column_name('offset_y'+str(i), existing_columns=pts.columns)
     #     if i == 0:
-    #         pts[off_x] = (((pts[x]-grid.total_bounds.xmin)%grid._search_spacing)-grid._search_spacing/2) / grid._search_spacing
-    #         pts[off_y] = (((pts[y]-grid.total_bounds.ymin)%grid._search_spacing)-grid._search_spacing/2) / grid._search_spacing
+    #         pts[off_x] = (((pts[x]-grid._search_internals.bounds.xmin)%grid._search_internals.spacing)-grid._search_internals.spacing/2) / grid._search_internals.spacing
+    #         pts[off_y] = (((pts[y]-grid._search_internals.bounds.ymin)%grid._search_internals.spacing)-grid._search_internals.spacing/2) / grid._search_internals.spacing
     #     else:
-    #         pts[off_x] = (((pts[last_offset_x])%grid._search_spacing)-grid._search_spacing/2) / grid._search_spacing
-    #         pts[off_y] = (((pts[y]-grid.total_bounds.ymin)%grid._search_spacing)-grid._search_spacing/2) / grid._search_spacing
+    #         pts[off_x] = (((pts[last_offset_x])%grid._search_internals.spacing)-grid._search_internals.spacing/2) / grid._search_internals.spacing
+    #         pts[off_y] = (((pts[y]-grid._search_internals.bounds.ymin)%grid._search_internals.spacing)-grid._search_internals.spacing/2) / grid._search_internals.spacing
     #     last_offset_x,last_offset_y = off_x, off_y
-    pts[off_x] = (((pts[x]-grid.total_bounds.xmin)%grid._search_spacing)-grid._search_spacing/2) / grid._search_spacing
+    pts[off_x] = (((pts[x]-grid._search_internals.bounds.xmin)%grid._search_internals.spacing)-grid._search_internals.spacing/2) / grid._search_internals.spacing
     # lat/y offset
-    pts[off_y] = (((pts[y]-grid.total_bounds.ymin)%grid._search_spacing)-grid._search_spacing/2) / grid._search_spacing
+    pts[off_y] = (((pts[y]-grid._search_internals.bounds.ymin)%grid._search_internals.spacing)-grid._search_internals.spacing/2) / grid._search_internals.spacing
 
     # classify which of the 8 triangles each point falls in (needed for per-triangle nested cell lookup)
     pts['triangle_id'] = classify_point_triangle(x=pts[off_x], y=pts[off_y])
@@ -512,7 +512,7 @@ def assign_points_to_mirco_regions(
     _lookups = build_disk_region_lookups(
         grid=grid,
         grid_spacing=1,
-        r=r/grid._search_spacing,
+        r=r/grid._search_internals.spacing,
         include_boundary=include_boundary,
         nest_depth=nest_depth,
         plot_offset_checks=plot_offset_checks,
@@ -524,12 +524,12 @@ def assign_points_to_mirco_regions(
     offset_region_comb_nr_to_check = _lookups['offset_region_comb_nr_to_check']
     offset_all_x_vals              = _lookups['offset_all_x_vals']
     offset_all_y_vals              = _lookups['offset_all_y_vals']
-    grid.id_to_offset_regions      = _lookups['id_to_offset_regions']
-    grid.search.__dict__.update({k: v for k, v in _lookups.items()
-                                  if k not in ('raster_cell_to_region_comb_nr',
-                                               'offset_region_comb_nr_to_check',
-                                               'offset_all_x_vals', 'offset_all_y_vals',
-                                               'id_to_offset_regions')})
+    grid._search_internals.id_to_offset_regions = _lookups['id_to_offset_regions']
+    grid._search_class.__dict__.update({k: v for k, v in _lookups.items()
+                                         if k not in ('raster_cell_to_region_comb_nr',
+                                                      'offset_region_comb_nr_to_check',
+                                                      'offset_all_x_vals', 'offset_all_y_vals',
+                                                      'id_to_offset_regions')})
     
     
     
@@ -593,8 +593,8 @@ def assign_points_to_mirco_regions(
 
 
     if 'testing' != 'testing':
-        print('Mean cntd:', sum([len(v) for v in grid.search.region_id_to_cntd_cells.values()])/len(grid.search.region_id_to_cntd_cells))
-        print('Mean ovlpd:', sum([len(v) for v in grid.search.region_id_to_ovlpd_cells.values()])/len(grid.search.region_id_to_ovlpd_cells))
+        print('Mean cntd:', sum([len(v) for v in grid._search_class.region_id_to_cntd_cells.values()])/len(grid._search_class.region_id_to_cntd_cells))
+        print('Mean ovlpd:', sum([len(v) for v in grid._search_class.region_id_to_ovlpd_cells.values()])/len(grid._search_class.region_id_to_ovlpd_cells))
     else:
         # pts['triangle_id'] = classify_point_triangle(x=pts[off_x], y=pts[off_y]) # TODO remove this
         pts.drop(columns=[reg_comb_col], inplace=True)#

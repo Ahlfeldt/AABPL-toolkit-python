@@ -12,9 +12,14 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable as _make_axes_locatable
 from matplotlib.pyplot import close as _plt_close
 from matplotlib.colors import LogNorm as _plt_LogNorm, Normalize as _plt_Normalize, LinearSegmentedColormap as _plt_LinearSegmentedColormap, ListedColormap as _plt_ListedColormap
 from matplotlib.pyplot import (subplots as _plt_subplots, colorbar as _plt_colorbar, get_cmap as _plt_get_cmap)
+from matplotlib.ticker import FuncFormatter as _FuncFormatter
 from matplotlib.patches import Patch as _plt_Patch
 from aabpl.illustrations.plot_utils import add_color_bar_ax, set_map_frame, truncate_colormap, plot_polygon
 from shapely.geometry import Polygon as _shapely_Polygon
+
+# Colour used for zero-value points and the colorbar's 'under' extension.
+# Change here to update it globally across all distribution plots.
+_ZERO_GREY = '#e9e9e9'
 
 def create_distribution_plot(
         pts:_pd_DataFrame,
@@ -30,6 +35,7 @@ def create_distribution_plot(
         plot_kwargs:dict={},
         show:bool=True,
         display_dpi:int=100,
+        save_kwargs:dict={},
 ):
     """
     Four-panel plot comparing the random-point null distribution to the
@@ -57,19 +63,90 @@ def create_distribution_plot(
         Save path. Empty string skips saving (default ``''``).
     plot_kwargs : dict
         Supported keys:
-        - ``figsize`` : tuple (default ``(10, 10)``)
-        - ``s`` : float — scatter marker size (default ``0.8``)
-        - ``color`` : str — marker colour (default ``'#eaa'``)
-        - ``hlines`` : dict — kwargs for ``ax.hlines`` threshold line
-        - ``vlines`` : dict — kwargs for ``ax.vlines`` percentile line
-        - ``fig``, ``axs`` — existing Figure/Axes to draw into
-        - ``sample_area_linewidth`` : float — border linewidth of the valid-area polygon (default ``0.2``)
-        - ``color_scale`` : str — ``'log'``, ``'linear'``, or ``'auto'`` (log when vmin>0, default ``'auto'``)
+
+        Layout / figure
+        ~~~~~~~~~~~~~~~
+        figsize : tuple
+            Figure size (default ``(10, 10)``).
+        maps_side_by_side : bool or None
+            ``True`` = maps side by side (horizontal), ``False`` = stacked
+            vertically.  ``None`` (default) = auto-detect from data aspect
+            ratio, with a small bias towards horizontal.
+        hspace : float
+            Vertical spacing between distribution axis and map panels
+            (default ``0.12``).
+        wspace : float
+            Horizontal spacing between side-by-side maps (default ``0.08``).
+        colorbar_width : float
+            Fractional width of the colorbar column when maps are side by
+            side (default ``0.04``).
+        dist_map_ratio : float
+            Height of the distribution panel relative to the map panel
+            (default ``0.3``). Decrease to give more vertical space to the maps.
+
+        Scatter appearance
+        ~~~~~~~~~~~~~~~~~~
+        s : float
+            Marker size for scatter points (default auto-scaled to figsize).
+        color : str
+            Colour for random-point distribution scatter (default ``'#eaa'``).
+        pts_color : str
+            Colour for dataset-point distribution scatter (default
+            ``'#66aabb'``).
+        zero_color : str
+            Colour for zero-value points and the colorbar under-extension
+            (default ``'#aaaaaa'``).
+        cmap : str or Colormap
+            Colormap for the radius-sum maps (default ``'Reds'``).
+            Accepts any matplotlib colormap name or object.
+        cmap_minval : float
+            Lower truncation of the colormap, 0–1 (default ``0.2``).
+        color_scale : str
+            ``'log'``, ``'linear'``, or ``'auto'`` — log when vmin > 0
+            (default ``'auto'``).
+        color_cluster : str
+            Colour for points above the cluster threshold (default
+            ``'#2a07ee'``).
+
+        Sample-area overlay
+        ~~~~~~~~~~~~~~~~~~~
+        non_valid_area_color : str
+            Fill colour for the non-valid (excluded) area (default
+            ``'#bedbe6'``).
+        sample_area_color : str
+            Fill colour for the valid sample area (default ``'#ffffff'``).
+        sample_area_linewidth : float
+            Border linewidth of the valid-area polygon (default ``0.2``).
+
+        Threshold lines
+        ~~~~~~~~~~~~~~~
+        hlines : dict
+            kwargs for ``ax.hlines`` threshold line (default
+            ``{'color': 'red', 'linewidth': 1}``).
+        vlines : dict
+            kwargs for ``ax.vlines`` percentile line (default
+            ``{'color': 'red', 'linewidth': 1}``).
+
+        Titles
+        ~~~~~~
+        title : str or None
+            Override the auto suptitle. Use ``{auto}`` to embed the generated
+            title: ``"My prefix: {auto}"``.
+        suptitle : dict
+            Extra kwargs forwarded to ``fig.suptitle()``.
+        ax_titles : dict
+            Override individual panel titles, keyed by
+            ``'rand_dist'``, ``'pts_dist'``, ``'rand_map'``, ``'pts_map'``.
+
+        Existing figure
+        ~~~~~~~~~~~~~~~
+        fig, axs
+            Existing Figure / Axes to draw into.
+
     show : bool
         Display the figure (default ``True``).
     display_dpi : int
         Resolution for inline/screen display (default ``100``).
-        Use ``save_kwargs={'dpi': 300}`` to control saved-file resolution.
 
     Returns
     -------
@@ -94,84 +171,144 @@ def create_distribution_plot(
     _rnd_y = rndm_pts[y_coord_name]
     disk_sums_for_random_points = rndm_pts[radius_sum_columns]
     (n_random_points, ncols) = disk_sums_for_random_points.shape
-    # specify default plot kwargs and add defaults
+
+    # ── Defaults ──────────────────────────────────────────────────────────────
     default_kwargs = {
-        's':0.8,
-        'color':'#eaa',
+        's': 0.8,
+        'color': '#eaa',
+        'pts_color': '#66aabb',
+        'zero_color': _ZERO_GREY,
+        'cmap': 'Reds',
+        'cmap_minval': 0.2,
+        'color_scale': 'auto',
+        'color_cluster': '#2a07ee',
 
-        'figsize': (10,10),
-        'fig':None,
-        'axs':None,
+        'figsize': (10, 10),
+        'maps_side_by_side': None,   # None = auto
+        'hspace': 0.05,
+        'wspace': 0.08,
+        'colorbar_width': 0.04,
+        'dist_map_ratio': 0.3,
 
-        'title': None,           # override the auto suptitle; use {auto} to embed it: "My prefix: {auto}"
-        'suptitle': {},          # extra kwargs forwarded to fig.suptitle(), e.g. fontsize, fontweight, y
-        'ax_titles': {},         # dict keyed by panel name to override individual panel titles
-                                 # keys: 'rand_dist', 'pts_dist', 'rand_map', 'pts_map'
-        'hlines':{'color':'red', 'linewidth':1},
-        'vlines':{'color':'red', 'linewidth':1},
+        'non_valid_area_color': '#bedbe6',
+        'sample_area_color': '#ffffff',
         'sample_area_linewidth': 0.2,
-        'color_scale': 'auto',   # 'log', 'linear', or 'auto' (log when vmin>0, else linear)
+
+        'fig': None,
+        'axs': None,
+        'title': None,
+        'suptitle': {},
+        'ax_titles': {},
+        'hlines': {'color': 'red', 'linewidth': 1},
+        'vlines': {'color': 'red', 'linewidth': 1},
     }
-    # Callers (grid.plot.rand_dist) forward **plot_kwargs; extract control args
-    # that must not leak into ax.scatter().
+
     show = plot_kwargs.pop('show', show)
     display_dpi = plot_kwargs.pop('display_dpi', display_dpi)
     plot_kwargs.pop('filename', None)
+
+    # Merge dict-typed defaults with caller overrides before flattening.
     kwargs = {}
+    dict_keys = {k for k, v in default_kwargs.items() if isinstance(v, dict)}
     for k in list(plot_kwargs.keys()):
-        if k in [k for k,v in default_kwargs.items() if type(v)==dict]:
+        if k in dict_keys:
             kwargs[k] = {**default_kwargs.pop(k), **plot_kwargs.pop(k)}
     kwargs.update(default_kwargs)
     kwargs.update(plot_kwargs)
-    figsize = kwargs.pop('figsize')
-    fig = kwargs.pop('fig')
-    axs = kwargs.pop('axs')
-    title_override = kwargs.pop('title')
-    suptitle_kwargs = kwargs.pop('suptitle')
-    ax_titles = kwargs.pop('ax_titles')
-    sample_area_lw = kwargs.pop('sample_area_linewidth')
-    color_scale = kwargs.pop('color_scale', 'auto')
-    for k in ['fig', 'axs', 'figsize', 'title', 'suptitle', 'ax_titles', 'sample_area_linewidth', 'color_scale']:
-        plot_kwargs.pop(k,None)
+
+    figsize              = kwargs.pop('figsize')
+    maps_side_by_side_kw = kwargs.pop('maps_side_by_side')
+    hspace               = kwargs.pop('hspace')
+    wspace               = kwargs.pop('wspace')
+    colorbar_width       = kwargs.pop('colorbar_width')
+    dist_map_ratio       = kwargs.pop('dist_map_ratio')
+    fig                  = kwargs.pop('fig')
+    axs                  = kwargs.pop('axs')
+    title_override       = kwargs.pop('title')
+    suptitle_kwargs      = kwargs.pop('suptitle')
+    ax_titles            = kwargs.pop('ax_titles')
+    sample_area_lw       = kwargs.pop('sample_area_linewidth')
+    color_scale          = kwargs.pop('color_scale')
+    zero_color           = kwargs.pop('zero_color')
+    non_valid_area_color = kwargs.pop('non_valid_area_color')
+    sample_area_color    = kwargs.pop('sample_area_color')
+    color_cluster        = kwargs.pop('color_cluster')
+    cmap_name            = kwargs.pop('cmap')
+    cmap_minval          = kwargs.pop('cmap_minval')
+    pts_color            = kwargs.pop('pts_color')
+
+    # Remove any remaining control keys that must not leak into ax.scatter().
+    for k in ['fig', 'axs', 'figsize', 'title', 'suptitle', 'ax_titles',
+              'sample_area_linewidth', 'color_scale', 'maps_side_by_side',
+              'hspace', 'wspace', 'colorbar_width']:
+        plot_kwargs.pop(k, None)
 
     if fig is None or axs is None:
-        fig = plt.figure(figsize=figsize, dpi=display_dpi, constrained_layout=True)
-        outer = gridspec.GridSpec(ncols, 1, figure=fig, hspace=0.08)
+        fig = plt.figure(figsize=figsize, dpi=display_dpi)
+        outer = gridspec.GridSpec(ncols, 1, figure=fig, hspace=0.08,
+                                  top=0.93, bottom=0.06, left=0.08, right=0.97)
 
-    _auto_title = "Aggregate for indicator" + ("" if ncols==1 else "s") + " within " + str(r) + " meters"
-    _suptitle = title_override.replace('{auto}', _auto_title) if title_override else _auto_title
+    _auto_title = (
+        "Aggregate for indicator" + ("" if ncols == 1 else "s") +
+        " within " + str(r) + " meters"
+    )
+    _suptitle = (
+        title_override.replace('{auto}', _auto_title) if title_override
+        else _auto_title
+    )
     fig.suptitle(_suptitle, **suptitle_kwargs)
+
     non_valid_area = _shapely_Polygon([
         (grid.sample_grid_bounds[0], grid.sample_grid_bounds[1]),
         (grid.sample_grid_bounds[2], grid.sample_grid_bounds[1]),
         (grid.sample_grid_bounds[2], grid.sample_grid_bounds[3]),
-        (grid.sample_grid_bounds[0], grid.sample_grid_bounds[3])
-        ]).difference(grid.sample_area)
+        (grid.sample_grid_bounds[0], grid.sample_grid_bounds[3]),
+    ]).difference(grid.sample_area)
 
     pct_xmin, pct_xmax = 0, 100
     xs_random_pts = _np_linspace(pct_xmin, pct_xmax, n_random_points)
-    xs_pts = _np_linspace(pct_xmin, pct_xmax, len(pts))
-    random_vals = disk_sums_for_random_points.values
-    pts_vals = pts[radius_sum_columns].values
+    xs_pts        = _np_linspace(pct_xmin, pct_xmax, len(pts))
+    random_vals   = disk_sums_for_random_points.values
+    pts_vals      = pts[radius_sum_columns].values
 
     for (i, colname, cluster_threshold_value, k) in zip(
-        range(ncols), radius_sum_columns, cluster_threshold_values, k_th_percentile):
-        # Layout: top row = merged distribution axis; bottom row = two maps + shared colorbar
-        # Map orientation: side-by-side when portrait (H > 1.2*W), stacked when landscape/flat
-        map_w = max((_pts_x.max() if hasattr(_pts_x, 'max') else max(_pts_x)) - (_pts_x.min() if hasattr(_pts_x, 'min') else min(_pts_x)), 1e-9)
-        map_h = max((_pts_y.max() if hasattr(_pts_y, 'max') else max(_pts_y)) - (_pts_y.min() if hasattr(_pts_y, 'min') else min(_pts_y)), 1e-9)
-        maps_side_by_side = map_h > 1.05 * map_w
-        panel = gridspec.GridSpecFromSubplotSpec(2, 1, subplot_spec=outer[i], hspace=0.12, height_ratios=[1, 4])
-        if maps_side_by_side:
-            bottom_gs = gridspec.GridSpecFromSubplotSpec(1, 2, subplot_spec=panel[1], wspace=0.08)
-        else:
-            bottom_gs = gridspec.GridSpecFromSubplotSpec(2, 1, subplot_spec=panel[1], hspace=0.08)
+            range(ncols), radius_sum_columns, cluster_threshold_values, k_th_percentile):
 
-        # CUMULATIVE DISTRIBUTIONS — both series on a single merged axis
-        ys_rnd = _np_sort(random_vals[:,i])
-        ys_pts = _np_sort(pts_vals[:,i])
-        ymin = min(ys_rnd.min(), ys_pts.min())
-        ymax = max(ys_rnd.max(), ys_pts.max())
+        # ── Determine map layout ──────────────────────────────────────────────
+        map_w = max(
+            (_pts_x.max() if hasattr(_pts_x, 'max') else max(_pts_x)) -
+            (_pts_x.min() if hasattr(_pts_x, 'min') else min(_pts_x)), 1e-9
+        )
+        map_h = max(
+            (_pts_y.max() if hasattr(_pts_y, 'max') else max(_pts_y)) -
+            (_pts_y.min() if hasattr(_pts_y, 'min') else min(_pts_y)), 1e-9
+        )
+        if maps_side_by_side_kw is None:
+            # Prefer horizontal (side by side) unless data is notably portrait.
+            maps_side_by_side = map_h < map_w * 1.2
+        else:
+            maps_side_by_side = maps_side_by_side_kw
+
+        # ── GridSpec layout ───────────────────────────────────────────────────
+        panel = gridspec.GridSpecFromSubplotSpec(
+            2, 1, subplot_spec=outer[i], hspace=hspace,
+            height_ratios=[dist_map_ratio, 1.0],
+        )
+        if maps_side_by_side:
+            bottom_gs = gridspec.GridSpecFromSubplotSpec(
+                1, 2, subplot_spec=panel[1], wspace=wspace,
+            )
+        else:
+            # Two rows: rand_map (top) | pts_map (bottom); colorbar spans both.
+            bottom_gs = gridspec.GridSpecFromSubplotSpec(
+                2, 1, subplot_spec=panel[1], hspace=hspace,
+            )
+
+        # ── Cumulative distribution panel ─────────────────────────────────────
+        ys_rnd = _np_sort(random_vals[:, i])
+        ys_pts = _np_sort(pts_vals[:, i])
+        ymin   = min(ys_rnd.min(), ys_pts.min())
+        ymax   = max(ys_rnd.max(), ys_pts.max())
 
         idx = _np_searchsorted(ys_rnd, cluster_threshold_value)
         next_smaller_val = ys_rnd[max(0, idx - 1)]
@@ -179,7 +316,8 @@ def create_distribution_plot(
         sufficient_digits = next((
             d for d in range(100) if (
                 (
-                    (next_smaller_val == next_larger_val or cluster_threshold_value == next_smaller_val) and
+                    (next_smaller_val == next_larger_val or
+                     cluster_threshold_value == next_smaller_val) and
                     round(next_smaller_val, d) == next_smaller_val
                 ) or (
                     round(next_larger_val, d) != round(cluster_threshold_value, d) and
@@ -189,82 +327,96 @@ def create_distribution_plot(
         ), 100)
 
         ax_dist = fig.add_subplot(panel[0])
-        # ax_title = ax_titles.get('rand_dist', "{{col}}: {{k}}th-percentile threshold = {thresh:.6g}")
         ax_title = ax_titles.get('rand_dist', "{col}: {k}th-percentile threshold = {thresh}")
-        ax_title = ax_title.format(col=colname, k=k, thresh=round(cluster_threshold_value, sufficient_digits), r=r, n=len(rndm_pts))
+        ax_title = ax_title.format(
+            col=colname, k=k,
+            thresh=round(cluster_threshold_value, sufficient_digits),
+            r=r, n=len(rndm_pts),
+        )
         ax_dist.set_title(ax_title, fontdict={'fontsize': 6})
         ax_dist.set_ylabel("Radius sum", fontsize=7)
         ax_dist.set_xlabel("Percentile rank", fontsize=7)
 
-        # ticks — x shared, y spanning both series
         xtick_steps, ytick_steps = 5, 5
         xticks = _np_array(sorted(
-            [x for x in _np_linspace(pct_xmin, pct_xmax, xtick_steps) if abs(x - k) > (pct_xmax - pct_xmin) / (xtick_steps * 2)] + [k]
+            [x for x in _np_linspace(pct_xmin, pct_xmax, xtick_steps)
+             if abs(x - k) > (pct_xmax - pct_xmin) / (xtick_steps * 2)] + [k]
         ))
         ax_dist.set_xticks(xticks, labels=xticks)
         yticks = _np_array(sorted(
-            [y for y in _np_linspace(ymin, ymax, ytick_steps) if abs(cluster_threshold_value - y) > (ymax - ymin) / (ytick_steps * 10)] +
+            [y for y in _np_linspace(ymin, ymax, ytick_steps)
+             if abs(cluster_threshold_value - y) > (ymax - ymin) / (ytick_steps * 10)] +
             [cluster_threshold_value]
         ))
         ax_dist.set_yticks(yticks, labels=[round(t, sufficient_digits) for t in yticks])
 
-        # threshold lines
         ax_dist.hlines(y=cluster_threshold_value, xmin=pct_xmin, xmax=pct_xmax, **kwargs['hlines'])
         ax_dist.vlines(x=k, ymin=ymin, ymax=ymax, **kwargs['vlines'])
 
-        # both distribution series
         _s = plot_kwargs.get('s', 0.8)
-        rnd_color = plot_kwargs.get('color', '#eeaaaa')
-        ax_dist.scatter(x=xs_random_pts, y=ys_rnd, s=_s, marker='.', label=f"Random pts (n={len(rndm_pts):,})", **{k: v for k, v in plot_kwargs.items() if k != 's'})
-        _pts_color = '#66aabb'
-        ax_dist.scatter(x=xs_pts, y=ys_pts, color=_pts_color, s=_s, marker='.', label=f"Dataset pts (n={len(pts):,})")
+        ax_dist.scatter(
+            x=xs_random_pts, y=ys_rnd, s=_s, marker='.',
+            label=f"Random pts (n={len(rndm_pts):,})",
+            **{k_: v for k_, v in plot_kwargs.items() if k_ != 's'},
+        )
+        ax_dist.scatter(
+            x=xs_pts, y=ys_pts, color=pts_color, s=_s, marker='.',
+            label=f"Dataset pts (n={len(pts):,})",
+        )
         ax_dist.set_xlim([pct_xmin, pct_xmax])
         if ymin != ymax:
             ax_dist.set_ylim([ymin, ymax])
         ax_dist.legend(fontsize=6, markerscale=2)
 
-        # MAP COLORMAP SETUP
+        # ── Colormap / norm setup ─────────────────────────────────────────────
         map_xmin = min(_pts_x.min(), _rnd_x.min())
         map_xmax = max(_pts_x.max(), _rnd_x.max())
         map_ymin = min(_pts_y.min(), _rnd_y.min())
         map_ymax = max(_pts_y.max(), _rnd_y.max())
 
-        _pts_nonzero = pts_vals[:,i][pts_vals[:,i] != 0]
-        _rnd_nonzero = random_vals[:,i][random_vals[:,i] != 0]
+        _pts_nonzero = pts_vals[:, i][pts_vals[:, i] != 0]
+        _rnd_nonzero = random_vals[:, i][random_vals[:, i] != 0]
         _has_range = len(_pts_nonzero) > 0 and len(_rnd_nonzero) > 0
         if _has_range:
             vmin = min(_pts_nonzero.min(), _rnd_nonzero.min())
-            vmax = max(pts_vals[:,i].max(), random_vals[:,i].max())
+            vmax = max(pts_vals[:, i].max(), random_vals[:, i].max())
             _has_range = vmin < vmax and vmin > 0
         if not _has_range:
             vmin = 1.0
             vmax = max(float(cluster_threshold_value), 2.0)
 
-        non_valid_area_color = "#bedbe6"
-        sample_area_color = "#ffffff"
-        color_cluster = "#2a07ee"
-        cmap_scatter = _plt_get_cmap('Reds')
-        minval = 0.2
-        color_under = cmap_scatter(minval / 2)
-        cmap_scatter = truncate_colormap(cmap=cmap_scatter, minval=minval, maxval=1.0, n=100)
-        cmap_scatter.set_under(color_under)
-        cmap_scatter.set_bad(color_under)
+        _base_cmap = cmap_name if hasattr(cmap_name, 'N') else _plt_get_cmap(cmap_name)
+        cmap_scatter = truncate_colormap(
+            cmap=_base_cmap, minval=cmap_minval, maxval=1.0, n=100
+        )
+        # Zero colour: sample the base cmap at half cmap_minval so it sits
+        # visually just below the data range — same hue family, clearly lighter.
+        # Falls back to the explicit zero_color parameter if the user set one.
+        _zero_col = zero_color if zero_color != _ZERO_GREY else _base_cmap(cmap_minval / 2)
+        cmap_scatter.set_under(_zero_col)
+        cmap_scatter.set_bad(_zero_col)
+        # Values above the cluster threshold → cluster colour.
         cmap_scatter.set_over(color_cluster)
-        _norm_vmax = float(cluster_threshold_value) if cluster_threshold_value > vmin else vmax
-        _use_log = (color_scale == 'log') or (color_scale == 'auto' and vmin > 0)
-        norm = _plt_LogNorm(vmin=vmin, vmax=_norm_vmax, clip=False) if _use_log else _plt_Normalize(vmin=vmin, vmax=_norm_vmax, clip=False)
-        s = 0.2 * figsize[0] / 10
 
-        # build grid overlay once (reused by both map axes)
+        _norm_vmax = float(cluster_threshold_value) if cluster_threshold_value > vmin else vmax
+        _use_log   = (color_scale == 'log') or (color_scale == 'auto' and vmin > 0)
+        norm = (
+            _plt_LogNorm(vmin=vmin, vmax=_norm_vmax, clip=False) if _use_log
+            else _plt_Normalize(vmin=vmin, vmax=_norm_vmax, clip=False)
+        )
+        s_map = 0.2 * figsize[0] / 10
+
+        # ── Sample-area grid overlay (shared by both map panels) ──────────────
         X = None
         extent = None
         cmap_binary = None
         if grid is not None:
-            cells_rndm_sample = grid.cells_rndm_sample
-            col_min = int(round((grid.sample_grid_bounds[0] - grid.total_bounds.xmin) / grid._search_spacing, 0))
-            row_min = int(round((grid.sample_grid_bounds[1] - grid.total_bounds.ymin) / grid._search_spacing, 0))
-            col_max = int(round((grid.sample_grid_bounds[2] - grid.total_bounds.xmin) / grid._search_spacing - 1, 0))
-            row_max = int(round((grid.sample_grid_bounds[3] - grid.total_bounds.ymin) / grid._search_spacing - 1, 0))
+            cells_rndm_sample = grid._search_internals.cells_rndm_sample
+            _si = grid._search_internals
+            col_min = int(round((grid.sample_grid_bounds[0] - _si.bounds.xmin) / _si.spacing, 0))
+            row_min = int(round((grid.sample_grid_bounds[1] - _si.bounds.ymin) / _si.spacing, 0))
+            col_max = int(round((grid.sample_grid_bounds[2] - _si.bounds.xmin) / _si.spacing - 1, 0))
+            row_max = int(round((grid.sample_grid_bounds[3] - _si.bounds.ymin) / _si.spacing - 1, 0))
             n_rows_x = row_max - row_min + 1
             n_cols_x = col_max - col_min + 1
             if type(cells_rndm_sample) == bool:
@@ -280,46 +432,101 @@ def create_distribution_plot(
                     if 0 <= ri < n_rows_x and 0 <= ci < n_cols_x:
                         X[ri, ci] = False
             cmap_binary = _plt_ListedColormap([sample_area_color, non_valid_area_color])
-            extent = [grid.sample_grid_bounds[0], grid.sample_grid_bounds[2],
-                      grid.sample_grid_bounds[1], grid.sample_grid_bounds[3]]
+            extent = [
+                grid.sample_grid_bounds[0], grid.sample_grid_bounds[2],
+                grid.sample_grid_bounds[1], grid.sample_grid_bounds[3],
+            ]
 
-        # MAP — random points (first map panel)
+        # ── Map: random points ────────────────────────────────────────────────
         ax_rnd = fig.add_subplot(bottom_gs[0])
         ax_rnd.set_facecolor(sample_area_color)
-        ax_rnd.set_title(ax_titles.get('rand_map', "Random points (n={n})").format(col=colname, k=k, thresh=round(cluster_threshold_value, sufficient_digits), r=r, n=len(rndm_pts)), fontdict={'fontsize': 6})
+        ax_rnd.set_title(
+            ax_titles.get('rand_map', "Random points (n={n})").format(
+                col=colname, k=k,
+                thresh=round(cluster_threshold_value, sufficient_digits),
+                r=r, n=len(rndm_pts),
+            ),
+            fontdict={'fontsize': 6},
+        )
         if X is not None:
             ax_rnd.imshow(X=X, interpolation='none', cmap=cmap_binary, extent=extent)
             non_valid_patch = _plt_Patch(facecolor=non_valid_area_color, label='Non-valid area', edgecolor='black')
-            sample_patch = _plt_Patch(facecolor=sample_area_color, label='Sample area', edgecolor='black')
+            sample_patch    = _plt_Patch(facecolor=sample_area_color,    label='Sample area',    edgecolor='black')
             ax_rnd.legend(handles=[non_valid_patch, sample_patch], loc='best', fontsize=5)
-        plot_polygon(ax=ax_rnd, poly=non_valid_area, facecolor=non_valid_area_color, edgecolor='black', linewidth=sample_area_lw)
-        sc = ax_rnd.scatter(x=_rnd_x, y=_rnd_y, c=random_vals[:,i], s=s, marker='.', norm=norm, cmap=cmap_scatter, linewidths=0.3)
-        plot_polygon(ax=ax_rnd, poly=grid.sample_area, facecolor="none", edgecolor='black', linewidth=sample_area_lw)
+        plot_polygon(ax=ax_rnd, poly=non_valid_area, facecolor=non_valid_area_color,
+                     edgecolor='black', linewidth=sample_area_lw)
+        sc = ax_rnd.scatter(
+            x=_rnd_x, y=_rnd_y, c=random_vals[:, i],
+            s=s_map, marker='.', norm=norm, cmap=cmap_scatter, linewidths=0.3,
+        )
+        plot_polygon(ax=ax_rnd, poly=grid.sample_area, facecolor="none",
+                     edgecolor='black', linewidth=sample_area_lw)
         set_map_frame(ax=ax_rnd, xmin=map_xmin, xmax=map_xmax, ymin=map_ymin, ymax=map_ymax, r=r)
 
-        # MAP — dataset points (second map panel)
+        # ── Map: dataset points ───────────────────────────────────────────────
         ax_pts = fig.add_subplot(bottom_gs[1])
         ax_pts.set_facecolor(sample_area_color)
-        ax_pts.set_title(ax_titles.get('pts_map', "Dataset points (n={n})").format(col=colname, k=k, thresh=round(cluster_threshold_value, sufficient_digits), r=r, n=len(pts)), fontdict={'fontsize': 6})
+        ax_pts.set_title(
+            ax_titles.get('pts_map', "Dataset points (n={n})").format(
+                col=colname, k=k,
+                thresh=round(cluster_threshold_value, sufficient_digits),
+                r=r, n=len(pts),
+            ),
+            fontdict={'fontsize': 6},
+        )
         if X is not None:
             ax_pts.imshow(X=X, interpolation='none', cmap=cmap_binary, extent=extent)
-        plot_polygon(ax=ax_pts, poly=non_valid_area, facecolor=non_valid_area_color, edgecolor='black', linewidth=sample_area_lw)
-        sc_pts = ax_pts.scatter(x=_pts_x, y=_pts_y, c=pts_vals[:,i], s=s, marker='.', norm=norm, cmap=cmap_scatter, linewidths=0.3)
+        plot_polygon(ax=ax_pts, poly=non_valid_area, facecolor=non_valid_area_color,
+                     edgecolor='black', linewidth=sample_area_lw)
+        sc_pts = ax_pts.scatter(
+            x=_pts_x, y=_pts_y, c=pts_vals[:, i],
+            s=s_map, marker='.', norm=norm, cmap=cmap_scatter, linewidths=0.3,
+        )
         set_map_frame(ax=ax_pts, xmin=map_xmin, xmax=map_xmax, ymin=map_ymin, ymax=map_ymax, r=r)
 
-        # shared colorbar spanning the combined height of both map panels
-        # make_axes_locatable respects set_aspect so the bar height matches the rendered maps
+        # ── Coordinate tick formatter ─────────────────────────────────────────
+        # Pick scale per axis from actual data magnitude, not a fixed threshold.
+        def _make_coord_fmt(vmin, vmax):
+            span = abs(vmax - vmin) or 1.0
+            _metric = getattr(grid, '_proj_is_metric', False) if grid is not None else False
+            if _metric and span >= 1000:
+                div, suffix = 1e3, ' km'
+            elif _metric:
+                div, suffix = 1.0, ' m'
+            else:
+                div, suffix = 1.0, ''
+            return _FuncFormatter(lambda v, p, d=div, s=suffix: f'{round(v/d):,}{s}')
+        _xfmt = _make_coord_fmt(map_xmin, map_xmax)
+        _yfmt = _make_coord_fmt(map_ymin, map_ymax)
+        for _ax in [ax_rnd, ax_pts]:
+            _ax.xaxis.set_major_formatter(_xfmt)
+            _ax.yaxis.set_major_formatter(_yfmt)
+
+        # ── Axis label cleanup ────────────────────────────────────────────────
         if maps_side_by_side:
-            _div = _make_axes_locatable(ax_pts)
-            _cax = _div.append_axes("right", size="3%", pad=0.05)
-            fig.colorbar(sc_pts, cax=_cax, extend='max')
+            # Both maps at same height — suppress redundant y-axis on right map.
+            ax_pts.tick_params(labelleft=False)
+            ax_pts.set_ylabel('')
         else:
-            fig.colorbar(sc_pts, ax=[ax_rnd, ax_pts], extend='max', fraction=0.03, pad=0.02)
+            # Top map (rand) shares x-extent with bottom map (pts) — suppress x labels.
+            ax_rnd.tick_params(labelbottom=False)
+            ax_rnd.set_xlabel('')
+
+        # ── Shared colorbar ───────────────────────────────────────────────────
+        # Steal space from the rightmost map axis — colorbar then matches its height exactly.
+        # 'both': grey triangle at bottom (zero), cluster colour at top (over-threshold).
+        _cbar_ax = ax_pts if maps_side_by_side else None
+        _cbar_axs = None if maps_side_by_side else [ax_rnd, ax_pts]
+        fig.colorbar(
+            sc_pts,
+            ax=_cbar_ax if _cbar_ax is not None else _cbar_axs,
+            extend='both',
+            fraction=colorbar_width,
+            pad=0.02,
+        )
 
     if filename:
-        fig.savefig(filename, dpi=300, bbox_inches="tight")
+        fig.savefig(filename, **{'dpi': 300, 'bbox_inches': 'tight', **save_kwargs})
     if not show:
         _plt_close(fig)
     return fig
-    #
-#

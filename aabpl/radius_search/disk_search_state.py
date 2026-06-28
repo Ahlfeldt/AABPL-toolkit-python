@@ -67,13 +67,13 @@ class DiskSearchSource(DiskSearchBase):
             silent:bool=False,
     ):
         # TODO 
-        return assign_points_to_mirco_regions( 
+        return assign_points_to_mirco_regions(
         # return assign_points_to_cell_regions(
             grid=self.grid,
             pts=self.pts,
-            r=self.grid.search.r,
-            nest_depth=self.grid.nest_depth,
-            include_boundary=self.grid.search.include_boundary,
+            r=self.grid._search_class.r,
+            nest_depth=self.grid._search_internals.nest_depth,
+            include_boundary=self.grid._search_class.include_boundary,
             y=self.y,
             x=self.x,
             off_x=self.off_x,
@@ -132,7 +132,7 @@ class DiskSearchTarget(DiskSearchBase):
             c=self.c,
             row_name=self.row_name,
             col_name=self.col_name,
-            nest_depth=self.grid.nest_depth,
+            nest_depth=self.grid._search_internals.nest_depth,
             silent=silent,
         )
     #
@@ -156,7 +156,7 @@ class DiskSearch(object):
         
         """
         # link to grid
-        grid.search = self
+        grid._search_class = self
         self.grid = grid
         self.exclude_self = exclude_self
         self.weight_valid_area = weight_valid_area
@@ -198,7 +198,7 @@ class DiskSearch(object):
         
         # store params
         self.r = r
-        self.nest_depth = nest_depth if not nest_depth is None else grid.nest_depth
+        self.nest_depth = nest_depth if not nest_depth is None else grid._search_internals.nest_depth
         self.include_boundary = include_boundary
         self.overlap_checks = []
         self.contain_checks = []
@@ -210,14 +210,14 @@ class DiskSearch(object):
         self.cells_maybe_overlapping_a_disk, 
         self.cells_maybe_overlapping_a_trgl_disk
         ) = classify_disk_cells(
-                grid_spacing=grid._search_spacing,
+                grid_spacing=grid._search_internals.spacing,
                 r=r,
                 include_boundary=include_boundary,
         )
         # hierarchically order all cells with respect to any point in triangle. 
         # Some cells are at least as far away as others 
         # e.g. (2,2) is weakly closer than (-2,-2) as any pt in triangle is P(x>=0,y>=0)
-        # e.g. (2,3) is weakly closer than (?,?) as any pt in triangle is P(x,y<=0.5*grid._search_spacing)
+        # e.g. (2,3) is weakly closer than (?,?) as any pt in triangle is P(x,y<=0.5*grid._search_internals.spacing)
         triangle_1_vertices = _np_array([[0,0],[0.5,0],[0.5,0.5]])
         vertices_is_inside_triangle_1 = _np_array([True,True,False],dtype=bool)
         # TODO r,grid_spacing, include_boundary could be removed from weak_order_tree generation
@@ -227,7 +227,7 @@ class DiskSearch(object):
                 convex_set_vertices = triangle_1_vertices,
                 vertex_is_inside_convex_set = vertices_is_inside_triangle_1,
                 r=r,
-                grid_spacing=grid._search_spacing,
+                grid_spacing=grid._search_internals.spacing,
                 include_boundary=include_boundary,
         )
         
@@ -322,9 +322,6 @@ class DiskSearch(object):
             col_name=col_name,
             suffix=suffix,
         )
-        # Snapshot projected coords now so plots work even after keep_cols cleanup drops them.
-        self.source._proj_x_snapshot = pts[x].values.copy() if x in pts.columns else None
-        self.source._proj_y_snapshot = pts[y].values.copy() if y in pts.columns else None
 
         self.tgt_df_contains_src_df = self.check_if_tgt_df_contains_src_df(silent=silent)
 
@@ -396,12 +393,6 @@ class DiskSearch(object):
             self.target.aggregate_pt_data_to_cells(silent=silent,)
         #
 
-        # Snapshot the projected coords + raw value columns the lazy output grid
-        # (Grid.update_spacing) needs, so it still works after radius_search drops
-        # the temporary proj_x/proj_y columns from the user's pts during cleanup.
-        # Indexed by pts.index so out_* cell ids can be written back by label.
-        _snap_cols = [x, y] + [col for col in c if col in pts.columns]
-        self.grid._output_snapshot = pts[_snap_cols].copy()
 
     #
 
@@ -430,15 +421,6 @@ class DiskSearch(object):
             plot_pt_disk=plot_pt_disk,
             silent=silent,
         )
-        # Re-snapshot coordinates after search_and_aggregate sorts pts_source in-place.
-        # The earlier snapshot in set_source was pre-sort; this keeps it aligned with
-        # the sorted order of the sum columns written to pts.
-        _x, _y = self.source.x, self.source.y
-        _pts = self.source.pts
-        if _x in _pts.columns:
-            self.source._proj_x_snapshot = _pts[_x].values.copy()
-        if _y in _pts.columns:
-            self.source._proj_y_snapshot = _pts[_y].values.copy()
         return result
     #
 #

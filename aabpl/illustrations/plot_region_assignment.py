@@ -64,15 +64,15 @@ def illustrate_point_to_cell_region_assignment(
     example_trgl_region = example_cell_region//100
 
     # unpack vals
-    grid_spacing = grid._search_spacing
+    grid_spacing = grid._search_internals.spacing
     cell_steps_max = -int(-r/grid_spacing)+1
     trgl_region_ids = _np_array([region_id//100 for region_id in region_ids])
-    unique_region_ids = _np_unique([region_id for region_id in grid.search.region_id_to_cntd_cells])
+    unique_region_ids = _np_unique([region_id for region_id in grid._search_class.region_id_to_cntd_cells])
     unique_trgl_region_ids = _np_unique([region_id//100 for region_id in unique_region_ids])
     
-    contain_region_ids = _np_array([region_id // grid.search.contain_region_mult for region_id in region_ids])
-    overlap_region_ids = _np_array([region_id % grid.search.contain_region_mult for region_id in region_ids])
-    unique_region_ids = sorted(_np_unique([region_id for region_id in grid.search.region_id_to_cntd_cells]))
+    contain_region_ids = _np_array([region_id // grid._search_class.contain_region_mult for region_id in region_ids])
+    overlap_region_ids = _np_array([region_id % grid._search_class.contain_region_mult for region_id in region_ids])
+    unique_region_ids = sorted(_np_unique([region_id for region_id in grid._search_class.region_id_to_cntd_cells]))
     
     print('unique region_ids:',len(unique_region_ids),'unique trgl_region_ids:', len(unique_trgl_region_ids))
 
@@ -139,10 +139,10 @@ def illustrate_point_to_cell_region_assignment(
             cells_maybe_overlapping_a_disk, 
             cells_cntd_in_all_disks,
             cells_cntd_in_all_trgl_disks, 
-            grid.search.region_id_to_cntd_cells[example_cell_region],
-            grid.search.weak_order_tree.cells_cntd_in_no_trgl1_disk,
-            grid.search.weak_order_tree.cells_ovlpd_by_all_trgl1_disks,
-            grid.search.region_id_to_ovlpd_cells[example_cell_region]
+            grid._search_class.region_id_to_cntd_cells[example_cell_region],
+            grid._search_class.weak_order_tree.cells_cntd_in_no_trgl1_disk,
+            grid._search_class.weak_order_tree.cells_ovlpd_by_all_trgl1_disks,
+            grid._search_class.region_id_to_ovlpd_cells[example_cell_region]
         ],
         [
             '#ccc',
@@ -163,9 +163,9 @@ def illustrate_point_to_cell_region_assignment(
     # trgl_combs = sorted(list(set([x%100 for x in unique_region_ids])))
     # n_rows = len(trgl_combs)
         
-    # # hundreds = set([x//100 for x in grid.search.region_id_to_cntd_cells.keys()])
-    # # tens = set([x%100//10 for x in grid.search.region_id_to_cntd_cells.keys()])
-    # # singles = set([x%10 for x in grid.search.region_id_to_cntd_cells.keys()])
+    # # hundreds = set([x//100 for x in grid._search_class.region_id_to_cntd_cells.keys()])
+    # # tens = set([x%100//10 for x in grid._search_class.region_id_to_cntd_cells.keys()])
+    # # singles = set([x%10 for x in grid._search_class.region_id_to_cntd_cells.keys()])
  
     # # for i in range(1,8+1):
     # #     tr_ids_i = [x for x in unique_region_ids if i == x%100//10] # tens
@@ -184,10 +184,10 @@ def illustrate_point_to_cell_region_assignment(
     #                     cells_maybe_overlapping_a_disk, 
     #                     cells_cntd_in_all_disks,
     #                     # cells_cntd_in_all_trgl_disks, 
-    #                     grid.search.region_id_to_cntd_cells[current_region_id],
-    #                     # grid.search.weak_order_tree.cells_cntd_in_no_trgl1_disk,
-    #                     # grid.search.weak_order_tree.cells_ovlpd_by_all_trgl1_disks,
-    #                     grid.search.region_id_to_ovlpd_cells[current_region_id]
+    #                     grid._search_class.region_id_to_cntd_cells[current_region_id],
+    #                     # grid._search_class.weak_order_tree.cells_cntd_in_no_trgl1_disk,
+    #                     # grid._search_class.weak_order_tree.cells_ovlpd_by_all_trgl1_disks,
+    #                     grid._search_class.region_id_to_ovlpd_cells[current_region_id]
     #                 ],
     #                 [
     #                     '#ccc',
@@ -216,9 +216,9 @@ def illustrate_point_to_cell_region_assignment(
     n_cols = _math_ceil(len(unique_region_ids)**.5)
     n_rows = n_cols
     print("n r c", n_rows,n_cols)
-    # hundreds = set([x//100 for x in grid.search.region_id_to_cntd_cells.keys()])
-    # tens = set([x%100//10 for x in grid.search.region_id_to_cntd_cells.keys()])
-    # singles = set([x%10 for x in grid.search.region_id_to_cntd_cells.keys()])
+    # hundreds = set([x//100 for x in grid._search_class.region_id_to_cntd_cells.keys()])
+    # tens = set([x%100//10 for x in grid._search_class.region_id_to_cntd_cells.keys()])
+    # singles = set([x%10 for x in grid._search_class.region_id_to_cntd_cells.keys()])
  
     # for i in range(1,8+1):
     #     tr_ids_i = [x for x in unique_region_ids if i == x%100//10] # tens
@@ -233,10 +233,10 @@ def illustrate_point_to_cell_region_assignment(
                 cells_maybe_overlapping_a_disk, 
                 cells_cntd_in_all_disks,
                 # cells_cntd_in_all_trgl_disks, 
-                grid.search.region_id_to_cntd_cells[current_region_id],
-                # grid.search.weak_order_tree.cells_cntd_in_no_trgl1_disk,
-                # grid.search.weak_order_tree.cells_ovlpd_by_all_trgl1_disks,
-                grid.search.region_id_to_ovlpd_cells[current_region_id]
+                grid._search_class.region_id_to_cntd_cells[current_region_id],
+                # grid._search_class.weak_order_tree.cells_cntd_in_no_trgl1_disk,
+                # grid._search_class.weak_order_tree.cells_ovlpd_by_all_trgl1_disks,
+                grid._search_class.region_id_to_ovlpd_cells[current_region_id]
             ],
             [
                 '#ccc',

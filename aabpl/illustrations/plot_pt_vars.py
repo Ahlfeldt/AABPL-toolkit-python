@@ -119,7 +119,7 @@ def create_plots_for_vars(
         # TODO this is not compelted
         nrows = len(additional_varnames)
     cmap_name = plot_kwargs.pop('cmap', 'Reds')
-    cmap = truncate_colormap(_plt_get_cmap(cmap_name), 0.1, 1)
+    cmap = truncate_colormap(cmap_name if hasattr(cmap_name, 'N') else _plt_get_cmap(cmap_name), 0.1, 1)
     if fig is None or axs is None:
         fig, axs = _plt_subplots(nrows, ncols, figsize=figsize, dpi=display_dpi,
                                   constrained_layout=True,
@@ -132,13 +132,14 @@ def create_plots_for_vars(
             (grid.sample_grid_bounds[2], grid.sample_grid_bounds[3]),
             (grid.sample_grid_bounds[0], grid.sample_grid_bounds[3])
             ]).difference(grid.sample_area) 
-        xmin, xmax, ymin, ymax = grid.total_bounds.xmin, grid.total_bounds.xmax, grid.total_bounds.ymin, grid.total_bounds.ymax,
+        xmin, xmax, ymin, ymax = grid._search_internals.bounds.xmin, grid._search_internals.bounds.xmax, grid._search_internals.bounds.ymin, grid._search_internals.bounds.ymax,
     else:    
-        xmin, xmax, ymin, ymax = grid.total_bounds.xmin, grid.total_bounds.xmax, grid.total_bounds.ymin, grid.total_bounds.ymax,
-    x_col, y_col = grid.search.source.x, grid.search.source.y
-    src = grid.search.source
-    xs = src.pts[x_col] if x_col in src.pts.columns else getattr(src, '_proj_x_snapshot', None)
-    ys = src.pts[y_col] if y_col in src.pts.columns else getattr(src, '_proj_y_snapshot', None)
+        xmin, xmax, ymin, ymax = grid._search_internals.bounds.xmin, grid._search_internals.bounds.xmax, grid._search_internals.bounds.ymin, grid._search_internals.bounds.ymax,
+    _sc = grid._search_class
+    x_col, y_col = _sc.source.x, _sc.source.y
+    src = _sc.source
+    xs = src.pts[x_col]
+    ys = src.pts[y_col]
     for i, colname in enumerate(colnames.flat):
         # SELECT AX (IF MULTIPLE)
         ax = axs.flat[i] if nrows > 1 else axs
@@ -158,11 +159,12 @@ def create_plots_for_vars(
         # CPOLOR NON SAMPLE AREA
         if not grid.sample_grid_bounds is None and not grid.sample_area is None:
             ax.set_facecolor(sample_area_color)
-            cells_rndm_sample = grid.cells_rndm_sample
-            col_min = int(round((grid.sample_grid_bounds[0]-grid.total_bounds.xmin)/grid._search_spacing,0))
-            row_min = int(round((grid.sample_grid_bounds[1]-grid.total_bounds.ymin)/grid._search_spacing,0))
-            col_max = int(round((grid.sample_grid_bounds[2]-grid.total_bounds.xmin)/grid._search_spacing-1,0))
-            row_max = int(round((grid.sample_grid_bounds[3]-grid.total_bounds.ymin)/grid._search_spacing-1,0))
+            cells_rndm_sample = grid._search_internals.cells_rndm_sample
+            _si = grid._search_internals
+            col_min = int(round((grid.sample_grid_bounds[0]-_si.bounds.xmin)/_si.spacing,0))
+            row_min = int(round((grid.sample_grid_bounds[1]-_si.bounds.ymin)/_si.spacing,0))
+            col_max = int(round((grid.sample_grid_bounds[2]-_si.bounds.xmin)/_si.spacing-1,0))
+            row_max = int(round((grid.sample_grid_bounds[3]-_si.bounds.ymin)/_si.spacing-1,0))
             # row_min, row_max = min([row for row,col in grid.cells_rndm_sample]), max([row for row,col in grid.cells_rndm_sample])
             # col_min, col_max = min([col for row,col in grid.cells_rndm_sample]), max([col for row,col in grid.cells_rndm_sample])
             n_rows_x = row_max - row_min + 1
@@ -188,7 +190,7 @@ def create_plots_for_vars(
                       handlelength=0.8, handleheight=0.8, fontsize=8, borderpad=0.5)
             plot_polygon(poly=non_valid_area, ax=ax, facecolor=non_valid_area_color, edgecolor='black', linewidth=sample_area_lw)
         # ADD DISTRIBUTION PLOT
-        c = grid.search.source.pts[colname]
+        c = src.pts[colname]
         scatter_kwargs = {k: v for k, v in plot_kwargs.items() if k not in ('vmin', 'vmax', 'norm')}
 
         # Detect discrete integer columns (e.g. cluster IDs): ≤20 unique integer values
@@ -202,7 +204,7 @@ def create_plots_for_vars(
             _sorted = sorted(int(v) for v in _unique_vals)
             _n = len(_sorted)
             _qual_cmap = _plt_get_cmap('tab10' if _n <= 10 else 'tab20')
-            _colors = ['#cccccc'] + [_qual_cmap(i / max(_n - 2, 1)) for i in range(_n - 1)]
+            _colors = ["#cccccc"] + [_qual_cmap(i / max(_n - 2, 1)) for i in range(_n - 1)]
             _disc_cmap = _plt_ListedColormap(_colors)
 
             _bounds = [v - 0.5 for v in _sorted] + [_sorted[-1] + 0.5]

@@ -23,6 +23,7 @@ def plot_sample_area(
         plot_kwargs:dict={},
         show:bool=True,
         display_dpi:int=100,
+        save_kwargs:dict={},
 ):
     """
     Plot the sample area used for drawing random points, with source points
@@ -106,11 +107,12 @@ def plot_sample_area(
     ax.set_title("Sample area", fontdict={'fontsize':6})
     # ADD DISTRIUBTION PLOT
     # grey out cells that are not used for sampling
-    cells_rndm_sample = grid.cells_rndm_sample
-    col_min = int(round((grid.sample_grid_bounds[0]-grid.total_bounds.xmin)/grid._search_spacing,0))
-    row_min = int(round((grid.sample_grid_bounds[1]-grid.total_bounds.ymin)/grid._search_spacing,0))
-    col_max = int(round((grid.sample_grid_bounds[2]-grid.total_bounds.xmin)/grid._search_spacing-1,0))
-    row_max = int(round((grid.sample_grid_bounds[3]-grid.total_bounds.ymin)/grid._search_spacing-1,0))
+    cells_rndm_sample = grid._search_internals.cells_rndm_sample
+    _si = grid._search_internals
+    col_min = int(round((grid.sample_grid_bounds[0]-_si.bounds.xmin)/_si.spacing,0))
+    row_min = int(round((grid.sample_grid_bounds[1]-_si.bounds.ymin)/_si.spacing,0))
+    col_max = int(round((grid.sample_grid_bounds[2]-_si.bounds.xmin)/_si.spacing-1,0))
+    row_max = int(round((grid.sample_grid_bounds[3]-_si.bounds.ymin)/_si.spacing-1,0))
     n_rows = row_max - row_min + 1
     n_cols = col_max - col_min + 1
     if type(cells_rndm_sample) == bool:
@@ -145,7 +147,7 @@ def plot_sample_area(
     ax.set_aspect('equal')
 
     if filename:
-        fig.savefig(filename, dpi=300, bbox_inches="tight")
+        fig.savefig(filename, **{'dpi': 300, 'bbox_inches': 'tight', **save_kwargs})
     if not show:
         _plt_close(fig)
     return fig

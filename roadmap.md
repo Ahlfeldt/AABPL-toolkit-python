@@ -41,5 +41,8 @@ Summary of what shipped (all verified with `temp/spacing_harness.py --cmp base`)
 ### Timing-model benchmark (coverage gaps)
 - The collected `perf_test` data is heavily skewed (~88% of runs at `n_source=2000`); `predict_timing` is unreliable at low `r/spacing` (1.41–1.58), low `nest_depth` (0–1), and high/uneven `n_src`×`n_tgt`. Gap-filling sweeps (`temp/gap_sweep*.py`) target `n_src ≫ n_tgt` (the `detect_cluster_pts` regime), low-`r/s`/low-`nd`, and multiple point distributions (clustered / uniform / 2nd dataset). Refit the model once enough gap data is collected.
 
+### Allow for rectangualar cells
+- Simply apply scaling on axis and remove it in the end. Needs to be kept in mind for plotting.
+
 ## Open items
 - Validate user inputs at the public API boundary.

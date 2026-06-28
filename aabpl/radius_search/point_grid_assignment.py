@@ -49,8 +49,8 @@ def assign_points_to_cells(
     """
     # to do change to cut
     # for each row select relevant points, then refine selection with columns to obtain cells
-    pts[row_name] = ((pts[y]-grid.total_bounds.ymin) // grid._search_spacing).astype(int)
-    pts[col_name] = ((pts[x]-grid.total_bounds.xmin) // grid._search_spacing).astype(int)
+    pts[row_name] = ((pts[y]-grid._search_internals.bounds.ymin) // grid._search_internals.spacing).astype(int)
+    pts[col_name] = ((pts[x]-grid._search_internals.bounds.xmin) // grid._search_internals.spacing).astype(int)
         
     return pts[[row_name, col_name]]
 
@@ -147,9 +147,9 @@ def aggregate_point_data_to_cells(
         _y_arr = pts[y].values
         _cell_counts = count_cells_per_level(
             _x_arr, _y_arr,
-            xmin=grid.total_bounds.xmin,
-            ymin=grid.total_bounds.ymin,
-            spacing=grid._search_spacing,
+            xmin=grid._search_internals.bounds.xmin,
+            ymin=grid._search_internals.bounds.ymin,
+            spacing=grid._search_internals.spacing,
             max_nd=nest_depth,
         )
         _recommended_nd = recommend_max_nest_depth(
@@ -161,10 +161,10 @@ def aggregate_point_data_to_cells(
         if _recommended_nd < nest_depth:
             nest_depth = _recommended_nd
             if nest_depth == 0:
-                grid.cell_codec = None
+                grid._search_internals.cell_codec = None
             else:
                 from aabpl.utils.cell_keys import CellKeyCodec
-                grid.cell_codec = CellKeyCodec(
+                grid._search_internals.cell_codec = CellKeyCodec(
                     nest_depth=nest_depth,
                     row_lo=int(grid.row_ids.min()), row_hi=int(grid.row_ids.max()),
                     col_lo=int(grid.col_ids.min()), col_hi=int(grid.col_ids.max()),
@@ -173,8 +173,8 @@ def aggregate_point_data_to_cells(
 
     if nest_depth > 0:
         # offsets normalized to 0-1
-        offset_x = 0.5 + ((pts[x]-grid.total_bounds.xmin)%grid._search_spacing - grid._search_spacing/2) / grid._search_spacing
-        offset_y = 0.5 + ((pts[y]-grid.total_bounds.ymin)%grid._search_spacing - grid._search_spacing/2) / grid._search_spacing
+        offset_x = 0.5 + ((pts[x]-grid._search_internals.bounds.xmin)%grid._search_internals.spacing - grid._search_internals.spacing/2) / grid._search_internals.spacing
+        offset_y = 0.5 + ((pts[y]-grid._search_internals.bounds.ymin)%grid._search_internals.spacing - grid._search_internals.spacing/2) / grid._search_internals.spacing
         pts[subcell_nr] = 0
 
         # loop through nest levels starting from the broadest/most aggregate end with smallest/most narrow
@@ -223,7 +223,7 @@ def aggregate_point_data_to_cells(
     # Key builder for the *_by_lvl dicts: packed int64 when the integer-key codec
     # is active, else the original (lvl,(row,col)) tuple.
     # The level-0 (row,col) dicts above keep tuple keys (clusters/plots/exports).
-    _codec = getattr(grid, 'cell_codec', None)
+    _codec = getattr(grid._search_internals, 'cell_codec', None)
     if _codec is not None:
         def _k(lvl, rc):
             return int(_codec.key(lvl, rc[0], rc[1]))
@@ -306,9 +306,9 @@ def aggregate_point_data_to_cells(
         #
     #
 
-    grid.id_to_sums           = id_to_sums
-    grid.id_to_sums_by_lvl    = id_to_sums_by_lvl
-    grid.id_to_vals_xy_by_lvl = id_to_vals_xy_by_lvl
+    grid._search_internals.id_to_sums           = id_to_sums
+    grid._search_internals.id_to_sums_by_lvl    = id_to_sums_by_lvl
+    grid._search_internals.id_to_vals_xy_by_lvl = id_to_vals_xy_by_lvl
     grid.sums_array           = _sums_array[:_node_count]
     grid.pts_vals_xy          = pts_vals_xy
     grid.pts_ids              = pts_ids
@@ -317,9 +317,9 @@ def aggregate_point_data_to_cells(
 
 def _lvl0_packed(grid, row, col):
     """Return the packed int64 position for a level-0 cell, or None if empty."""
-    codec = grid.cell_codec
+    codec = grid._search_internals.cell_codec
     k = codec.key(0, row, col) if codec is not None else (0, (row, col))
-    return grid.id_to_vals_xy_by_lvl.get(k)
+    return grid._search_internals.id_to_vals_xy_by_lvl.get(k)
 
 def cell_count(grid, row, col):
     """Number of points in level-0 cell (row, col); 0 if empty."""
@@ -328,9 +328,9 @@ def cell_count(grid, row, col):
 
 def cell_count_iter(grid):
     """Yield (row, col, count) for every non-empty level-0 cell."""
-    codec = grid.cell_codec
-    vxy = grid.id_to_vals_xy_by_lvl
-    for rc in grid.id_to_sums:
+    codec = grid._search_internals.cell_codec
+    vxy = grid._search_internals.id_to_vals_xy_by_lvl
+    for rc in grid._search_internals.id_to_sums:
         k = codec.key(0, rc[0], rc[1]) if codec is not None else (0, rc)
         pos = vxy[k]
         yield rc[0], rc[1], (pos & 0xFFFFFFFF) - (pos >> 32)

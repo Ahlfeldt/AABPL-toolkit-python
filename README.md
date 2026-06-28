@@ -119,22 +119,24 @@ pts.columns = ["eid", "employment", "industry", "lat", "lon", "moved"]
 grid = detect_cluster_cells(
     pts=pts,
     crs=crs_of_your_csv,
-    r=15000,                        # search radius in metres (after reprojection); also accepts r=[500,750] or r=[(0,500),(500,750)]
-    c='employment',                 # column(s) to aggregate; list for multiple
-    stat='sum',                     # sum|count|mean|variance|std|cv|skewness|kurtosis
-    exclude_self=True,              # exclude point from its own neighbourhood
-    sample_area='buff_cells,min_pts=1',  # sampling region; call resolve_sample_area.params() for all options
-                                    # alternatives: 'concave,concavity=0.5' | 'convex' | 'bbox' | 'grid' | Shapely Polygon/MultiPolygon
-    weight_valid_area=None,         # edge-effect correction: None|'estimate'|'precise'
-    k_th_percentile=99.5,           # null-distribution percentile used as cluster threshold
-    n_random_points=100000,         # random points drawn to build the null distribution
-    random_seed=0,                  # set for reproducibility; None for random
-    contingency=1,                  # merge adjacent clusters within this many cells (0 = off)
-    merge_dist=(25000, 10000),      # (centroid_dist, border_dist): merge clusters closer than these distances
-    min_cluster_share=(0.05, 0.0, 0.0),  # drop clusters smaller than this share of the largest
-    make_convex=True,               # replace cluster polygons with their convex hulls
-    spacing=15000,                  # output grid cell size in metres; defaults to r/3
+    r=15000,                            # search radius in metres (after reprojection); also accepts multiple radii r=[500,750] or (weighted) distance bands r=[(0,500,.004),(500,750,.0016)]
+    c='employment',                     # column(s) to aggregate within radius; c=['col1','col2'] for multiple
+    stat='sum',                         # aggregation statistic: sum|count|mean|std|variance|cv|skewness|kurtosis
+    exclude_self=True,                  # exclude the point's own value from its radius sum
+    sample_area='buff_cells,min_pts=1,buf=30000',  # region used to draw null-distribution random points; call aabpl.main.resolve_sample_area.params() for all options
+                                        # alternatives: 'concave,concavity=0.5' | 'convex' | 'bbox' | 'grid' | Shapely Polygon/MultiPolygon
+    weight_valid_area=None,             # edge-effect correction near sample boundary: None | 'estimate' | 'precise'
+    k_th_percentile=99.5,               # cluster threshold = this percentile of the null distribution (0–100); lower → more clusters
+    null_distribution=100_000,          # int → draw N random points uniformly within sample area for null distribution; or pass an (N,2) array/DataFrame of pre-drawn coords (x first)
+    random_seed=0,                      # for reproducibility; None = different result each run
+    contingency=(1,1),                  # gap tolerance (queen_cells, rook_cells) when merging near-adjacent clusters; (0,0) = no gap merge
+    merge_dist=(25000, 15000),          # (centroid_dist, border_dist) in metres: merge cluster pairs where both distances fall below these thresholds
+    min_cluster_share=(0.05, 0.0, 0.0),# drop clusters below this share of the largest: applied after (contingency merge, centroid merge, convex-hull step)
+    make_convex=True,                   # replace each cluster polygon with its convex hull (fills concavities)
+    cell_size=5000,                     # output grid resolution in metres; rule of thumb: r/3; smaller = finer detail but slower
+    overwrite=True,                     # allow overwriting existing radius-sum columns in pts DataFrame
 )
+# grid.info()  # inspect grid layout, cell size, cluster summary, bounds, and available plot methods
 
 # Save outputs
 df_clusters    = grid.save_cell_clusters(filename='output_gis/clusters',   file_format='shp')
@@ -147,9 +149,15 @@ grid.plot.vars(      filename='output_maps/employment_vars')
 grid.plot.cluster_pts(filename='output_maps/employment_cluster_pts')
 grid.plot.rand_dist( filename='output_maps/rand_dist_employment')
 
-# Radius search only (no clustering)
-# Appends employment_sum_15000 to pts
-grid = radius_sum(pts=pts, crs=crs_of_your_csv, r=15000, c='employment', exclude_self=True)
+# Radius search only (no clustering) — exclude_self defaults to False for radius_sum/radius_search
+grid = radius_sum(
+    pts=pts,
+    crs=crs_of_your_csv,
+    r=15000,                            # search radius in metres; also accepts r=[500,750] or distance bands r=[(0,500,.004),(500,750,.0016)]
+    c='employment',                     # column(s) to aggregate; c=['col1','col2'] for multiple; result appended as employment_sum_15000
+    exclude_self=False,                 # False by default: each point's own value is included in its radius sum; set True to exclude self-contribution
+    overwrite=True,
+)
 ```
 
 
@@ -279,7 +287,31 @@ All functions are available directly on the `aabpl` module after `import aabpl`.
 | `radius_cv(pts, crs, r, c, ...)` | Shorthand for `radius_search(..., stat='cv')` (coefficient of variation). |
 | `radius_skewness(pts, crs, r, c, ...)` | Shorthand for `radius_search(..., stat='skewness')`. |
 | `radius_kurtosis(pts, crs, r, c, ...)` | Shorthand for `radius_search(..., stat='kurtosis')`. |
-| `aggregate_to_grid(pts, grid, ...)` | Aggregates point-level values onto the output grid cells of an existing `Grid` object. |
+
+<details>
+<summary><strong>Grid object methods</strong> — methods available on the <code>grid</code> object returned by <code>detect_cluster_cells</code></summary>
+
+### Grid object methods
+
+The `grid` object returned by `detect_cluster_cells` exposes the following methods:
+
+| Method | Description |
+|:---|:---|
+| `grid.info()` | Print grid layout, cell size, bounds, cluster summary, and available plot/save methods. |
+| `grid.aggregate_pts_to_output_cells(pts, val_cols, agg)` | Aggregate additional point columns into existing grid cells without rerunning the full pipeline. Coordinates must be in `grid.proj_crs`. Use `add_to_exports=True` to include the new columns in `save_sparse_grid` output. |
+| `grid.plot.clusters(filename)` | Map of cluster polygons overlaid on cell aggregates. |
+| `grid.plot.cell_aggregates(filename)` | Heatmap of raw aggregated values per output cell. |
+| `grid.plot.vars(filename)` | Scatter of source points coloured by any column value. |
+| `grid.plot.rand_dist(filename)` | Observed vs null distribution — use to calibrate `k_th_percentile`. |
+| `grid.plot_sample_area(filename)` | Map of the sampling region used for the null distribution. |
+| `grid.save_cell_clusters(filename, file_format)` | Export cluster polygons as shapefile / GeoJSON / GeoParquet / CSV. |
+| `grid.save_sparse_grid(filename, file_format)` | Export non-empty grid cells with cluster IDs and aggregates. |
+| `grid.create_sparse_grid_df()` | Return non-empty grid cells as a GeoDataFrame for custom analysis without saving to disk. |
+| `grid.clustering.by_column['col']` | Access individual cluster objects directly: `.cells`, `.centroid`, `.geometry`, `.area`. |
+
+All plot methods accept `show=False` to suppress the pop-up, `display_dpi` to control screen resolution, and `save_kwargs={'dpi': 300}` to control saved-file resolution.
+
+</details>
 
 
 
@@ -345,7 +377,7 @@ This produces one number per point that reflects local concentration — a point
 
 
 
-To decide whether an aggregate is *significantly* elevated, a **null distribution** is built by drawing `n_random_points` uniformly at random from the sample area and running `radius_search` on them with the same radius and source points. The **k-th percentile** of this distribution becomes the cluster threshold `τ`; a point is labelled clustered if `agg_i > τ`. Because the null distribution is drawn fresh each call, its shape automatically accounts for the actual study-area geometry, including irregular boundaries and gaps.
+To decide whether an aggregate is *significantly* elevated, a **null distribution** is built by drawing random points from the sample area and running `radius_search` on them with the same radius and source points. The **k-th percentile** of this distribution becomes the cluster threshold `τ`; a point is labelled clustered if `agg_i > τ`. Pass an integer to `null_distribution=` to control how many random points are drawn (default 100 000), or pass an (N, 2) array/DataFrame with x in the first column and y in the second (projected CRS) to supply your own reference coordinates. Because the null distribution reflects the study-area geometry, it automatically accounts for irregular boundaries and gaps.
 
 
 

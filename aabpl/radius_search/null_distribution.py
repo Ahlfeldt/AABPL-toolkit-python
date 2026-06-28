@@ -1,7 +1,8 @@
 from pandas import DataFrame as _pd_DataFrame
 from numpy import (
-    array as _np_array, column_stack as _np_column_stack, ndarray as _np_ndarray, vstack as _np_vstack, 
-    ones as _np_ones, empty as _np_empty, percentile as _np_percentile, bool_ as _np_bool
+    array as _np_array, column_stack as _np_column_stack, ndarray as _np_ndarray, vstack as _np_vstack,
+    ones as _np_ones, empty as _np_empty, percentile as _np_percentile, bool_ as _np_bool,
+    zeros as _np_zeros,
 )
 from numpy.random import ( random as _np_random,  randint as _np_randint, seed as _np_seed, )
 from shapely.geometry import Polygon as _shapely_Polygon, Point as _shapely_Point
@@ -53,7 +54,7 @@ def draw_random_points_in_sample_area(
         sample_area = grid.sample_area
 
     # SET RANDOM SEED IF ANY SUPPLIED AND ASSERT TYPE
-    if type(random_seed)==int:
+    if type(random_seed) == int:
         _np_seed(random_seed)
     elif random_seed is not None:
         raise TypeError(
@@ -67,11 +68,63 @@ def draw_random_points_in_sample_area(
     if cell_height is None:
         cell_height = cell_width
     #
-    
-    
+
+    # ── Fast path: output-cell-level sampling ────────────────────────────────
+    # When infer_sample_area_from_pts has pre-classified output cells (buff_cells
+    # methods), sample uniformly within output cells.  Fully-valid cells need no
+    # geometry check; partly-valid boundary cells do.
+    _out_fully = getattr(grid, 'output_cells_fully_valid', None)
+    _out_partly = getattr(grid, 'output_cells_partly_valid', None)
+    if _out_fully is not None and _out_partly is not None:
+        _sx = grid._output_sample_spacing_x
+        _sy = grid._output_sample_spacing_y
+        _ox = grid.x_steps_bounds[0]
+        _oy = grid.y_steps_bounds[0]
+        _fully_arr = _np_array(sorted(_out_fully), dtype=float)   # (row, col)
+        _partly_arr = _np_array(sorted(_out_partly), dtype=float) if _out_partly else _np_array([]).reshape(0, 2)
+        _n_fully  = len(_fully_arr)
+        _n_partly = len(_partly_arr)
+        _n_total  = _n_fully + _n_partly
+        # Expected keep-rate for partly cells (estimated lazily from first batch).
+        _partly_keep_rate = 0.5
+        _result = _np_ndarray(shape=(0, 2))
+        _pts_attempted = 0
+        while _result.shape[0] < n_random_points:
+            _need = n_random_points - _result.shape[0]
+            # Allocate attempts proportionally; oversample partly cells.
+            _w_fully  = _n_fully
+            _w_partly = _n_partly / max(_partly_keep_rate, 0.01)
+            _w_total  = _w_fully + _w_partly
+            _n_full_draw  = int(_need * _w_fully  / _w_total) + fix_extra_pts_to_create + 1
+            _n_part_draw  = int(_need * _w_partly / _w_total) + fix_extra_pts_to_create + 1
+            coords_out = _np_ndarray(shape=(0, 2))
+            if _n_fully:
+                _idx = _np_randint(0, _n_fully, _n_full_draw)
+                _rc  = _fully_arr[_idx]
+                _pts = _np_array([_ox, _oy]) + _np_array([_sx, _sy]) * (
+                    _np_random((_n_full_draw, 2)) + _rc[:, ::-1]
+                )
+                coords_out = _pts
+            if _n_partly:
+                _idx = _np_randint(0, _n_partly, _n_part_draw)
+                _rc  = _partly_arr[_idx]
+                _pts = _np_array([_ox, _oy]) + _np_array([_sx, _sy]) * (
+                    _np_random((_n_part_draw, 2)) + _rc[:, ::-1]
+                )
+                _inside = _shapely_contains_xy(sample_area, _pts[:, 0], _pts[:, 1])
+                _kept = _pts[_inside]
+                if _n_part_draw > 0:
+                    _partly_keep_rate = max(len(_kept) / _n_part_draw, 1e-3)
+                coords_out = _np_vstack([coords_out, _kept]) if len(coords_out) and len(_kept) else (coords_out if len(coords_out) else _kept)
+            if len(coords_out):
+                _result = _np_vstack([_result, coords_out]) if _result.shape[0] else coords_out
+            _pts_attempted += _n_full_draw + _n_part_draw
+        return _result[:n_random_points]
+    # ── End fast path ─────────────────────────────────────────────────────────
+
     # cells_fully_valid_ref = grid.cells_fully_valid_max_lvl
-    cells_fully_valid_ref = grid.cells_fully_valid
-    cells_partly_valid_ref = grid.cells_partly_valid_max_lvl
+    cells_fully_valid_ref = grid._search_internals.cells_fully_valid
+    cells_partly_valid_ref = grid._search_internals.cells_partly_valid_max_lvl
     # col_min = int((sample_area.bounds[0] - grid.total_bounds.xmin) // cell_width)
     # row_min = int((sample_area.bounds[1] - grid.total_bounds.ymin) // cell_height)
     # col_max = int((sample_area.bounds[2] - grid.total_bounds.xmin) // cell_width)
@@ -97,7 +150,7 @@ def draw_random_points_in_sample_area(
             sum([2**-(2*lvl) for lvl,(row, col) in cells_fully_valid_ref if lvl==lvl_i])
             for lvl_i in set([lvl for lvl, (row, col) in cells_fully_valid_ref])
         ])
-    all_cells_eligible = sample_area is None or max_cells_fully_covered >= grid._search_n_cells 
+    all_cells_eligible = sample_area is None or max_cells_fully_covered >= grid._search_internals.n_cells 
     
 
     # update cells_rndm_sample with grid cells outside the grid
@@ -145,13 +198,13 @@ def draw_random_points_in_sample_area(
         return transformed_rand_ints
     
     grid.rand_int_transformer = rand_int_transformer
-    cell_to_poly = grid.cell_to_poly if hasattr(grid, 'cell_to_poly') else {}
-    
+    cell_to_poly = grid._search_internals.cell_to_poly if hasattr(grid._search_internals, 'cell_to_poly') else {}
+
     grid_bbox = _shapely_Polygon([
-            (grid.total_bounds.xmin,grid.total_bounds.ymin),
-            (grid.total_bounds.xmax,grid.total_bounds.ymin),
-            (grid.total_bounds.xmax,grid.total_bounds.ymax),
-            (grid.total_bounds.xmin,grid.total_bounds.ymax),
+            (grid._search_internals.bounds.xmin,grid._search_internals.bounds.ymin),
+            (grid._search_internals.bounds.xmax,grid._search_internals.bounds.ymin),
+            (grid._search_internals.bounds.xmax,grid._search_internals.bounds.ymax),
+            (grid._search_internals.bounds.xmin,grid._search_internals.bounds.ymax),
     ])
     
     sample_area_contains_grid = sample_area.contains(grid_bbox)
@@ -195,11 +248,11 @@ def draw_random_points_in_sample_area(
         rand_ints = rand_int_transformer(_np_randint(0, rand_int_stop, n_rndm_points_to_create))
         rndm_cells = sample_cells_arr[rand_ints]
         # _np_array([sample_bounds_xmin, sample_bounds_ymin]) 
-        new_random_point_coordinates = _np_array([grid.total_bounds.xmin, grid.total_bounds.ymin]) + grid._search_spacing * (
-            _np_random((n_rndm_points_to_create,2)) * 
+        new_random_point_coordinates = _np_array([grid._search_internals.bounds.xmin, grid._search_internals.bounds.ymin]) + grid._search_internals.spacing * (
+            _np_random((n_rndm_points_to_create,2)) *
             (2**-rndm_cells[:,0].reshape(-1,1)) +
-            rndm_cells[:,1:][:,::-1] # TOOD this part might not put the points into the right postion if lvl>0
-        )#  rndm_cells[:,:0:-1]
+            rndm_cells[:,1:][:,::-1] # TODO this part might not put the points into the right position if lvl>0
+        )
         
         # if anywhere is valid area        
         if sample_area_contains_grid:
@@ -247,7 +300,7 @@ def compute_null_distribution(
     pts:_pd_DataFrame,
     sample_area:_shapely_Polygon=None,
     min_pts_to_sample_cell:int=1,
-    n_random_points:int=int(1e5),
+    null_distribution=int(1e5),
     k_th_percentile:float=[99.5],
     c:list=[],
     x:str='lon',
@@ -257,30 +310,30 @@ def compute_null_distribution(
     suffix:str='_750m',
     random_seed:int=None,
     silent:bool=False,
-    null_distribution=None,
     r=None,
     stat:str='sum',
 ):
-    """Draws n_random_points within sample_area and aggregates data from points within search radius.
-    From those values it calculates the k_th_percentile threshold value for the variable(s). This
-    execute methods
+    """Draws random points within sample_area and aggregates data within the search radius to
+    build a null distribution. From those values it calculates the k_th_percentile threshold.
 
     k_th_percentile: in [0,100] k-th percentile
 
-    1. draw n_random_points with draw_random_points_within_valid_area
-    2. aggregate_point_data_to_disks_vectorized
-    TODO Check if how cluster value
-
-
-
     min_pts_to_sample_cell (int):
         minimum number of points in dataset that need to be in cell s.t. random points are allowed to be drawn within it. (default=1)
-    null_distribution (array-like or pd.DataFrame, optional):
-        User-supplied null-distribution coordinates. Must contain at least two columns (or be a
-        2-column array) with the same projected x/y units as ``pts``. When provided the internal
-        uniform-random draw is skipped and these coordinates are used directly. The radius sums
-        are still computed by the package. Useful when a non-uniform spatial distribution is
-        desired (e.g. stratified, clustered, or empirically derived reference points).
+    null_distribution (int | numpy.ndarray | pandas.DataFrame):
+        Controls the null distribution used for cluster detection:
+
+        - **int** (default ``100_000``): draw this many points uniformly at random within
+          ``sample_area`` and compute their radius sums as the reference distribution.
+        - **numpy.ndarray of shape (N, 2)**: use these coordinates directly — first column is
+          **x**, second column is **y**, both in the projected CRS (metres). The internal
+          random draw is skipped.
+        - **pandas.DataFrame**: converted to a numpy array via ``.values``; must have at least
+          two columns in **x, y order** (projected CRS). Column names are ignored.
+
+        In all coordinate-array cases the radius sums are still computed by the package.
+        Useful for non-uniform reference distributions (e.g. stratified, clustered, or
+        empirically derived reference points).
     """
     if type(k_th_percentile) != list:
         k_th_percentiles = [k_th_percentile for i in range(len(c))]
@@ -292,39 +345,30 @@ def compute_null_distribution(
             set([k_th_percentile for k_th_percentile in k_th_percentiles if k_th_percentile >= 100 or k_th_percentile <= 0])
         )
     from aabpl.radius_search.point_grid_assignment import cell_count_iter as _cell_count_iter
-    grid.cells_rndm_sample = True if min_pts_to_sample_cell == 0 else set((row, col) for row, col, cnt in _cell_count_iter(grid) if cnt >= min_pts_to_sample_cell)
+    grid._search_internals.cells_rndm_sample = True if min_pts_to_sample_cell == 0 else set((row, col) for row, col, cnt in _cell_count_iter(grid) if cnt >= min_pts_to_sample_cell)
     grid.sample_area = sample_area
 
-    if null_distribution is not None:
-        # User supplied their own null-distribution coordinates — skip internal draw.
-        if isinstance(null_distribution, _pd_DataFrame):
-            if x not in null_distribution.columns or y not in null_distribution.columns:
-                raise ValueError(
-                    f"null_distribution DataFrame must contain columns '{x}' and '{y}'. "
-                    f"Found: {list(null_distribution.columns)}"
-                )
-            rndm_pts = null_distribution[[x, y]].reset_index(drop=True).copy()
-        else:
-            arr = _np_array(null_distribution)
-            if arr.ndim != 2 or arr.shape[1] < 2:
-                raise ValueError(
-                    "null_distribution array must have shape (n, 2) with columns [x, y]."
-                )
-            rndm_pts = _pd_DataFrame(data=arr[:, :2], columns=[x, y])
-    else:
+    if isinstance(null_distribution, int):
+        # Draw N random points uniformly within sample_area.
         random_point_coords = draw_random_points_in_sample_area(
             grid=grid,
-            cell_width=grid._search_spacing,
-            n_random_points=n_random_points,
+            cell_width=grid._search_internals.spacing,
+            n_random_points=null_distribution,
             random_seed=random_seed,
-            cell_height=grid._search_spacing,
+            cell_height=grid._search_internals.spacing,
         )
-        rndm_pts = _pd_DataFrame(
-            data=random_point_coords,
-            columns=[x, y]
-        )
+        rndm_pts = _pd_DataFrame(data=random_point_coords, columns=[x, y])
+    else:
+        # User-supplied coordinates — array (N,2) or DataFrame (columns ignored, x-first).
+        arr = _np_array(null_distribution.values if isinstance(null_distribution, _pd_DataFrame) else null_distribution)
+        if arr.ndim != 2 or arr.shape[1] < 2:
+            raise ValueError(
+                "null_distribution array/DataFrame must have shape (N, 2) with x in the first "
+                "column and y in the second column, both in the projected CRS."
+            )
+        rndm_pts = _pd_DataFrame(data=arr[:, :2], columns=[x, y])
 
-    grid.rndm_pts = rndm_pts
+    grid.null_distribution = rndm_pts
 
     cols_c = [c] if isinstance(c, str) else list(c)
 
@@ -359,19 +403,20 @@ def compute_null_distribution(
                             f"No grid for radius {ri} in grid._mr_grids. "
                             "Ensure multi_radius_search was called before compute_null_distribution."
                         )
-                    grid_i.search.set_source(
+                    _gi_sc = grid_i._search_class
+                    _gi_sc.set_source(
                         pts=rndm_pts, c=cols_c, x=x, y=y,
                         row_name=row_name, col_name=col_name,
                         suffix=int_sfx, silent=True,
                     )
-                    grid_i.search.set_target(
+                    _gi_sc.set_target(
                         pts=pts, c=cols_c, x=x, y=y,
                         row_name=row_name, col_name=col_name, silent=silent,
                     )
-                    _excl_orig = grid_i.search.exclude_self
-                    grid_i.search.exclude_self = False
-                    grid_i.search.perform_search(silent=True)
-                    grid_i.search.exclude_self = _excl_orig
+                    _excl_orig = _gi_sc.exclude_self
+                    _gi_sc.exclude_self = False
+                    _gi_sc.perform_search(silent=True)
+                    _gi_sc.exclude_self = _excl_orig
 
             # build output columns and thresholds
             thresholds: dict = {}
@@ -420,7 +465,8 @@ def compute_null_distribution(
             return (thresholds, rndm_pts)
 
     # ── single-radius path (original) ────────────────────────────────────────
-    grid.search.set_source(
+    _sc = grid._search_class
+    _sc.set_source(
         pts=rndm_pts,
         c=c,
         x=x,
@@ -431,7 +477,7 @@ def compute_null_distribution(
         silent=True,
     )
 
-    grid.search.set_target(
+    _sc.set_target(
         pts=pts,
         c=c,
         x=x,
@@ -442,13 +488,10 @@ def compute_null_distribution(
     )
 
     # Random points have no "self" to exclude — suppress exclude_self for this search.
-    _exclude_self_orig = grid.search.exclude_self
-    grid.search.exclude_self = False
-    grid.search.perform_search(silent=True,)
-    grid.search.exclude_self = _exclude_self_orig
-    # Snapshot after search so coords are in the same sorted order as the sum columns.
-    grid._rndm_pts_x_snapshot = rndm_pts[x].values.copy() if x in rndm_pts.columns else None
-    grid._rndm_pts_y_snapshot = rndm_pts[y].values.copy() if y in rndm_pts.columns else None
+    _exclude_self_orig = _sc.exclude_self
+    _sc.exclude_self = False
+    _sc.perform_search(silent=True,)
+    _sc.exclude_self = _exclude_self_orig
 
     sum_radius_names = [(cname+suffix) for cname in c]
     disk_sums_for_random_points = rndm_pts[sum_radius_names].values

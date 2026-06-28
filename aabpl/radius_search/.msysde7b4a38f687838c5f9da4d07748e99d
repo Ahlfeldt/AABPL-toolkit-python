@@ -16,8 +16,8 @@ def merge_condition_queen_contingency(max_steps:int=1)->bool:
     def check_if_merge(cluster_a, cluster_b, max_steps=max_steps):
         cluster_small, cluster_large = (cluster_a, cluster_b) if cluster_a.n_cells < cluster_b.n_cells else (cluster_b, cluster_a)
         for row_a, col_a in cluster_small.cells:
-            for row_offset in range(-max_steps, max_steps + 1):
-                for col_offset in range(-max_steps, max_steps + 1):
+            for row_offset in range(-max_steps,max_steps):
+                for col_offset in range(-max_steps,max_steps):
                     if (row_a+row_offset, col_a+col_offset) in cluster_large.cells:
                         return True
         return False
@@ -30,9 +30,9 @@ def merge_condition_rook_contingency(max_steps:int=1)->bool:
     def check_if_merge(cluster_a, cluster_b, max_steps=max_steps):
         cluster_small, cluster_large = (cluster_a, cluster_b) if cluster_a.n_cells < cluster_b.n_cells else (cluster_b, cluster_a)
         for row_a, col_a in cluster_small.cells:
-            for row_offset in range(-max_steps, max_steps + 1):
+            for row_offset in range(-max_steps, max_steps):
                 if row_offset == 0: continue
-                for col_offset in range(-max_steps, max_steps + 1):
+                for col_offset in range(-max_steps, max_steps):
                     if col_offset == 0: continue
                     if (row_a+row_offset, col_a+col_offset) in cluster_large.cells:
                         return True
@@ -71,65 +71,10 @@ def merge_condition_distance_based(max_centroid_dist:float, max_border_dist:floa
         return False
     return check_if_merge
 
-def merge_condition_distance_based_dnf(conditions: list, spacing: float) -> bool:
-    """
-    DNF (Disjunctive Normal Form) merge condition for a list of (centroid_dist, border_dist) tuples.
-
-    Merge is triggered when ANY condition tuple is fully satisfied (OR between tuples).
-    Within each tuple both thresholds must hold (AND within tuple).
-
-    Parameters
-    ----------
-    conditions : list of (float, float)
-        Each element is ``(max_centroid_dist, max_border_dist)``.
-        A ``None`` threshold in a pair disables that measure for that condition:
-        ``(25000, None)`` = centroid only; ``(None, 10000)`` = border only.
-    spacing : float
-        Grid cell size in the same unit as the distance thresholds.
-
-    Examples
-    --------
-    ``[(25000, 10000)]``
-        Equivalent to the original AND behaviour.
-    ``[(25000, 10000), (15000, 20000)]``
-        Merge if (centroid ≤ 25 km AND border ≤ 10 km) OR (centroid ≤ 15 km AND border ≤ 20 km).
-    """
-    def check_if_merge(cluster_a, cluster_b, conditions=conditions, spacing=spacing):
-        centroid_dist = (
-            (cluster_a.centroid[0] - cluster_b.centroid[0]) ** 2 +
-            (cluster_a.centroid[1] - cluster_b.centroid[1]) ** 2
-        ) ** 0.5
-        # Compute border distance lazily — only when at least one condition needs it.
-        _border_dist = None
-        def _get_border_dist():
-            nonlocal _border_dist
-            if _border_dist is None:
-                cluster_small, cluster_large = (
-                    (cluster_a, cluster_b) if cluster_a.n_cells < cluster_b.n_cells
-                    else (cluster_b, cluster_a)
-                )
-                small_cells = _np_array(cluster_small.cells)
-                large_cells = _np_array(cluster_large.cells)
-                _border_dist = min(
-                    min(min_possible_dist_cells_to_cell(large_cells, cell))
-                    for cell in small_cells
-                ) * spacing
-            return _border_dist
-
-        for (max_c, max_b) in conditions:
-            c_ok = (max_c is None) or (centroid_dist <= max_c)
-            if not c_ok:
-                continue
-            b_ok = (max_b is None) or (_get_border_dist() <= max_b)
-            if b_ok:
-                return True
-        return False
-    return check_if_merge
-
 def get_val_if_not_already_scalar(val_or_vals, index:int):
-    if hasattr(val_or_vals, '__len__'):
-        return float(val_or_vals[index])
-    return float(val_or_vals)
+    if type(val_or_vals) in [list, _np_array]:
+        return val_or_vals[index]
+    return val_or_vals
 
 class Clustering(object):
     """ 
@@ -195,6 +140,7 @@ class Clustering(object):
         make_convex (bool):
             Whether all cells within the convex hull of a cluster shall be added to it (default=True)
         """
+        print(row_name, col_name, "pts.columns",pts.columns)
         # TODO raise error when not columns contains col for which no radius search has been performed
         centroid_dist_threshold = centroid_dist_threshold if type(centroid_dist_threshold) in [list, _np_array] else [centroid_dist_threshold for n in c]
         border_dist_threshold = border_dist_threshold if type(border_dist_threshold) in [list, _np_array] else [border_dist_threshold for n in c]
@@ -209,34 +155,19 @@ class Clustering(object):
             )
             self.by_column[column] = clusters_for_column
             largest_cluster = max([0]+[cluster.total for cluster in clusters_for_column.clusters])
-            if queen_contingency:
+            if queen_contingency: 
                 clusters_for_column.merge_clusters(check_if_merge=merge_condition_queen_contingency(queen_contingency))
-            if rook_contingency > queen_contingency:
+            if rook_contingency > queen_contingency: 
                 clusters_for_column.merge_clusters(check_if_merge=merge_condition_rook_contingency(rook_contingency))
             if min_cluster_share_after_contingency > 0:
                 clusters_for_column.drop_small_cluster(largest_cluster * min_cluster_share_after_contingency)
             clusters_for_column.clusters_pre_merge = 0
-            # merge_dist_conditions is a normalised list of (centroid, border) tuples
-            # (set by _unpack_merge_dist when caller passes merge_dist=).
-            # Fall back to the legacy two-scalar path when called directly.
-            _conditions = getattr(self, '_merge_dist_conditions_for_col', {}).get(column)
-            if _conditions is not None:
-                if _conditions:
-                    clusters_for_column.merge_clusters(
-                        check_if_merge=merge_condition_distance_based_dnf(_conditions, self.grid.cell_size)
-                    )
-                clusters_for_column.merge_rules = {'contingency': queen_contingency or rook_contingency, 'merge_dist': _conditions}
-            elif not centroid_dist_threshold is None and not border_dist_threshold is None:
+            if not centroid_dist_threshold is None and not border_dist_threshold is None:
                 clusters_for_column.merge_clusters(check_if_merge=merge_condition_distance_based(max_centroid_dist, max_border_dist, self.grid.cell_size))
-                clusters_for_column.merge_rules = {'contingency': queen_contingency or rook_contingency, 'centroid_dist': max_centroid_dist, 'border_dist': max_border_dist}
             elif not centroid_dist_threshold is None:
                 clusters_for_column.merge_clusters(check_if_merge=merge_condition_centroid_distance(centroid_dist_threshold))
-                clusters_for_column.merge_rules = {'contingency': queen_contingency or rook_contingency, 'centroid_dist': centroid_dist_threshold}
             elif not border_dist_threshold is None:
                 clusters_for_column.merge_clusters(check_if_merge=merge_condition_border_distance(max_border_dist, self.grid.cell_size))
-                clusters_for_column.merge_rules = {'contingency': queen_contingency or rook_contingency, 'border_dist': max_border_dist}
-            else:
-                clusters_for_column.merge_rules = {'contingency': queen_contingency or rook_contingency}
             if min_cluster_share_after_centroid_dist > 0:
                 clusters_for_column.drop_small_cluster(largest_cluster * min_cluster_share_after_centroid_dist)
             if make_convex:
@@ -255,7 +186,7 @@ class Clustering(object):
         ensure all cells between (=orthogononally, not diagonally) two cluster cells are also part of the cluster
         exception: a cell is part of another cluster already
         """
-        id_to_sums = self.grid.cell_aggregates
+        id_to_sums = self.grid._search_internals.id_to_sums
         grid_xmin = self.grid.x_steps_bounds[0]
         grid_ymin = self.grid.y_steps_bounds[0]
         cell_size = self.grid.cell_size
@@ -443,7 +374,7 @@ class Clustering(object):
             self.column = column
             self.column_id = column_id
             self.clustered_cells = set(arr_to_tpls(clustered_cells, int))
-            id_to_sums = self.grid.cell_aggregates
+            id_to_sums = self.grid._search_internals.id_to_sums
             get_cell_centroid = grid.get_cell_centroid  # output-grid centroid: (xmin + (col+0.5)*cell_size, ...)
             self.clusters = [Clustering.Cluster(
                 id=i,
@@ -512,7 +443,7 @@ class Clustering(object):
                 self
         ):
             set_clustered_cells = self.clustered_cells
-            id_to_sums = self.grid.cell_aggregates
+            id_to_sums = self.grid._search_internals.id_to_sums
             cell_size = self.grid.cell_size
             cell_size_y = self.grid.cell_size_y
             grid_xmin = self.grid.x_steps_bounds[0]

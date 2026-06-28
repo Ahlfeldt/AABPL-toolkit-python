@@ -192,30 +192,63 @@ def intersect_polygon_with_grid(
         rel_tol = 0.00000,
 
 ):
-    grid.sample_col_min = sample_col_min = int((grid.sample_area.bounds[0] - grid.total_bounds.xmin) // grid._search_spacing)
-    grid.sample_row_min = sample_row_min = int((grid.sample_area.bounds[1] - grid.total_bounds.ymin) // grid._search_spacing)
-    grid.sample_col_max = sample_col_max = int((grid.sample_area.bounds[2] - grid.total_bounds.xmin) // grid._search_spacing)
-    grid.sample_row_max = sample_row_max = int((grid.sample_area.bounds[3] - grid.total_bounds.ymin) // grid._search_spacing)
-    
-    col_min = min(grid._search_col_ids)
-    row_min = min(grid._search_row_ids)
-    col_max = max(grid._search_col_ids)
-    row_max = max(grid._search_row_ids)
-    _sp = grid._search_spacing
-    _x0, _y0 = grid.total_bounds.xmin, grid.total_bounds.ymin
-    _x1, _y1 = grid.total_bounds.xmax, grid.total_bounds.ymax
-    _col_lo, _col_hi = min(grid._search_col_ids), max(grid._search_col_ids)
-    _row_lo, _row_hi = min(grid._search_row_ids), max(grid._search_row_ids)
+    _si = grid._search_internals
+    grid.sample_col_min = sample_col_min = int((grid.sample_area.bounds[0] - _si.bounds.xmin) // _si.spacing)
+    grid.sample_row_min = sample_row_min = int((grid.sample_area.bounds[1] - _si.bounds.ymin) // _si.spacing)
+    grid.sample_col_max = sample_col_max = int((grid.sample_area.bounds[2] - _si.bounds.xmin) // _si.spacing)
+    grid.sample_row_max = sample_row_max = int((grid.sample_area.bounds[3] - _si.bounds.ymin) // _si.spacing)
+
+    col_min = int(_si.col_ids.min())
+    row_min = int(_si.row_ids.min())
+    col_max = int(_si.col_ids.max())
+    row_max = int(_si.row_ids.max())
+    _sp = _si.spacing
+    _x0, _y0 = _si.bounds.xmin, _si.bounds.ymin
+    _x1, _y1 = _si.bounds.xmax, _si.bounds.ymax
+    _col_lo, _col_hi = col_min, col_max
+    _row_lo, _row_hi = row_min, row_max
     grid.sample_x_steps = concatenate([
         _np_arange(_x0 + (sample_col_min - _col_lo) * _sp, _x0, _sp) if sample_col_min < _col_lo else _np_array([]),
-        grid._search_x_steps,
+        _si.x_steps,
         _np_arange(_x1 + _sp, _x0 + (sample_col_max + 1) * _sp + _sp * 0.5, _sp) if sample_col_max > _col_hi else _np_array([]),
     ])
     grid.sample_y_steps = concatenate([
         _np_arange(_y0 + (sample_row_min - _row_lo) * _sp, _y0, _sp) if sample_row_min < _row_lo else _np_array([]),
-        grid._search_y_steps,
+        _si.y_steps,
         _np_arange(_y1 + _sp, _y0 + (sample_row_max + 1) * _sp + _sp * 0.5, _sp) if sample_row_max > _row_hi else _np_array([]),
     ])
+    grid.update_spacing(recompute=True)
+    # Classify output cells now that the grid has been extended to cover the
+    # sample area.  Using x_steps_bounds[0] as the anchor here (post-extension)
+    # ensures null_distribution uses the same anchor as this classification.
+    _ox = grid.x_steps_bounds[0]
+    _oy = grid.y_steps_bounds[0]
+    _sx = grid.cell_size
+    _sy = grid.cell_size_y
+    _bx0, _by0, _bx1, _by1 = grid.sample_area.bounds
+    from math import floor as _mfloor, ceil as _mceil
+    _ocmin = max(0, _mfloor((_bx0 - _ox) / _sx))
+    _ormin = max(0, _mfloor((_by0 - _oy) / _sy))
+    _ocmax = _mceil((_bx1 - _ox) / _sx)
+    _ormax = _mceil((_by1 - _oy) / _sy)
+    _out_fully = set()
+    _out_partly = set()
+    for _r in range(_ormin, _ormax + 1):
+        for _c in range(_ocmin, _ocmax + 1):
+            _cp = _shapely_Polygon([
+                (_ox + _c * _sx,       _oy + _r * _sy),
+                (_ox + (_c+1) * _sx,   _oy + _r * _sy),
+                (_ox + (_c+1) * _sx,   _oy + (_r+1) * _sy),
+                (_ox + _c * _sx,       _oy + (_r+1) * _sy),
+            ])
+            if grid.sample_area.contains(_cp):
+                _out_fully.add((_r, _c))
+            elif grid.sample_area.intersects(_cp):
+                _out_partly.add((_r, _c))
+    grid.output_cells_fully_valid = _out_fully
+    grid.output_cells_partly_valid = _out_partly
+    grid._output_sample_spacing_x = _sx
+    grid._output_sample_spacing_y = _sy
     # grid.sample_x_steps = _np_array(
     #     [grid.total_bounds.xmin - (col_min-col)*grid._search_spacing for col in range(sample_col_min, col_min)] +  
     #     list(grid._search_x_steps) + 
@@ -229,10 +262,10 @@ def intersect_polygon_with_grid(
     grid.sample_col_ids = range(col_min,col_max+1)
     grid.sample_row_ids = range(row_min,row_max+1)
     grid.sample_grid_bounds = [
-        grid.total_bounds.xmin + sample_col_min * grid._search_spacing,
-        grid.total_bounds.ymin + sample_row_min * grid._search_spacing,
-        grid.total_bounds.xmin + (sample_col_max+1) * grid._search_spacing,
-        grid.total_bounds.ymin + (sample_row_max+1) * grid._search_spacing,
+        _si.bounds.xmin + sample_col_min * _si.spacing,
+        _si.bounds.ymin + sample_row_min * _si.spacing,
+        _si.bounds.xmin + (sample_col_max+1) * _si.spacing,
+        _si.bounds.ymin + (sample_row_max+1) * _si.spacing,
     ]
     
     
@@ -257,7 +290,7 @@ def intersect_polygon_with_grid(
     used_poly_lvls = sorted(set(lvl for lvl,(row,col) in cell_to_poly if lvls_to_store==True or lvl in lvls_to_store))
     min_lvl = int(min(used_poly_lvls))
     max_lvl = int(max(used_poly_lvls))
-    abs_tol = rel_tol * (grid._search_spacing*2**-max_lvl)**2
+    abs_tol = rel_tol * (grid._search_internals.spacing*2**-max_lvl)**2
     # method to obtain poky for fully valid cells from lvl, row, col
     def get_fully_valid_poly(
             lvl:int,
@@ -287,12 +320,12 @@ def intersect_polygon_with_grid(
         (lvl, (row,col)) for (lvl, (row,col)), poly in cell_to_poly.items() 
         if lvl in used_poly_lvls and (
         (type(poly) is bool and poly is True) or
-        poly.area >= (grid._search_spacing*2**-lvl)**2 - abs_tol
+        poly.area >= (grid._search_internals.spacing*2**-lvl)**2 - abs_tol
         )}
     cells_partly_valid_max_lvl = {
         (lvl, (row,col)) for (lvl, (row,col)), poly in cell_to_poly.items() 
         if lvl == max_lvl and not type(poly) is bool and
-        (grid._search_spacing*2**-lvl)**2 - abs_tol > poly.area > abs_tol
+        (grid._search_internals.spacing*2**-lvl)**2 - abs_tol > poly.area > abs_tol
         } 
     #
 
@@ -307,10 +340,10 @@ def intersect_polygon_with_grid(
         cell_to_poly = {
             (lvl,(row,col)): 
                 get_fully_valid_poly(lvl,row,col) if type(v) is bool and v is True else v 
-            for (lvl,(row,col)),v in grid.cell_to_poly.items()
+            for (lvl,(row,col)),v in grid._search_internals.cell_to_poly.items()
             }
         if bind_to_grid:
-            grid.cell_to_poly = cell_to_poly
+            grid._search_internals.cell_to_poly = cell_to_poly
         return cell_to_poly
     grid.get_cell_to_poly = get_cell_to_poly
     #
@@ -373,10 +406,10 @@ def intersect_polygon_with_grid(
             # else keep cell
 
 
-    grid.cell_to_poly = cell_to_poly
-    grid.cell_to_poly_partly_valid = {cell:poly for cell, poly in cell_to_poly.items() if cell in cells_partly_valid_max_lvl}
-    grid.cells_fully_valid = cells_fully_valid
-    grid.cells_partly_valid_max_lvl = set(cells_partly_valid_max_lvl)
+    grid._search_internals.cell_to_poly = cell_to_poly
+    grid._search_internals.cell_to_poly_partly_valid = {cell:poly for cell, poly in cell_to_poly.items() if cell in cells_partly_valid_max_lvl}
+    grid._search_internals.cells_fully_valid = cells_fully_valid
+    grid._search_internals.cells_partly_valid_max_lvl = set(cells_partly_valid_max_lvl)
     
     # if area_complexity>500:
     #     print('WARNING: The Polygon defining the valid area is complex (n edges=' +
@@ -387,7 +420,7 @@ def intersect_polygon_with_grid(
 def infer_sample_area_from_pts(
         pts:_pd_DataFrame=None,
         grid=None,
-        hull_type:str=['buff_non_empty_cells', 'buff_cells_min_pts', 'buff_pts', 'concave','convex','bounding_box','grid'][0],
+        hull_type:str=['buff_non_empty_cells', 'buff_cells', 'buff_pts', 'concave','convex','bounding_box','grid'][0],
         concavity:float=1,
         buffer:float=None,
         tolerance:float=None,
@@ -407,7 +440,7 @@ def infer_sample_area_from_pts(
     hull_type (str):
         Must be one of ['concave','convex','bounding_box','grid']. 
             - 'buff_non_empty_cells': each non-empty cell plus buffer around them
-            - 'buff_cells_min_pts': each cell with at least min_pts_to_sample_cell points plus buffer around them
+            - 'buff_cells': each cell with at least min_pts_to_sample_cell points plus buffer around them
             - 'buff_pts': a buffer will be drawn around each point. Warning: extremely be slow for large number of points
             - 'concave': a concave hull will be drawn around points. 
             - 'convex': a convex hull will be drawn around points.
@@ -424,7 +457,7 @@ def infer_sample_area_from_pts(
     y (str):
         column name of y-coordinate (=lattitude) in pts_source (default='lat')
     min_pts_to_sample_cell (int):
-        will only be used when hull_type=='buff_cells_min_pts'. Minimum number of points that need to be present in a cell so that the cell is included in the sample area (default=0)
+        will only be used when hull_type=='buff_cells'. Minimum number of points that need to be present in a cell so that the cell is included in the sample area (default=0)
     
     Returns:
     -------
@@ -448,8 +481,8 @@ def infer_sample_area_from_pts(
         progress_print("sample_area hull_type 'buffer' deprectated. Use 'buff_pts' instead.")
         hull_type='buff_pts'
     elif hull_type == 'buffered_cells':
-        progress_print("sample_area hull_type 'buffered_cells' deprectated. Use 'buff_non_empty_cells' or 'buff_cells_min_pts' instead.")
-        hull_type='buff_cells_min_pts'
+        progress_print("sample_area hull_type 'buffered_cells' deprecated. Use 'buff_cells' instead.")
+        hull_type='buff_cells'
     
     if hull_type == 'bounding_box':
     
@@ -465,12 +498,19 @@ def infer_sample_area_from_pts(
     elif hull_type == 'grid':
         if grid is None:
             raise ValueError('In order to use the grid bounds as valid area, a grid needs to be supplied as function input: infer_sample_area_from_pts(grid=...)')
+        # hull_coordinates = [
+        #     (grid._search_internals.bounds.xmin,grid._search_internals.bounds.ymin),
+        #     (grid._search_internals.bounds.xmax,grid._search_internals.bounds.ymin),
+        #     (grid._search_internals.bounds.xmax,grid._search_internals.bounds.ymax),
+        #     (grid._search_internals.bounds.xmin,grid._search_internals.bounds.ymax),
+        #     ]
         hull_coordinates = [
-            (grid.total_bounds.xmin,grid.total_bounds.ymin),
-            (grid.total_bounds.xmax,grid.total_bounds.ymin),
-            (grid.total_bounds.xmax,grid.total_bounds.ymax),
-            (grid.total_bounds.xmin,grid.total_bounds.ymax),
-            ]
+            (grid.x_steps[0],  grid.y_steps[0]),   # Links unten
+            (grid.x_steps[-1], grid.y_steps[0]),   # Rechts unten
+            (grid.x_steps[-1], grid.y_steps[-1]),  # Rechts oben
+            (grid.x_steps[0],  grid.y_steps[-1]),  # Links oben
+        ]
+
     
     elif hull_type in ['concave', 'convex']:
     
@@ -487,12 +527,16 @@ def infer_sample_area_from_pts(
         # don't simplify this shape
         area_missing_from_hull = 0
 
-    elif hull_type in ['buff_non_empty_cells', 'buff_cells_min_pts']:
-        
-        grid_xmin = grid.total_bounds.xmin
-        grid_ymin = grid.total_bounds.ymin
-        grid_xmax = grid.total_bounds.xmax
-        grid_ymax = grid.total_bounds.ymax
+    elif hull_type in ['buff_non_empty_cells', 'buff_cells']:
+        # TODO this should no longer refer to the search grid!
+        # grid_xmin = grid._search_internals.bounds.xmin
+        # grid_ymin = grid._search_internals.bounds.ymin
+        # grid_xmax = grid._search_internals.bounds.xmax
+        # grid_ymax = grid._search_internals.bounds.ymax
+        grid_xmin = grid.x_steps[0]
+        grid_ymin = grid.y_steps[0]
+        grid_xmax = grid.x_steps[-1]
+        grid_ymax = grid.y_steps[-1]
         if min_pts_to_sample_cell == 0 and hull_type != 'buff_non_empty_cells':
             sample_poly = _shapely_Polygon([
                 (grid_xmin, grid_ymin),
@@ -545,21 +589,20 @@ def infer_sample_area_from_pts(
         else:
             if hull_type == 'buff_non_empty_cells':
                 if min_pts_to_sample_cell != 1:
-                    progress_print("sample_area hull_type 'buff_non_empty_cells' used together with min_pts_to_sample_cell != 1. min_pts_to_sample_cell will be set = 1. Use 'buff_cells_min_pts' to specify different value.")
+                    progress_print("sample_area hull_type 'buff_non_empty_cells' used together with min_pts_to_sample_cell != 1. min_pts_to_sample_cell will be set = 1. Use 'buff_cells' to specify different value.")
                 min_pts_to_sample_cell = 1
-            # Build the valid-area footprint from search-grid cells (size =
-            # grid._search_spacing = r/3). Using output_spacing would produce cells
-            # much larger than r after update_spacing() runs (e.g. 25 000 m cells
-            # with a 15 000 m buffer), making the buffer zone negligibly thin.
+            # Build the valid-area footprint from OUTPUT grid cells, then intersect
+            # with the search grid in intersect_polygon_with_grid below.
+            # Note: the intersection step could be skipped when weight_valid_area is
+            # False, since partial cell coverage only matters for area weighting.
             from numpy import floor as _np_floor
             from collections import Counter as _Counter
-            sx = grid._search_spacing
-            sy = grid._search_spacing
-            # output_x_steps[0] == total_bounds.xmin, but the output arrays are built
-            # lazily (update_spacing) and the sample area is constructed during the
-            # search, before that — so read the origin from total_bounds directly.
-            ox = grid.total_bounds.xmin
-            oy = grid.total_bounds.ymin
+            sx = grid.cell_size
+            sy = grid.cell_size_y
+            # ox = grid.x_steps_bounds[0]
+            # oy = grid.y_steps_bounds[0]
+            ox = grid.x_steps[0]
+            oy = grid.y_steps[0]
             _cols = _np_floor((pts[x].values - ox) / sx).astype(int)
             _rows = _np_floor((pts[y].values - oy) / sy).astype(int)
             _counts = _Counter(zip(_rows.tolist(), _cols.tolist()))
@@ -598,7 +641,7 @@ def infer_sample_area_from_pts(
         area_missing_from_hull = 0
            
     else:
-        raise ValueError("hull_type to infere sample area for random points must be in ['buff_non_empty_cells', 'buff_cells_min_pts', 'concave','convex','buff_pts', 'bounding_box', 'grid']. Value provided:",hull_type)
+        raise ValueError("hull_type to infere sample area for random points must be in ['buff_non_empty_cells', 'buff_cells', 'concave','convex','buff_pts', 'bounding_box', 'grid']. Value provided:",hull_type)
     #
     if area_missing_from_hull > 0:
         hull_poly = _shapely_Polygon(hull_coordinates).buffer(distance=0,quad_segs=1)

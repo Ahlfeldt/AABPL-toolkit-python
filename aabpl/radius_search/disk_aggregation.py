@@ -71,22 +71,22 @@ def search_and_aggregate(
     # sums_by_lvl, produced by point_grid_assignment.aggregate_point_data_to_cells)
     # combined as min-of-mins / max-of-maxes over contained cells, while overlapped
     # cells are still reduced point-by-point. Not implemented yet — see main.py.
-    codec = grid.cell_codec
-    sums_by_lvl = grid.id_to_sums_by_lvl
-    vals_xy_by_lvl = grid.id_to_vals_xy_by_lvl
+    codec = grid._search_internals.cell_codec
+    sums_by_lvl = grid._search_internals.id_to_sums_by_lvl
+    vals_xy_by_lvl = grid._search_internals.id_to_vals_xy_by_lvl
     sums_array  = grid.sums_array
     pts_vals_xy = grid.pts_vals_xy
     nonempty_cell_keys = set(sums_by_lvl)
-    grid_spacing = grid._search_spacing
-    contain_region_mult = grid.search.contain_region_mult
+    grid_spacing = grid._search_internals.spacing
+    contain_region_mult = grid._search_class.contain_region_mult
 
-    shared_cntd_cells = grid.search.shared_cntd_cells
-    cntd_cells_by_region = grid.search.region_and_trgl_id_to_distinct_cntd_cells
-    ovlpd_cells_by_region = grid.search.region_and_trgl_id_to_distinct_ovlpd_cells
+    shared_cntd_cells = grid._search_class.shared_cntd_cells
+    cntd_cells_by_region = grid._search_class.region_and_trgl_id_to_distinct_cntd_cells
+    ovlpd_cells_by_region = grid._search_class.region_and_trgl_id_to_distinct_ovlpd_cells
     # level-0 (row,col) templates, used only for the valid-area invalid-cell test
-    cntd_cells_by_cell_region = grid.search.region_id_to_cntd_cells
-    ovlpd_cells_by_cell_region = grid.search.region_id_to_ovlpd_cells
-    get_cell_centroid = grid.get_cell_centroid
+    cntd_cells_by_cell_region = grid._search_class.region_id_to_cntd_cells
+    ovlpd_cells_by_cell_region = grid._search_class.region_id_to_ovlpd_cells
+    get_cell_centroid = grid._search_internals.cell_centroid
 
     n_pts = len(pts_source)
     n_cols = len(c)
@@ -95,7 +95,7 @@ def search_and_aggregate(
     zero_sum = _np_zeros(n_cols, dtype=int) if n_cols > 1 else 0
 
     # ---- edge weighting: which level-0 cells are NOT in the sampling grid ------
-    cells_rndm_sample = grid.cells_rndm_sample
+    cells_rndm_sample = grid._search_internals.cells_rndm_sample
     if isinstance(cells_rndm_sample, bool) and cells_rndm_sample:
         weight_valid_area = False  # every cell is sampled -> the whole disk is valid
     if weight_valid_area not in ('precise', 'estimate', False, None):
@@ -112,8 +112,8 @@ def search_and_aggregate(
         pad = -int(-grid_spacing // r)
         invalid_cells = set(
             (int(row_id), int(col_id))
-            for row_id in range(min(grid._search_row_ids) - pad, max(grid._search_row_ids) + pad)
-            for col_id in range(min(grid._search_col_ids) - pad, max(grid._search_col_ids) + pad)
+            for row_id in range(int(grid._search_internals.row_ids.min()) - pad, int(grid._search_internals.row_ids.max()) + pad)
+            for col_id in range(int(grid._search_internals.col_ids.min()) - pad, int(grid._search_internals.col_ids.max()) + pad)
             if (int(row_id), int(col_id)) not in cells_rndm_sample
         )
         invalid_keys = set(int(codec.key(0, rr, cc)) for rr, cc in invalid_cells)
@@ -559,7 +559,7 @@ def search_and_aggregate(
             def _rc_count(rc):
                 p = _lvl0_packed(grid, rc[0], rc[1])
                 return (p & 0xFFFFFFFF) - (p >> 32) if p else 0
-            _best_rc = max(grid.id_to_sums, key=_rc_count)
+            _best_rc = max(grid._search_internals.id_to_sums, key=_rc_count)
             _pos = _lvl0_packed(grid, _best_rc[0], _best_rc[1])
             plot_pt_disk['pt_id'] = int(grid.pts_ids[_pos >> 32]) if _pos and (_pos & 0xFFFFFFFF) > (_pos >> 32) else None
         target_id = plot_pt_disk['pt_id']
@@ -585,7 +585,7 @@ def search_and_aggregate(
             # otherwise let illustrate_point_disk skip that one overlay rather than
             # crash the search. Everything else in the figure is independent of it.
             region_id_for_plot = (int(cell_region[pos])
-                                  if int(cell_region[pos]) in grid.id_to_offset_regions else None)
+                                  if int(cell_region[pos]) in grid._search_internals.id_to_offset_regions else None)
             try:
                 illustrate_point_disk(
                     grid=grid, pts_source=pts_source, pts_target=pts_target, r=r, c=c, x=x, y=y,
@@ -610,7 +610,7 @@ def search_and_aggregate(
     if exclude_self:
         # TODO when implementing max,min,range - excluding the point itself cannot be done. Docstring for those function need to tell that.
         # if we only have max,min,range as method and this option is on, consider informing via print 
-        if grid.search.tgt_df_contains_src_df:
+        if grid._search_class.tgt_df_contains_src_df:
             for sum_name, value_col in zip(sum_radius_names, c):
                 pts_source[sum_name] = pts_source[sum_name].values - pts_source[value_col]
         else:
@@ -618,7 +618,7 @@ def search_and_aggregate(
                   "You may have to Fall back to substract the point own values manually from result of radius aggregation.")
 
     if weight_valid_area:
-        share_name = 'valid_area_share' + suffix
+        share_name = f'valid_area_share_{r}'
         pts_source[share_name] = valid_area_shares
         for sum_name in sum_radius_names:
             pts_source[sum_name] = pts_source[sum_name].values / pts_source[share_name].values
@@ -649,7 +649,7 @@ def search_and_aggregate(
         # Initialize own_vals as 0 or None in case exclude_self is False
         own_vals = 0.0 
         
-        if exclude_self and grid.search.tgt_df_contains_src_df:
+        if exclude_self and grid._search_class.tgt_df_contains_src_df:
             if n_cols > 1:
                 own_vals = pts_target.loc[rep_idx, c].values.astype(float)
             else:

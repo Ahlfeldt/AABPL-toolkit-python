@@ -54,6 +54,7 @@ def _validate_kwargs(
         build_grid_obj:bool=True,
         n_pts_src_extra:int=0,
         proj_crs:str='auto',
+        grid_bounds=(None, None, None, None),
         silent:bool=None,
 ):
     """
@@ -149,6 +150,7 @@ def _validate_kwargs(
             output_spacing=output_spacing,
             output_spacing_y=output_spacing_y,
             n_pts_src_extra=n_pts_src_extra,
+            grid_bounds=grid_bounds,
             silent=silent,
         )
     else:
@@ -168,12 +170,39 @@ def _unpack_contingency(v):
     return v, v
 
 def _unpack_merge_dist(v):
+    """
+    Normalise the ``merge_dist`` parameter to a list of ``(centroid_dist, border_dist)``
+    condition tuples used by ``merge_condition_distance_based_dnf``.
+
+    Accepted forms
+    --------------
+    ``None``
+        No distance-based merging → returns ``[]``.
+    ``float`` or ``int``
+        Single threshold applied to both centroid and border (original scalar form)
+        → ``[(v, v)]``.
+    ``(centroid, border)``
+        Single AND-condition (original tuple form, backward-compatible)
+        → ``[(centroid, border)]``.
+    ``[(c1, b1), (c2, b2), ...]``
+        DNF: merge if ANY condition tuple is fully satisfied.
+        OR between tuples; AND within each tuple.
+        A ``None`` element inside a tuple disables that measure for that condition.
+    """
     if v is None:
-        return None, None
+        return []
+    # scalar → same threshold for both measures
+    if isinstance(v, (int, float)):
+        return [(float(v), float(v))]
+    # detect list-of-tuples vs plain pair
     if isinstance(v, (tuple, list)):
-        return v[0], v[1]
-    f = float(v)
-    return f, f
+        # If the first element is itself a tuple/list it's already DNF form.
+        if v and isinstance(v[0], (tuple, list)):
+            return [(t[0], t[1]) for t in v]
+        # Plain pair (centroid, border) — original backward-compatible form.
+        return [(v[0], v[1])]
+    raise TypeError(f"merge_dist must be None, a number, a (centroid, border) tuple, "
+                    f"or a list of such tuples; got {type(v)}")
 
 def _unpack_min_cluster_share(v):
     if isinstance(v, (tuple, list)):
@@ -195,11 +224,11 @@ def _parse_sample_area_spec(spec):
     return method, params
 
 _SAMPLE_AREA_ALIASES = {
-    'buff_cells':     'buff_cells_min_pts',
-    'buff_non_empty': 'buff_non_empty_cells',
-    'concave_hull':   'concave',
-    'convex_hull':    'convex',
-    'bbox':           'bounding_box',
+    'buff_cells_min_pts': 'buff_cells',  # old name → canonical
+    'buff_non_empty':     'buff_non_empty_cells',
+    'concave_hull':       'concave',
+    'convex_hull':        'convex',
+    'bbox':               'bounding_box',
 }
 
 _SAMPLE_AREA_SPEC_DOCS = (
@@ -211,7 +240,7 @@ _SAMPLE_AREA_SPEC_DOCS = (
     "    Buffer around all non-empty grid cells.\n"
     "    buf=<float>       Buffer radius in CRS units (default: search radius r).\n"
     "\n"
-    "buff_cells_min_pts / buff_cells\n"
+    "buff_cells  [also: buff_cells_min_pts]\n"
     "    Buffer around cells that contain >= min_pts data points.\n"
     "    min_pts=<int>     Minimum points per cell (default: 1 = non-empty).\n"
     "    buf=<float>       Buffer radius (default: r).\n"
@@ -242,7 +271,7 @@ _SAMPLE_AREA_SPEC_DOCS = (
     "Examples\n"
     "    sample_area='buff_cells'\n"
     "    sample_area='buff_cells,min_pts=2,buf=500'\n"
-    "    sample_area='buff_cells_min_pts,min_pts=1,buf=53.3'\n"
+    "    sample_area='buff_cells,min_pts=1,buf=53.3'\n"
     "    sample_area='concave,concavity=0.5,buf=1000,tol=50'\n"
     "    sample_area='convex'\n"
     "    sample_area='bounding_box'\n"
@@ -267,10 +296,10 @@ def resolve_sample_area(
 ):
     if type(sample_area)==bool and sample_area==False:
         return _shapely_Polygon([
-            (grid.total_bounds.xmin, grid.total_bounds.ymin),
-            (grid.total_bounds.xmax, grid.total_bounds.ymin),
-            (grid.total_bounds.xmax, grid.total_bounds.ymax),
-            (grid.total_bounds.xmin, grid.total_bounds.ymax)
+            (grid._search_internals.bounds.xmin, grid._search_internals.bounds.ymin),
+            (grid._search_internals.bounds.xmax, grid._search_internals.bounds.ymin),
+            (grid._search_internals.bounds.xmax, grid._search_internals.bounds.ymax),
+            (grid._search_internals.bounds.xmin, grid._search_internals.bounds.ymax)
         ])
 
     if sample_area is None:
@@ -280,7 +309,7 @@ def resolve_sample_area(
 
         if hull_type == 'buff_non_empty_cells':
             progress_print("sample_area='buff_non_empty_cells' is deprecated. Use sample_area='buff_cells' instead.")
-            hull_type = 'buff_cells_min_pts'
+            hull_type = 'buff_cells'
             parsed.setdefault('min_pts', '1')
 
         _buf       = float(parsed['buf'])       if 'buf'       in parsed else r
@@ -297,10 +326,10 @@ def resolve_sample_area(
         def _fmt(v): return str(int(v)) if v == int(v) else str(v)
 
         _param_parts = []
-        if hull_type in ('buff_cells_min_pts', 'buff_pts', 'concave', 'convex', 'bounding_box', 'grid'):
+        if hull_type in ('buff_cells', 'buff_pts', 'concave', 'convex', 'bounding_box', 'grid'):
             if hull_type != 'grid':
                 _param_parts.append(f'buf={_fmt(_buf)}')
-        if hull_type == 'buff_cells_min_pts':
+        if hull_type == 'buff_cells':
             _param_parts.append(f'min_pts={_min_pts}')
         if hull_type in ('concave', 'convex', 'buff_pts'):
             _param_parts.append(f'tol={_fmt(_tol_resolved)}')
@@ -308,7 +337,7 @@ def resolve_sample_area(
             _param_parts.append(f'concavity={_fmt(_concavity)}')
         _params_str = (', '.join(_param_parts) + '. ') if _param_parts else ''
         progress_print(f"Creating sample area: method='{hull_type}', {_params_str}Use 'grid.sample_area' to inspect.")
-
+        grid.update_spacing()
         sample_area = infer_sample_area_from_pts(
             pts=pts,
             grid=grid,
@@ -353,6 +382,7 @@ def build_grid(
     output_spacing:float=None,
     output_spacing_y:float=None,
     n_pts_src_extra:int=0,
+    grid_bounds=(None, None, None, None),
     silent:bool=None,
 ):
     """
@@ -397,6 +427,7 @@ def build_grid(
         output_spacing=output_spacing,
         output_spacing_y=output_spacing_y,
         n_pts_src_extra=n_pts_src_extra,
+        grid_bounds=grid_bounds,
         silent=silent,
     )
 #
@@ -475,12 +506,12 @@ def radius_search(
     x:str='lon',
     y:str='lat',
     stat:str=['sum','count','mean','variance','std','cv','skewness','kurtosis'][0],
-    exclude_self:bool=True,
+    exclude_self:bool=False,
     proj_crs:str='auto',
     suffix=None,
     overwrite:bool=False,
     weight_valid_area:str=None,
-    spacing:float=None,
+    cell_size:float=None,
     sample_area=False,
     row_name:str='id_y',
     col_name:str='id_x',
@@ -493,6 +524,7 @@ def radius_search(
     exclude_pt_itself:bool=None,   # deprecated alias for exclude_self
     _dev:dict=None,
     silent:bool=None,
+    **kwargs,
 ):
     """
     Aggregates data from neighboring points within a search radius for every point in ``pts``.
@@ -563,12 +595,12 @@ def radius_search(
         when ``sample_area`` is a custom Polygon or MultiPolygon with sharp edges. For
         method-string sample areas (``'buff_non_empty_cells'``, ``'concave'``, etc.) the
         boundary follows cell edges exactly and this bias does not occur.
-    spacing (float):
+    cell_size (float):
         Output cell size, in the same unit as ``r`` (metres after reprojection). Controls the
         resolution of the output grid used for exports and plots — NOT the internal search grid,
         whose cell size is chosen automatically for speed. Per-point aggregates are exact
         regardless of this value, so a finer output grid is well-defined. When None, defaults to
-        ``r/3`` (default=None).
+        ``r/3`` (default=None). Formerly ``spacing=`` (deprecated).
     sample_area (shapely.Polygon | shapely.MultiPolygon | str):
         Area used for valid-area weighting. Accepted string values:
             - ``'buff_non_empty_cells'``: non-empty grid cells plus a radius-sized buffer (default)
@@ -625,6 +657,16 @@ def radius_search(
     # Result column: employment_sum_750
     grid.plot.vars(filename='employment_750')
     """
+    # backward-compat: spacing= was renamed to cell_size=
+    if 'spacing' in kwargs:
+        import warnings
+        warnings.warn("'spacing' is deprecated, use 'cell_size' instead.", DeprecationWarning, stacklevel=2)
+        if cell_size is None:
+            cell_size = kwargs.pop('spacing')
+        else:
+            kwargs.pop('spacing')
+    if kwargs:
+        raise TypeError(f"radius_search() got unexpected keyword argument(s): {sorted(kwargs)}")
     # ── multi-radius delegation ───────────────────────────────────────────────
     # When r is not a scalar (list of radii or distance bands), hand off to the
     # dedicated implementation which calls radius_search once per unique radius.
@@ -639,7 +681,7 @@ def radius_search(
             _parsed_spec=(spec_type, spec_data),
             crs=crs, proj_crs=proj_crs,
             sample_area=sample_area,
-            spacing=spacing, row_name=row_name, col_name=col_name,
+            spacing=cell_size, row_name=row_name, col_name=col_name,
             pts_target=pts_target, x_tgt=x_tgt, y_tgt=y_tgt,
             row_name_tgt=row_name_tgt, col_name_tgt=col_name_tgt,
             weight_valid_area=weight_valid_area, overwrite=overwrite,
@@ -676,7 +718,7 @@ def radius_search(
         pts=pts, crs=crs, r=r, c=c, stat=stat, x=x, y=y, row_name=row_name,
         col_name=col_name, suffix=suffix, pts_target=pts_target, x_tgt=x_tgt, y_tgt=y_tgt,
         row_name_tgt=row_name_tgt, col_name_tgt=col_name_tgt,
-        output_spacing=spacing,
+        output_spacing=cell_size,
         proj_crs=proj_crs, silent=silent,
     )
     pts, local_crs = vk.pts, vk.local_crs
@@ -688,8 +730,8 @@ def radius_search(
     c = list(c)
     # TODO: replace with the actual output column names once spacing/nesting
     # changes how row/col indices are stored (may differ from input row_name/col_name)
-    grid.output_row_name = row_name
-    grid.output_col_name = col_name
+    grid.cell_row_name = row_name
+    grid.cell_col_name = col_name
 
     # Resolve dynamic default suffix for the single-stat path (multi-stat already set
     # suffix='__rs_int__' above; _validate_kwargs may have changed stat, e.g. to 'count').
@@ -725,6 +767,8 @@ def radius_search(
         _output_cols = set(col + _stat_suffixes[a] for a in _stat_list for col in orig_cols)
         if not orig_cols and 'count' in _stat_list and count_helper_col:
             _output_cols.add(count_helper_col + _stat_suffixes['count'])
+        if weight_valid_area:
+            _output_cols.add(f'valid_area_share_{r}')
     else:
         if stat in _MOMENT_AGGS:
             # variance/skewness/kurtosis are computed from raw moments: radius-sum x^p
@@ -754,6 +798,8 @@ def radius_search(
         # cleanup filter below can simply check membership instead of guessing via
         # prefix/suffix heuristics.
         _output_cols = set(col + suffix for col in orig_cols)
+        if weight_valid_area:
+            _output_cols.add(f'valid_area_share_{r}')
 
     if not overwrite:
         _collision = _output_cols & _cols_before
@@ -778,11 +824,11 @@ def radius_search(
         _prog.step("initializing")
 
     if exclude_pt_itself is not None:
-        progress_print("DeprecationWarning: `exclude_pt_itself` is deprecated, use `exclude_self` instead.")
+        import warnings; warnings.warn("'exclude_pt_itself' is deprecated, use 'exclude_self' instead.", DeprecationWarning, stacklevel=2)
         exclude_self = exclude_pt_itself
 
     # initialize disk_search
-    grid.search = DiskSearch(
+    DiskSearch(
         grid=grid,
         r=r,
         exclude_self=exclude_self,
@@ -792,7 +838,7 @@ def radius_search(
     if not _is_internal:
         _prog.step("assigning target")
     # prepare target points data
-    grid.search.set_target(
+    grid._search_class.set_target(
         pts=pts_target,
         c=c,
         x=x_tgt,
@@ -806,7 +852,7 @@ def radius_search(
         _prog.step("assigning source")
     # prepare source points data
     _d = _dev or {}
-    grid.search.set_source(
+    grid._search_class.set_source(
         pts=pts,
         c=c,
         x=x,
@@ -830,7 +876,7 @@ def radius_search(
 
     if not _is_internal:
         _prog.step("searching")
-    disk_sums_for_pts = grid.search.perform_search(silent=False if silent is None else silent,plot_pt_disk=_d.get('plot_pt_disk'))
+    disk_sums_for_pts = grid._search_class.perform_search(silent=False if silent is None else silent,plot_pt_disk=_d.get('plot_pt_disk'))
 
     if _stat_list is not None:
         # Multi-stat post-processing: derive each requested stat from the internal
@@ -953,7 +999,7 @@ def radius_search(
 
     if not keep_cols:
         if keep_cols is None:
-            _keep_extra = {grid.output_row_name, grid.output_col_name, x, y}
+            _keep_extra = {grid.cell_row_name, grid.cell_col_name, x, y}
         else:
             _keep_extra = {x, y}
         _to_drop = [
@@ -1033,29 +1079,24 @@ def detect_cluster_pts(
     crs:str,
     r,          # float | list | bands | weighted bands — see radius_search.params.r
     c:list=[],
-    stat:str=['sum','count','mean','variance','std','cv','skewness','kurtosis'][0],
-    exclude_self:bool=True,
-    sample_area='buff_cells_min_pts',
-    weight_valid_area:str=None,
-    k_th_percentile:float=99.5,
-    n_random_points:int=int(1e5),
-    random_seed:int=None,
-    null_distribution=None,
     x:str='lon',
     y:str='lat',
+    stat:str=['sum','count','mean','variance','std','cv','skewness','kurtosis'][0],
+    exclude_self:bool=True,
+    cell_size:float=None,
+    sample_area='buff_cells,min_pts=1',
+    weight_valid_area:str=None,
+    k_th_percentile:float=99.5,
+    null_distribution=int(1e5),
+    random_seed:int=None,
+    proj_crs:str='auto',
     row_name:str='id_y',
     col_name:str='id_x',
     suffix:str=None,
-    cluster_suffix:str=None,
-    proj_crs:str='auto',
     pts_target:_pd_DataFrame=None,
-    spacing:float=None,
-    plot_distribution:dict=None,
-    plot_cluster_points:dict=None,
     keep_cols:bool=False,
     overwrite:bool=False,
     exclude_pt_itself:bool=None,   # deprecated alias for exclude_self
-    _dev:dict=None,
     silent:bool=None,
     **kwargs,
 ):
@@ -1065,17 +1106,36 @@ def detect_cluster_pts(
     Then all points from DataFrame which exceed the k_th_percentile of the random distribution are labeld as clustered.
     The results will be appended to DataFrame.
 
-    null_distribution (array-like or pd.DataFrame, optional):
-        User-supplied null-distribution coordinates. When provided the internal uniform-random draw
-        is skipped and these coordinates are used as reference points for computing the null radius
-        sums. Accepts a DataFrame with the same x/y column names used in the search, or a
-        2-column array ``[[x, y], ...]``.
+    null_distribution (int | numpy.ndarray | pandas.DataFrame):
+        Controls the null distribution used for cluster detection (default ``100_000``):
 
-        **Important:** coordinates must be in the same projected CRS that ``pts`` is reprojected
-        into (metres), not in the original input CRS. When a real ``crs`` is supplied, use
-        ``aabpl.draw_random_coords()`` with the already-projected ``grid.sample_area`` to generate
-        compatible coordinates, or project your own points beforehand.
+        - **int**: draw this many points uniformly at random within ``sample_area``.
+        - **numpy.ndarray of shape (N, 2)**: use these coordinates directly as the reference
+          distribution — **first column x, second column y**, both in the projected CRS (metres).
+          The radius sums are still computed by the package.
+        - **pandas.DataFrame**: treated as an (N, 2) array via ``.values`` — **first column x,
+          second column y** (column names are ignored).
+
+        **Important for coordinate inputs:** coordinates must be in the same projected CRS that
+        ``pts`` is reprojected into (metres), not the original input CRS. Use
+        ``aabpl.draw_random_coords()`` with ``grid.sample_area`` to generate compatible coordinates.
     """
+    # backward-compat: spacing= was renamed to cell_size=
+    if 'spacing' in kwargs:
+        import warnings
+        warnings.warn("'spacing' is deprecated, use 'cell_size' instead.", DeprecationWarning, stacklevel=2)
+        if cell_size is None:
+            cell_size = kwargs.pop('spacing')
+        else:
+            kwargs.pop('spacing')
+    # backward-compat: n_random_points= merged into null_distribution=
+    if 'n_random_points' in kwargs:
+        import warnings
+        warnings.warn("'n_random_points' is deprecated, pass an integer to 'null_distribution' instead.", DeprecationWarning, stacklevel=2)
+        if isinstance(null_distribution, int):
+            null_distribution = kwargs.pop('n_random_points')
+        else:
+            kwargs.pop('n_random_points')
     if 'min_pts_to_sample_cell' in kwargs:
         min_pts_to_sample_cell = kwargs.pop('min_pts_to_sample_cell')
         progress_print(
@@ -1085,6 +1145,25 @@ def detect_cluster_pts(
         )
     else:
         min_pts_to_sample_cell = 0
+    _dev = kwargs.pop('_dev', None)
+    grid_bounds = kwargs.pop('grid_bounds', (None, None, None, None))
+    _cluster_suffix_internal = kwargs.pop('_cluster_suffix', None)  # passed by detect_cluster_cells
+    if _cluster_suffix_internal is not None:
+        cluster_suffix = _cluster_suffix_internal
+    elif 'cluster_suffix' in kwargs:
+        import warnings
+        warnings.warn("'cluster_suffix' is deprecated as a function argument. It will be removed in a future version.", DeprecationWarning, stacklevel=2)
+        cluster_suffix = kwargs.pop('cluster_suffix', None)
+    else:
+        cluster_suffix = None
+    if 'plot_distribution' in kwargs:
+        import warnings
+        warnings.warn("'plot_distribution' is deprecated as a function argument. Call grid.plot.rand_dist() on the returned grid instead.", DeprecationWarning, stacklevel=2)
+        kwargs.pop('plot_distribution')
+    if 'plot_cluster_points' in kwargs:
+        import warnings
+        warnings.warn("'plot_cluster_points' is deprecated as a function argument. Call grid.plot.cluster_pts() on the returned grid instead.", DeprecationWarning, stacklevel=2)
+        kwargs.pop('plot_cluster_points')
     x_tgt        = kwargs.pop('x_tgt', None)
     y_tgt        = kwargs.pop('y_tgt', None)
     row_name_tgt = kwargs.pop('row_name_tgt', None)
@@ -1149,10 +1228,9 @@ def detect_cluster_pts(
             grid=last_grid, pts=pts, sample_area=last_grid.sample_area,
             min_pts_to_sample_cell=min_pts_to_sample_cell,
             c=value_cols, x=x, y=y, row_name=row_name, col_name=col_name,
-            suffix='__mr_null__', n_random_points=n_random_points,
+            suffix='__mr_null__', null_distribution=null_distribution,
             k_th_percentile=k_th_percentile, random_seed=random_seed,
-            silent=silent, null_distribution=null_distribution,
-            r=r, stat=stat,
+            silent=silent, r=r, stat=stat,
         )
 
         # Label each output column: True where the aggregate exceeds its threshold.
@@ -1171,7 +1249,7 @@ def detect_cluster_pts(
 
         pts.sort_values(sort_order_col, inplace=True)
         pts.drop(columns=[sort_order_col], inplace=True)
-        last_grid.rndm_pts = random_pts
+        last_grid.null_distribution = random_pts
         return last_grid
     # ── end multi-radius ──────────────────────────────────────────────────────
 
@@ -1183,10 +1261,10 @@ def detect_cluster_pts(
         pts=pts, crs=crs, r=r, c=c, stat=stat,
         x=x, y=y, row_name=row_name, col_name=col_name, suffix=suffix,
         pts_target=pts_target, x_tgt=x_tgt, y_tgt=y_tgt, row_name_tgt=row_name_tgt, col_name_tgt=col_name_tgt,
-        output_spacing=spacing,
-        # the null distribution searches n_random_points extra sources over the
-        # same grid, so include them in the spacing/timing estimate.
-        n_pts_src_extra=n_random_points,
+        output_spacing=cell_size,
+        # the null distribution searches extra source pts over the same grid
+        n_pts_src_extra=null_distribution if isinstance(null_distribution, int) else 0,
+        grid_bounds=grid_bounds,
         proj_crs=proj_crs, silent=silent,
     )
     pts, local_crs = vk.pts, vk.local_crs
@@ -1221,11 +1299,11 @@ def detect_cluster_pts(
         _prog.step("initializing")
 
     if exclude_pt_itself is not None:
-        progress_print("DeprecationWarning: `exclude_pt_itself` is deprecated, use `exclude_self` instead.")
+        import warnings; warnings.warn("'exclude_pt_itself' is deprecated, use 'exclude_self' instead.", DeprecationWarning, stacklevel=2)
         exclude_self = exclude_pt_itself
 
     # initialize disk_search
-    grid.search = DiskSearch(
+    DiskSearch(
         grid,
         r=r,
         exclude_self=exclude_self,
@@ -1233,7 +1311,7 @@ def detect_cluster_pts(
     )
 
     if not _is_internal: _prog.step("assigning target")
-    grid.search.set_target(
+    grid._search_class.set_target(
         pts=pts_target,
         c=c,
         x=x_tgt,
@@ -1247,11 +1325,11 @@ def detect_cluster_pts(
         pts=pts, r=r,
         sample_area=sample_area, crs=crs, local_crs=local_crs, x=x, y=y, grid=grid,
         min_pts_to_sample_cell=min_pts_to_sample_cell,
-        no_plot=plot_distribution is None and plot_cluster_points is None)
+        no_plot=True)
     intersect_polygon_with_grid(grid=grid)
 
     if not _is_internal: _prog.step("null distribution")
-    if null_distribution is not None and local_crs and local_crs != crs:
+    if not isinstance(null_distribution, int) and local_crs and local_crs != crs:
         progress_print(
             "WARNING: null_distribution coordinates must already be in the projected CRS "
             f"'{local_crs}', not the input CRS '{crs}'. "
@@ -1270,22 +1348,23 @@ def detect_cluster_pts(
         row_name=row_name,
         col_name=col_name,
         suffix=suffix,
-        n_random_points=n_random_points,
+        null_distribution=null_distribution,
         k_th_percentile=k_th_percentile,
         random_seed=random_seed,
         silent=silent,
-        null_distribution=null_distribution,
     )
     # unpack dict → list keyed by c[j]+suffix for the single-radius path
     cluster_threshold_values = [_cluster_thresholds_dict[col+suffix] for col in c]
+    grid.null_distribution = rndm_pts
 
     if not silent:
-        for (colname, threshold_value, k_th_p) in zip(c, cluster_threshold_values,k_th_percentile):
-            progress_print("Threshold value for "+str(k_th_p)+"th-percentile is "+str(threshold_value)+" for "+str(colname)+" within "+str(r)+" meters.")
+        _r_str = (f'{r/1000:g} km' if r >= 1000 else f'{r:g} m') if grid._proj_is_metric else f'{r:g}'
+        for (colname, threshold_value, k_th_p) in zip(c, cluster_threshold_values, k_th_percentile):
+            progress_print(f"Threshold for {colname} within {_r_str}: {k_th_p}th-percentile = {threshold_value:g}.")
 
     if not _is_internal: _prog.step("assigning source")
     _d = _dev or {}
-    grid.search.set_source(
+    grid._search_class.set_source(
         pts=pts,
         c=c,
         x=x,
@@ -1301,26 +1380,11 @@ def detect_cluster_pts(
     )
 
     if not _is_internal: _prog.step("searching")
-    disk_sums_for_pts = grid.search.perform_search(silent=silent,plot_pt_disk=_d.get('plot_pt_disk'))
+    disk_sums_for_pts = grid._search_class.perform_search(silent=silent,plot_pt_disk=_d.get('plot_pt_disk'))
 
     if not _is_internal: _prog.step("labeling clusters")
     for j, cname in enumerate(c):
         pts[str(cname)+str(cluster_suffix)] = disk_sums_for_pts.values[:,j]>cluster_threshold_values[j]
-
-    if plot_distribution is not None:
-        from .illustrations.distribution_plot import create_distribution_plot
-        create_distribution_plot(
-            pts=pts,
-            x=x,
-            y=y,
-            radius_sum_columns=[n+suffix for n in c],
-            grid=grid,
-            rndm_pts=rndm_pts,
-            cluster_threshold_values=cluster_threshold_values,
-            k_th_percentile=k_th_percentile,
-            r=r,
-            plot_kwargs=plot_distribution
-            )
 
     def plot_rand_dist(
             filename:str="",
@@ -1333,6 +1397,9 @@ def detect_cluster_pts(
             k_th_percentile=k_th_percentile,
             r=r,
             grid=grid,
+            show:bool=True,
+            display_dpi:int=100,
+            save_kwargs:dict={},
             **plot_kwargs
     ):
         from .illustrations.distribution_plot import create_distribution_plot
@@ -1348,6 +1415,9 @@ def detect_cluster_pts(
             cluster_threshold_values=cluster_threshold_values,
             k_th_percentile=k_th_percentile,
             r=r,
+            show=show,
+            display_dpi=display_dpi,
+            save_kwargs=save_kwargs,
             )
     grid.plot.rand_dist = plot_rand_dist
 
@@ -1370,11 +1440,8 @@ def detect_cluster_pts(
     # Cluster detection always materialises the output grid (cell aggregates etc.).
     grid.update_spacing()
 
-    if plot_cluster_points is not None:
-        grid.plot.cluster_pts(**plot_cluster_points)
-
     if not keep_cols:
-        _keep_extra = {grid.output_row_name, grid.output_col_name, init_sort, x, y}
+        _keep_extra = {grid.cell_row_name, grid.cell_col_name, init_sort, x, y}
         _to_drop = [
             col for col in pts.columns
             if col not in _cols_before and col not in _output_cols and col not in _keep_extra
@@ -1397,32 +1464,27 @@ def detect_cluster_cells(
     crs:str,
     r,          # float | list | bands | weighted bands — see radius_search.params.r
     c:list=[],
+    x:str='lon',
+    y:str='lat',
     stat:str=['sum','count','mean','variance','std','cv','skewness','kurtosis'][0],
     exclude_self:bool=True,
-    spacing:float=None,
-    sample_area='buff_cells_min_pts',
+    cell_size:float=None,
+    sample_area='buff_cells,min_pts=1',
     weight_valid_area:str=None,
     k_th_percentile:float=99.5,
-    n_random_points:int=int(1e5),
+    null_distribution=int(1e5),
     random_seed:int=None,
-    null_distribution=None,
+    proj_crs:str='auto',
+    row_name:str='id_y',
+    col_name:str='id_x',
+    suffix:str=None,
     contingency=1,
     merge_dist=None,
     min_cluster_share=(0.05, 0.0, 0.0),
     make_convex:bool=True,
-    x:str='lon',
-    y:str='lat',
-    row_name:str='id_y',
-    col_name:str='id_x',
-    suffix:str=None,
-    cluster_suffix:str=None,
-    proj_crs:str='auto',
     pts_target:_pd_DataFrame=None,
-    plot_distribution:dict=None,
-    plot_cluster_points:dict=None,
     keep_cols:bool=False,
     overwrite:bool=False,
-    _dev:dict=None,
     silent:bool=None,
     **kwargs,
 ):
@@ -1508,29 +1570,44 @@ def detect_cluster_cells(
         boundary follows cell edges exactly and this bias does not occur.
     k_th_percentile (float):
         Percentile of the random distribution a point must exceed to be labelled as clustered (default=99.5).
-    n_random_points (int):
-        Number of random points drawn to build the comparison distribution (default=100000).
+    null_distribution (int | numpy.ndarray | pandas.DataFrame):
+        Controls the null distribution used for cluster detection (default ``100_000``):
+
+        - **int**: draw this many points uniformly at random within ``sample_area``.
+        - **numpy.ndarray of shape (N, 2)**: use these coordinates directly — **first column x,
+          second column y**, both in the projected CRS (metres).
+        - **pandas.DataFrame**: treated as an (N, 2) array via ``.values`` — **first column x,
+          second column y** (column names are ignored).
+
+        **Important for coordinate inputs:** coordinates must be in the projected CRS (metres),
+        not the original input CRS. Use ``aabpl.draw_random_coords()`` with ``grid.sample_area``
+        to generate compatible coordinates.
     random_seed (int):
         Random seed for reproducibility. None means no seed is set (default=None).
-    null_distribution (array-like or pd.DataFrame, optional):
-        User-supplied null-distribution coordinates. When provided the internal uniform-random draw
-        is skipped and these coordinates are used as reference points for computing the null radius
-        sums. Accepts a DataFrame with the same x/y column names used in the search, or a
-        2-column array ``[[x, y], ...]``.
-
-        **Important:** coordinates must be in the same projected CRS that ``pts`` is reprojected
-        into (metres), not in the original input CRS. Use ``aabpl.draw_random_coords()`` with
-        ``crs`` set to generate correctly projected coordinates.
     queen_contingency (int):
         Merge neighbouring clustered cells (including diagonals) into the same cluster.
         Values ≥ 2 also pull in cells that many steps away (default=1).
     rook_contingency (int):
         Merge horizontally/vertically neighbouring clustered cells into the same cluster.
         Ignored when ``queen_contingency`` is set higher. Values ≥ 2 extend the reach (default=1).
+    merge_dist (None | float | tuple | list of tuples):
+        Distance threshold(s) for merging clusters after contingency merging.
+        Each condition is a ``(centroid_dist, border_dist)`` pair — both must hold (AND).
+        Pass a list of such pairs to merge when ANY pair is satisfied (OR between pairs, AND within each).
+        A ``None`` element in a pair disables that measure for that condition.
+        Accepts:
+
+        - ``None``                         — no distance merging (default).
+        - ``float``                        — same threshold for both centroid and border.
+        - ``(centroid, border)``           — single AND-condition (original form).
+        - ``[(c1,b1), (c2,b2), ...]``      — merge if condition 1 OR condition 2 OR … is met.
+
+        Defaults to ``(r*10/3, r*4/3)`` when ``centroid_dist_threshold``/``border_dist_threshold``
+        are passed directly (deprecated).
     centroid_dist_threshold (float):
-        Maximum centroid-to-centroid distance for merging two clusters. None disables centroid merging (default=r*10/3).
+        Deprecated — use ``merge_dist=(centroid, border)`` instead.
     border_dist_threshold (float):
-        Maximum border-to-border distance for merging two clusters. None disables border merging (default=r*4/3).
+        Deprecated — use ``merge_dist=(centroid, border)`` instead.
     min_cluster_share_after_contingency (float):
         Minimum share of total clustered points a cluster must represent after contingency merging to be retained (default=0.05).
     min_cluster_share_after_centroid_dist (float):
@@ -1567,10 +1644,23 @@ def detect_cluster_cells(
         Grid row-index column name for ``pts_target``. Defaults to ``row_name`` when None (default=None).
     col_name_tgt (str):
         Grid column-index column name for ``pts_target``. Defaults to ``col_name`` when None (default=None).
+    grid_bounds (tuple of 4 floats|None):
+        ``(xmin, ymin, xmax, ymax)`` in the **input CRS** (same units as ``x``/``y``).
+        Any component may be ``None`` to fall back to the data extent for that edge.
+
+        - ``(lon_west, lat_south, None, None)`` — anchor the south-west corner only.
+        - ``(None, None, lon_east, lat_north)`` — extend grid at least this far east/north.
+        - ``(None, lat_south, None, lat_north)`` — fix latitudinal edges only.
+
+        **xmin/ymin are binding** (west edge of col 0, south edge of row 0; points outside
+        get negative indices). **xmax/ymax are soft minimums** — grid extends to
+        ``max(data_extent, specified_value)``. x = easting/longitude, y = northing/latitude.
+        A large expansion (> 20 000 cells AND > 50 % of data extent) prints an info message.
+        Default: ``(None, None, None, None)``.
     plot_distribution (dict):
-        Kwargs for the random-distribution plot. None disables it (default=None).
+        *Deprecated.* Call ``grid.plot.rand_dist()`` on the returned grid instead.
     plot_cluster_points (dict):
-        Kwargs for a map of the identified cluster points. None disables it (default=None).
+        *Deprecated.* Call ``grid.plot.cluster_pts()`` on the returned grid instead.
     keep_cols (bool):
         If False, intermediate columns added during processing (grid indices, offsets, proj x+y, etc.)
         are removed from ``pts`` before returning. If None proj x+y are retained. If True they are retained (default=False).
@@ -1578,9 +1668,7 @@ def detect_cluster_cells(
         If True, existing output columns with the same names are overwritten. Raises ValueError
         when False and a collision is detected (default=False).
     _dev (dict):
-        Development only. Dict of kwargs for internal debug plots. Supported keys:
-        ``plot_pt_disk``, ``plot_cell_reg_assign``, ``plot_offset_checks``,
-        ``plot_offset_regions``, ``plot_offset_raster``. None disables all (default=None).
+        *Deprecated kwarg.* Development only. Dict of kwargs for internal debug plots.
     silent (bool):
         If True, suppresses all progress output. None is treated as False (default=None).
 
@@ -1591,6 +1679,22 @@ def detect_cluster_cells(
         ``grid.clustering``. Boolean cluster columns ``{c}{cluster_suffix}`` and radius
         aggregates ``{c}{suffix}`` are appended to ``pts``.
     """
+    # backward-compat: spacing= was renamed to cell_size=
+    if 'spacing' in kwargs:
+        import warnings
+        warnings.warn("'spacing' is deprecated, use 'cell_size' instead.", DeprecationWarning, stacklevel=2)
+        if cell_size is None:
+            cell_size = kwargs.pop('spacing')
+        else:
+            kwargs.pop('spacing')
+    # backward-compat: n_random_points= merged into null_distribution=
+    if 'n_random_points' in kwargs:
+        import warnings
+        warnings.warn("'n_random_points' is deprecated, pass an integer to 'null_distribution' instead.", DeprecationWarning, stacklevel=2)
+        if isinstance(null_distribution, int):
+            null_distribution = kwargs.pop('n_random_points')
+        else:
+            kwargs.pop('n_random_points')
     if 'min_pts_to_sample_cell' in kwargs:
         min_pts_to_sample_cell = kwargs.pop('min_pts_to_sample_cell')
         progress_print(
@@ -1600,13 +1704,30 @@ def detect_cluster_cells(
         )
     else:
         min_pts_to_sample_cell = 0
+    if 'cluster_suffix' in kwargs:
+        import warnings
+        warnings.warn("'cluster_suffix' is deprecated as a function argument. It will be removed in a future version.", DeprecationWarning, stacklevel=2)
+    cluster_suffix = kwargs.pop('cluster_suffix', None)
+    _dev = kwargs.pop('_dev', None)
+    grid_bounds = kwargs.pop('grid_bounds', (None, None, None, None))
+    if 'plot_distribution' in kwargs:
+        import warnings
+        warnings.warn("'plot_distribution' is deprecated as a function argument. Call grid.plot.rand_dist() on the returned grid instead.", DeprecationWarning, stacklevel=2)
+        kwargs.pop('plot_distribution')
+    if 'plot_cluster_points' in kwargs:
+        import warnings
+        warnings.warn("'plot_cluster_points' is deprecated as a function argument. Call grid.plot.cluster_pts() on the returned grid instead.", DeprecationWarning, stacklevel=2)
+        kwargs.pop('plot_cluster_points')
     x_tgt             = kwargs.pop('x_tgt', None)
     y_tgt             = kwargs.pop('y_tgt', None)
     row_name_tgt      = kwargs.pop('row_name_tgt', None)
     col_name_tgt      = kwargs.pop('col_name_tgt', None)
     exclude_pt_itself = kwargs.pop('exclude_pt_itself', None)
     queen_contingency, rook_contingency = _unpack_contingency(contingency)
-    centroid_dist_threshold, border_dist_threshold = _unpack_merge_dist(merge_dist)
+    _merge_dist_conditions = _unpack_merge_dist(merge_dist)
+    # Legacy scalar unpacking kept for _dep_cluster backward compat.
+    centroid_dist_threshold = _merge_dist_conditions[0][0] if _merge_dist_conditions else None
+    border_dist_threshold   = _merge_dist_conditions[0][1] if _merge_dist_conditions else None
     (min_cluster_share_after_contingency,
      min_cluster_share_after_centroid_dist,
      min_cluster_share_after_convex) = _unpack_min_cluster_share(min_cluster_share)
@@ -1663,34 +1784,34 @@ def detect_cluster_cells(
         weight_valid_area=weight_valid_area,
         sample_area=sample_area,
         k_th_percentile=k_th_percentile,
-        n_random_points=n_random_points,
-        random_seed=random_seed,
         null_distribution=null_distribution,
+        random_seed=random_seed,
         x=x,
         y=y,
         row_name=row_name,
         col_name=col_name,
         suffix=suffix,
-        cluster_suffix=cluster_suffix,
+        _cluster_suffix=cluster_suffix,
         proj_crs=local_crs,
         pts_target=pts_target,
         x_tgt=x_tgt,
         y_tgt=y_tgt,
         row_name_tgt=row_name_tgt,
         col_name_tgt=col_name_tgt,
-        spacing=spacing,
-        plot_distribution=plot_distribution,
-        plot_cluster_points=plot_cluster_points,
+        cell_size=cell_size,
+        grid_bounds=grid_bounds,
         keep_cols=True,  # cell ids (row_name/col_name) are needed for clustering below
         overwrite=overwrite,
         _dev=_dev,
         silent=silent,
     )
     # TODO: replace with actual output names once spacing/nesting changes column naming
-    if not hasattr(grid, 'output_row_name'):
-        grid.output_row_name = row_name
-        grid.output_col_name = col_name
+    if not hasattr(grid, 'cell_row_name'):
+        grid.cell_row_name = row_name
+        grid.cell_col_name = col_name
 
+    # Inject DNF conditions so assign_clusters can use the full list of tuples.
+    grid.clustering._merge_dist_conditions_for_col = {col: _merge_dist_conditions for col in c}
     grid.clustering.create_clusters(
         pts=pts,
         c=c,
@@ -1702,32 +1823,28 @@ def detect_cluster_cells(
         min_cluster_share_after_centroid_dist=min_cluster_share_after_centroid_dist,
         min_cluster_share_after_convex=min_cluster_share_after_convex,
         make_convex=make_convex,
-        # Cluster on the SEARCH grid: clusters.py looks cell totals up in
-        # grid.id_to_sums, which is keyed by the search-cell ids (id_y/id_x). The
-        # output grid (out_id_*) is for display/export only.
-        row_name=row_name,
-        col_name=col_name,
+        row_name=grid.cell_row_name,
+        col_name=grid.cell_col_name,
         cluster_suffix=cluster_suffix,
         )
 
     if not grid._silent:
         grid.update_spacing()
         nr, nc = len(grid.row_ids), len(grid.col_ids)
-        n_nonempty = len(grid.id_to_sums)
-        s = grid._search_spacing
-        out_s  = grid.output_spacing
-        out_sy = getattr(grid, 'output_spacing_y', None) or out_s
-        ratio_x = max(1, round(out_s  / s))
-        ratio_y = max(1, round(out_sy / s))
+        n_nonempty = len(grid._search_internals.id_to_sums)
+        s = grid._search_internals.spacing
         n_clusters = sum(len(col_cl.clusters) for col_cl in grid.clustering.by_column.values())
         n_cluster_cells = sum(
-            len(set((row // ratio_y, col // ratio_x) for row, col in cl.cells))
+            len(set(cl.cells))
             for col_cl in grid.clustering.by_column.values()
             for cl in col_cl.clusters
         )
+        _cs = grid.cell_size
+        _cs_str = (f'{_cs/1000:g} km' if _cs >= 1000 else f'{_cs:g} m') if grid._proj_is_metric else f'{_cs:g}'
+        _cl_str = f'Detected {n_clusters} cluster{"s" if n_clusters != 1 else ""} spanning {n_cluster_cells} cells.'
         progress_print(
-            f'Built output grid: {nr}*{nc}={nr*nc} cells with spacing {grid.output_spacing} '
-            f'({n_nonempty} non-empty) — {n_clusters} cluster(s) across {n_cluster_cells} output cells'
+            f'Output grid: {nr}x{nc} = {nr*nc:,} cells'
+            f'  |  {n_nonempty:,} non-empty  |  cell size {_cs_str}  |  {_cl_str}'
         )
 
     if not keep_cols:
@@ -1737,7 +1854,7 @@ def detect_cluster_cells(
             set(str(col)+cluster_suffix for col in c) |
             set(str(col)+_cluster_id_suffix for col in c)
         )
-        _keep_extra = {grid.output_row_name, grid.output_col_name, x, y}
+        _keep_extra = {grid.cell_row_name, grid.cell_col_name, x, y}
         _to_drop = [
             col for col in pts.columns
             if col not in _cols_before and col not in _outer_output_cols and col not in _keep_extra
@@ -1768,7 +1885,7 @@ def detect_cluster_cells_from_labeled_pts(
     merge_dist=None,
     min_cluster_share=(0.0, 0.0, 0.0),
     make_convex:bool=True,
-    spacing:float=None,
+    cell_size:float=None,
     suffix:str=None,
     proj_crs:str='auto',
     keep_cols:bool=False,
@@ -1792,8 +1909,19 @@ def detect_cluster_cells_from_labeled_pts(
 
     Returns the Grid with cluster polygons at ``grid.clustering``.
     """
+    # backward-compat: spacing= was renamed to cell_size=
+    if 'spacing' in kwargs:
+        import warnings
+        warnings.warn("'spacing' is deprecated, use 'cell_size' instead.", DeprecationWarning, stacklevel=2)
+        if cell_size is None:
+            cell_size = kwargs.pop('spacing')
+        else:
+            kwargs.pop('spacing')
     queen_contingency, rook_contingency = _unpack_contingency(contingency)
-    centroid_dist_threshold, border_dist_threshold = _unpack_merge_dist(merge_dist)
+    _merge_dist_conditions = _unpack_merge_dist(merge_dist)
+    # Legacy scalar unpacking kept for _dep_cluster backward compat.
+    centroid_dist_threshold = _merge_dist_conditions[0][0] if _merge_dist_conditions else None
+    border_dist_threshold   = _merge_dist_conditions[0][1] if _merge_dist_conditions else None
     (min_cluster_share_after_contingency,
      min_cluster_share_after_centroid_dist,
      min_cluster_share_after_convex) = _unpack_min_cluster_share(min_cluster_share)
@@ -1832,7 +1960,7 @@ def detect_cluster_cells_from_labeled_pts(
     vk = _validate_kwargs(
         pts=pts, crs=crs, r=r, c=c, stat='sum',
         x=x, y=y, row_name=row_name, col_name=col_name, suffix=suffix,
-        output_spacing=spacing, proj_crs=proj_crs, silent=silent,
+        output_spacing=cell_size, proj_crs=proj_crs, silent=silent,
     )
     pts, local_crs = vk.pts, vk.local_crs
     c, x, y, suffix = vk.c, vk.x, vk.y, vk.suffix
@@ -1855,24 +1983,25 @@ def detect_cluster_cells_from_labeled_pts(
     # Assign points to grid cells and pre-aggregate per-cell mass (used for cluster
     # totals). No radius search and no null distribution is performed.
     if exclude_pt_itself is not None:
-        progress_print("DeprecationWarning: `exclude_pt_itself` is deprecated, use `exclude_self` instead.")
+        import warnings; warnings.warn("'exclude_pt_itself' is deprecated, use 'exclude_self' instead.", DeprecationWarning, stacklevel=2)
         exclude_self = exclude_pt_itself
-    grid.search = DiskSearch(grid, r=r, exclude_self=exclude_self,
-                             weight_valid_area=False)
-    grid.search.set_target(pts=pts_target, c=c, x=x_tgt, y=y_tgt,
-                           row_name=row_name_tgt, col_name=col_name_tgt, silent=silent)
-    grid.search.set_source(pts=pts, c=c, x=x, y=y, row_name=row_name, col_name=col_name,
-                           suffix=suffix, silent=silent)
+    DiskSearch(grid, r=r, exclude_self=exclude_self,
+               weight_valid_area=False)
+    grid._search_class.set_target(pts=pts_target, c=c, x=x_tgt, y=y_tgt,
+                                  row_name=row_name_tgt, col_name=col_name_tgt, silent=silent)
+    grid._search_class.set_source(pts=pts, c=c, x=x, y=y, row_name=row_name, col_name=col_name,
+                                  suffix=suffix, silent=silent)
 
     # Use the caller-provided boolean as the cluster label for every column in c.
     is_cluster = pts[is_cluster_column].astype(bool)
     for column in c:
         pts[str(column)+str(cluster_suffix)] = is_cluster
 
-    if not hasattr(grid, 'output_row_name'):
-        grid.output_row_name = row_name
-        grid.output_col_name = col_name
+    if not hasattr(grid, 'cell_row_name'):
+        grid.cell_row_name = row_name
+        grid.cell_col_name = col_name
 
+    grid.clustering._merge_dist_conditions_for_col = {col: _merge_dist_conditions for col in c}
     grid.clustering.create_clusters(
         pts=pts,
         c=c,
@@ -1890,7 +2019,7 @@ def detect_cluster_cells_from_labeled_pts(
     )
 
     if not keep_cols:
-        _keep_extra = {grid.output_row_name, grid.output_col_name, init_sort, x, y}
+        _keep_extra = {grid.cell_row_name, grid.cell_col_name, init_sort, x, y}
         _to_drop = [
             col for col in pts.columns
             if col not in _cols_before and col not in _output_cols and col not in _keep_extra

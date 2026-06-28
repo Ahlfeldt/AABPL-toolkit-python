@@ -11,6 +11,7 @@ from matplotlib.pyplot import close as _plt_close
 from matplotlib.patches import (Rectangle as _plt_Rectangle, Polygon as _plt_Polygon, Circle as _plt_Circle)
 from matplotlib.collections import PatchCollection as _plt_PatchCollection
 from matplotlib.colors import LogNorm as _plt_LogNorm, Normalize as _plt_Normalize
+import matplotlib.colors as _plt_colors
 from mpl_toolkits.axes_grid1 import make_axes_locatable as _make_axes_locatable
 from aabpl.illustrations.plot_utils import truncate_colormap, map_2D_to_rgb, get_2D_rgb_colobar_kwargs, add_color_bar_ax, set_map_frame
 from aabpl.illustrations.plot_pt_vars import create_plots_for_vars
@@ -65,13 +66,57 @@ class GridPlots(object):
     def __init__(self, grid):
         self.grid = grid
 
-    def vars(self, colnames=None, filename='', **plot_kwargs):
+    def vars(self, colnames=None, filename='', show:bool=True, display_dpi:int=100, save_kwargs:dict={}, **plot_kwargs):
+        """
+        Scatter plot of source points coloured by their radius-sum value.
+        One subplot per indicator column.
+
+        Parameters
+        ----------
+        colnames : array-like, optional
+            Column names to plot. Defaults to all indicator columns in ``c``.
+        filename : str
+            Save path. Empty string skips saving (default ``''``).
+        show : bool
+            Display the figure (default ``True``).
+        display_dpi : int
+            Resolution for inline/screen display (default ``100``).
+        save_kwargs : dict
+            Forwarded to ``fig.savefig()``.
+        **plot_kwargs
+            figsize : tuple
+                Figure size (default ``(10 * n_cols, 5 * n_rows)``).
+            cmap : str or Colormap
+                Colormap for point values (default ``'Reds'``).
+            s : float
+                Scatter marker size (default auto-scaled to figsize).
+            vmin, vmax : float
+                Colormap range (default data min/max).
+            sample_area_colors : list[str, str]
+                Colours for [valid area, excluded area]
+                (default ``['#ffffff', '#bedbe6']``).
+            sample_area_linewidth : float
+                Border linewidth of the valid-area polygon (default ``0.2``).
+
+        Returns
+        -------
+        matplotlib.figure.Figure
+
+        Examples
+        --------
+        fig = grid.plot.vars()
+        fig = grid.plot.vars(cmap='viridis', s=2, figsize=(14, 10))
+        fig = grid.plot.vars(filename='vars.png', show=False)
+        """
         from aabpl.illustrations.plot_pt_vars import create_plots_for_vars
         import numpy as np
         if colnames is None:
-            colnames = np.array(self.grid.search.target.c)
+            _sc = self.grid._search_class
+            colnames = np.array(_sc.target.c)
         _r = getattr(self.grid, '_r', None)
-        return create_plots_for_vars(grid=self.grid, colnames=colnames, filename=filename, plot_kwargs=plot_kwargs, r=_r)
+        return create_plots_for_vars(grid=self.grid, colnames=colnames, filename=filename,
+                                     show=show, display_dpi=display_dpi, save_kwargs=save_kwargs,
+                                     plot_kwargs=plot_kwargs, r=_r)
 
     def cell_aggregates(
         self,
@@ -101,32 +146,42 @@ class GridPlots(object):
         save_kwargs : dict
             Forwarded to ``fig.savefig()``.
         **plot_kwargs
-            figsize : tuple, default ``(12, 10)``
-            cmap : str, default ``'Reds'``
+            figsize : tuple
+                Figure size (default ``(12, 10)``).
+            cmap : str or Colormap
+                Colormap for cell values (default ``'Reds'``). Accepts any
+                matplotlib colormap name or object.
 
         Returns
         -------
         matplotlib.figure.Figure
+
+        Examples
+        --------
+        fig = grid.plot.cell_aggregates()
+        fig = grid.plot.cell_aggregates(cmap='Blues', figsize=(14, 10))
+        fig = grid.plot.cell_aggregates(filename='cells.png', show=False)
         """
         save_kwargs = {'dpi': 300, 'bbox_inches': 'tight', **save_kwargs}
         figsize = plot_kwargs.pop('figsize', (12, 10))
-        cmap_name = plot_kwargs.pop('cmap', 'Reds')
+        cmap_arg = plot_kwargs.pop('cmap', 'Reds')
+        _sc = self.grid._search_class
         if axs is None:
-            fig, axs = _plt_subplots(ncols=len(self.grid.search.target.c), figsize=figsize, dpi=display_dpi)
+            fig, axs = _plt_subplots(ncols=len(_sc.target.c), figsize=figsize, dpi=display_dpi)
 
         # Output grid + cached per-output-cell aggregates are built lazily here.
         self.grid.update_spacing()
         # Draw one coloured square per NON-EMPTY output cell (from the cached
-        # grid.output_id_to_sums) as a PatchCollection — no dense full-grid array,
+        # grid.cell_aggregates) as a PatchCollection — no dense full-grid array,
         # so memory scales with populated cells, not the bounding-box area. The axes
         # still span the full output extent, so the plot looks the same as a raster.
-        sx, sy = self.grid.output_spacing, self.grid.output_spacing_y
-        ox, oy = self.grid.output_x_steps[0], self.grid.output_y_steps[0]
-        extent = [self.grid.output_x_steps[0], self.grid.output_x_steps[-1],
-                  self.grid.output_y_steps[-1], self.grid.output_y_steps[0]]
-        out_sums = self.grid.output_id_to_sums
-        for i,column in enumerate(self.grid.search.target.c):
-            ax = axs if len(self.grid.search.target.c)==1 else axs.flat[i]
+        sx, sy = self.grid.cell_size, self.grid.cell_size_y
+        ox, oy = self.grid.x_steps_bounds[0], self.grid.y_steps_bounds[0]
+        extent = [self.grid.x_steps_bounds[0], self.grid.x_steps_bounds[-1],
+                  self.grid.y_steps_bounds[-1], self.grid.y_steps_bounds[0]]
+        out_sums = self.grid.cell_aggregates
+        for i,column in enumerate(_sc.target.c):
+            ax = axs if len(_sc.target.c)==1 else axs.flat[i]
             rects, vals = [], []
             for (row, col), v in out_sums.items():
                 val = v[i]
@@ -140,7 +195,7 @@ class GridPlots(object):
             vmin = vals[vals != 0].min()
             vmax = vals.max()
             norm = _plt_LogNorm(vmin=vmin,vmax=vmax,clip=False) if vmin>0 else _plt_Normalize(vmin=vmin,vmax=vmax,clip=False)
-            cmap = truncate_colormap(_plt_get_cmap(cmap_name), 0.3, 1)
+            cmap = truncate_colormap(cmap_arg if hasattr(cmap_arg, 'N') else _plt_get_cmap(cmap_arg), 0.3, 1)
             cmap.set_under('#ffffff00')
             cmap.set_bad('#ffffff00')
             pc = _plt_PatchCollection(rects, cmap=cmap, norm=norm)
@@ -181,7 +236,14 @@ class GridPlots(object):
             Forwarded to ``fig.savefig()``.
         **plot_kwargs
             figsize : tuple, default ``(10, 10 * n_indicators)``
-            cmap : str, default ``'binary'``
+            cmap : str or Colormap, default ``'binary'``
+            cluster_color : str, default ``'red'``
+                Edge colour of the cluster polygon outline.
+            cluster_hatch : str, default ``'////'``
+                Hatch pattern for the cluster polygon fill.
+                Any matplotlib hatch string e.g. ``'////'``, ``'xxxx'``, ``'....'``, ``''``.
+            cluster_alpha : float, default ``0.0``
+                Face alpha of the cluster polygon (0 = transparent).
 
         Returns
         -------
@@ -192,14 +254,19 @@ class GridPlots(object):
         fig = grid.plot.clusters()
         fig = grid.plot.clusters(filename='clusters.png', show=False)
         fig = grid.plot.clusters(figsize=(20, 15), cmap='Greys')
+        fig = grid.plot.clusters(cluster_color='#2255cc', cluster_hatch='xxxx')
         """
         if len(self.grid.clustering.by_column)==0:
             print("No clustering performed. Run detect_cell_clusters or grid.create_clusters first.")
             return
         save_kwargs = {'dpi': 300, 'bbox_inches': 'tight', **save_kwargs}
-        n = len(self.grid.search.target.c)
-        figsize = plot_kwargs.pop('figsize', (10, 10 * n))
-        cmap_name = plot_kwargs.pop('cmap', 'binary')
+        _sc2 = self.grid._search_class
+        n = len(_sc2.target.c)
+        figsize         = plot_kwargs.pop('figsize', (10, 10 * n))
+        cmap_arg        = plot_kwargs.pop('cmap', 'binary')
+        cluster_color   = plot_kwargs.pop('cluster_color', 'red')
+        cluster_hatch   = plot_kwargs.pop('cluster_hatch', '////')
+        cluster_alpha   = plot_kwargs.pop('cluster_alpha', 0.0)
         if axs is None:
             fig, axs = _plt_subplots(ncols=n, figsize=figsize, dpi=display_dpi)
 
@@ -207,16 +274,16 @@ class GridPlots(object):
         # background matches grid.plot.cell_aggregates. Cluster outlines are drawn in
         # coordinate space below and are unaffected by the grid choice.
         self.grid.update_spacing()
-        sx, sy = self.grid.output_spacing, self.grid.output_spacing_y
-        ox, oy = self.grid.output_x_steps[0], self.grid.output_y_steps[0]
-        extent = [self.grid.output_x_steps[0], self.grid.output_x_steps[-1],
-                  self.grid.output_y_steps[-1], self.grid.output_y_steps[0]]
-        out_sums = self.grid.output_id_to_sums
+        sx, sy = self.grid.cell_size, self.grid.cell_size_y
+        ox, oy = self.grid.x_steps_bounds[0], self.grid.y_steps_bounds[0]
+        extent = [self.grid.x_steps_bounds[0], self.grid.x_steps_bounds[-1],
+                  self.grid.y_steps_bounds[-1], self.grid.y_steps_bounds[0]]
+        out_sums = self.grid.cell_aggregates
 
         for i, (cluster_column, clusters_for_column) in enumerate(self.grid.clustering.by_column.items()):
             ax = axs.flat[i] if n > 1 else axs
-            ax.set_xlabel('x/lon '+str(self.grid.local_crs))
-            ax.set_ylabel('y/lat '+str(self.grid.local_crs))
+            ax.set_xlabel('x/lon '+str(self.grid.proj_crs))
+            ax.set_ylabel('y/lat '+str(self.grid.proj_crs))
             clusters = clusters_for_column.clusters
             ax.title.set_text(str(len(clusters))+' cluster'+ ('s' if len(clusters)!=1 else '') +' for '+str(cluster_column))
 
@@ -228,7 +295,7 @@ class GridPlots(object):
                     continue
                 rects.append(_plt_Rectangle((ox + int(col) * sx, oy + int(row) * sy), sx, sy))
                 vals.append(val)
-            cmap = _plt_get_cmap(cmap_name)
+            cmap = cmap_arg if hasattr(cmap_arg, 'N') else _plt_get_cmap(cmap_arg)
             cmap = truncate_colormap(cmap, 0.1, 1)
             cmap.set_under('#fff0')
             if vals:
@@ -241,12 +308,17 @@ class GridPlots(object):
             for cluster in clusters:
                 geoms = [cluster.geometry] if hasattr(cluster.geometry, 'exterior') else cluster.geometry.geoms
                 for geom in geoms:
-                    ax.add_patch(_plt_Polygon(xy=geom.exterior.coords, hatch='////', facecolor='#f000', edgecolor='#f00'))
-                ax.annotate(cluster.id, xy=cluster.centroid, fontsize=15, weight='bold', color='red')
+                    ax.add_patch(_plt_Polygon(
+                        xy=geom.exterior.coords,
+                        hatch=cluster_hatch,
+                        facecolor=(*_plt_colors.to_rgba(cluster_color)[:3], cluster_alpha),
+                        edgecolor=cluster_color,
+                    ))
+                ax.annotate(cluster.id, xy=cluster.centroid, fontsize=15, weight='bold', color=cluster_color)
 
             _r = getattr(self.grid, '_r', None)
-            set_map_frame(ax=ax, xmin=self.grid._search_x_steps.min(), xmax=self.grid._search_x_steps.max(),
-                          ymin=self.grid._search_y_steps.min(), ymax=self.grid._search_y_steps.max(), r=_r)
+            set_map_frame(ax=ax, xmin=self.grid._search_internals.x_steps.min(), xmax=self.grid._search_internals.x_steps.max(),
+                          ymin=self.grid._search_internals.y_steps.min(), ymax=self.grid._search_internals.y_steps.max(), r=_r)
             if len(vals) > 0:
                 _divider = _make_axes_locatable(ax)
                 _cax = _divider.append_axes("right", size="3%", pad=0.05)
@@ -284,13 +356,17 @@ class GridPlots(object):
         save_kwargs : dict
             Forwarded to ``fig.savefig()``.
         **plot_kwargs
-            figsize : tuple, default ``(10 * n_cols, 8 * n_rows)``
-            cmap : str, default ``'Reds'``
-            s : float  — marker size (default auto-scaled to figsize)
-            vmin, vmax : float — colormap range
+            figsize : tuple
+                Figure size (default ``(10 * n_cols, 8 * n_rows)``).
+            cmap : str or Colormap
+                Colormap for point values (default ``'Reds'``).
+            s : float
+                Scatter marker size (default auto-scaled to figsize).
+            vmin, vmax : float
+                Colormap range (default data min/max).
             sample_area_colors : list[str, str]
-                Two hex colours for [valid area, excluded area]
-                (default ``['#ffffff', '#bedbe6']``)
+                Colours for [valid area, excluded area]
+                (default ``['#ffffff', '#bedbe6']``).
             sample_area_linewidth : float
                 Border linewidth of the valid-area polygon (default ``0.5``).
 
@@ -306,7 +382,7 @@ class GridPlots(object):
         """
         return create_plots_for_vars(
             grid=self.grid,
-            colnames=_np_array([self.grid.search.target.c, self.grid.search.source.aggregate_columns]),
+            colnames=_np_array([(_sc3 := (self.grid._search_class)).target.c, _sc3.source.aggregate_columns]),
             filename=filename,
             show=show,
             save_kwargs=save_kwargs,
@@ -345,16 +421,16 @@ class GridPlots(object):
         if ax is None:
             fig, ax = _plt_subplots(ncols=3, figsize=figsize, dpi=display_dpi)
         imshow_kwargs = {
-            'xmin':self.grid._search_x_steps.min(),
-            'ymin':self.grid._search_y_steps.min(),
-            'xmax':self.grid._search_x_steps.max(),
-            'ymax':self.grid._search_y_steps.max(),
+            'xmin':self.grid._search_internals.x_steps.min(),
+            'ymin':self.grid._search_internals.y_steps.min(),
+            'xmax':self.grid._search_internals.x_steps.max(),
+            'ymax':self.grid._search_internals.y_steps.max(),
         }
         extent=[imshow_kwargs['xmin'],imshow_kwargs['xmax'],imshow_kwargs['ymax'],imshow_kwargs['ymin']]
-        X = _np_array([[map_2D_to_rgb(x,y, **imshow_kwargs) for x in  self.grid._search_x_steps[:-1]] for y in reversed(self.grid._search_y_steps[:-1])])
+        X = _np_array([[map_2D_to_rgb(x,y, **imshow_kwargs) for x in  self.grid._search_internals.x_steps[:-1]] for y in reversed(self.grid._search_internals.y_steps[:-1])])
         # ax.flat[0].imshow(X=X, interpolation='none', extent=extent)
-        # ax.flat[0].pcolormesh([self.grid._search_x_steps, self.grid._search_y_steps], X)
-        # ax.flat[0].pcolormesh(X, edgecolor="black", linewidth=.1/max([len(self.grid._search_col_ids), len(self.grid._search_row_ids)]))
+        # ax.flat[0].pcolormesh([self.grid._search_internals.x_steps, self.grid._search_internals.y_steps], X)
+        # ax.flat[0].pcolormesh(X, edgecolor="black", linewidth=.1/max([len(self.grid._search_internals.col_ids), len(self.grid._search_internals.row_ids)]))
         ax.flat[0].imshow(X=X, interpolation='none', extent=extent)
         # ax.flat[0].set_aspect(2)
         colorbar_kwargs = get_2D_rgb_colobar_kwargs(**imshow_kwargs)
@@ -369,14 +445,14 @@ class GridPlots(object):
         ax.flat[0].title.set_text("Grid lat / lon coordinates")
 
         imshow_kwargs = {
-            'xmin':self.grid._search_col_ids.min(),
-            'ymin':self.grid._search_row_ids.min(),
-            'xmax':self.grid._search_col_ids.max(),
-            'ymax':self.grid._search_row_ids.max(),
+            'xmin':self.grid._search_internals.col_ids.min(),
+            'ymin':self.grid._search_internals.row_ids.min(),
+            'xmax':self.grid._search_internals.col_ids.max(),
+            'ymax':self.grid._search_internals.row_ids.max(),
         }
         extent=[imshow_kwargs['xmin'],imshow_kwargs['xmax'],imshow_kwargs['ymax'],imshow_kwargs['ymin']]
 
-        X = _np_array([[map_2D_to_rgb(x,y, **imshow_kwargs) for x in  self.grid._search_col_ids] for y in reversed(self.grid._search_row_ids)])
+        X = _np_array([[map_2D_to_rgb(x,y, **imshow_kwargs) for x in  self.grid._search_internals.col_ids] for y in reversed(self.grid._search_internals.row_ids)])
         ax.flat[1].imshow(X=X, interpolation='none', extent=extent)
         # ax.flat[1].set_aspect(2)
         colorbar_kwargs = get_2D_rgb_colobar_kwargs(**imshow_kwargs)
@@ -394,7 +470,7 @@ class GridPlots(object):
         ax.flat[1].title.set_text("Grid row / col indices")
         
         from aabpl.radius_search.point_grid_assignment import cell_count as _cell_count
-        X = _np_array([[_cell_count(self.grid, row_id, col_id) for col_id in self.grid._search_col_ids] for row_id in reversed(self.grid._search_row_ids)])
+        X = _np_array([[_cell_count(self.grid, row_id, col_id) for col_id in self.grid._search_internals.col_ids] for row_id in reversed(self.grid._search_internals.row_ids)])
         # p = ax.flat[2].pcolormesh(X, cmap='Reds')
         p = ax.flat[2].imshow(X=X, interpolation='none', extent=extent, cmap='Reds')
         _plt_colorbar(p, cax=add_color_bar_ax(fig,ax.flat[2]))

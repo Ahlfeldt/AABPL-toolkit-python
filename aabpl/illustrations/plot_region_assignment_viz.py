@@ -74,7 +74,7 @@ def visualize_pt_to_cell_region_assignment(
         
         # plot region polygon outlines
         OffsetRegion.plot_many(
-                regions=list(grid.id_to_offset_regions.values()), 
+                regions=list(grid._search_internals.id_to_offset_regions.values()),
                 plot_edges=False, 
                 add_idxs=True,
                 edgecolor='black', facecolor='None', alpha=0.8, linewidth=0.4,
