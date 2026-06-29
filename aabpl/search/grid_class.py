@@ -21,18 +21,14 @@ from math import log10 as _math_log10, inf as _math_inf
 from aabpl.utils.misc import flatten_list, find_column_name
 from aabpl.utils.crs_transformation import convert_bounds_to_local_crs
 from aabpl.illustrations.plot_utils import map_2D_to_rgb, get_2D_rgb_colobar_kwargs
-from .disk_search_state import (
+from .algorithm.disk_search import (
     aggregate_point_data_to_cells,
     search_and_aggregate
 )
 from .point_region_assignment import assign_points_to_cell_regions
 from .sample_area import compute_disk_cell_overlap, intersect_polygon_with_grid
 from aabpl.testing.test_performance import time_func_perf
-# from .clusters import (
-#     create_clusters, add_geom_to_cluster, connect_cells_to_clusters,
-#     make_cluster_orthogonally_convex, make_cluster_convex, merge_clusters,
-#     add_cluster_tags_to_cells, save_full_grid, save_sparse_grid, save_cell_clusters)
-from .clusters import Clustering
+from aabpl.cluster.clusters import Clustering
 from shapely.geometry import Polygon, Point
 from shapely.ops import unary_union
 from geopandas import GeoDataFrame as _gpd_GeoDataFrame
@@ -195,7 +191,7 @@ class Grid(object):
         self.plot = GridPlots(self)
         # TODO _search_internals.bounds should also contain excluded area if not cntd
         # min(points._search_internals.bounds+r, max(points._search_internals.bounds, excluded_area_total_bound))
-        self.input_crs = initial_crs
+        self.data_crs = data_crs if data_crs is not None else local_crs
         self.proj_crs = local_crs
         try:
             from pyproj import CRS as _CRS
@@ -413,7 +409,7 @@ class Grid(object):
         lines = ['-' * 60]
 
         # Grid dimensions
-        lines.append(f'  grid.row_ids / col_ids    {nr} x {nc} cells  |  cell size {cs_str}')
+        lines.append(f'  grid.row_ids / col_ids    {nr} x {nc} cells  |  cell_size {cs_str}')
         lines.append(f'  grid.cell_aggregates      {n_nonempty:,} non-empty cells')
         xb = getattr(self, 'x_steps_bounds', None)
         yb = getattr(self, 'y_steps_bounds', None)
@@ -421,9 +417,11 @@ class Grid(object):
         lines.append(f'  grid.y_steps_bounds       {_steps_preview(yb)}')
 
         # CRS
+        data_crs = getattr(self, 'data_crs', None)
         proj_crs = getattr(self, 'proj_crs', '?')
-        input_crs = getattr(self, 'input_crs', '?')
-        lines.append(f'  grid.proj_crs             {proj_crs}  (input: {input_crs})')
+        if data_crs and data_crs != proj_crs:
+            lines.append(f'  grid.data_crs             {data_crs}')
+        lines.append(f'  grid.proj_crs             {proj_crs}')
 
         # Tracked columns
         val_cols = getattr(self, '_output_val_cols', [])
@@ -500,7 +498,7 @@ class Grid(object):
         }
         _mentioned = {
             'row_ids', 'col_ids', 'cell_aggregates', 'x_steps_bounds', 'y_steps_bounds',
-            'proj_crs', 'input_crs', '_output_val_cols', 'cell_row_name', 'cell_col_name',
+            'proj_crs', 'data_crs', '_output_val_cols', 'cell_row_name', 'cell_col_name',
             'sample_area', 'null_distribution', 'clustering', '_search_class',
             '_search_internals', '_spacing_computed', '_proj_is_metric',
             '_grid_bounds_proj', '_x_anchor_offset', '_y_anchor_offset',
@@ -516,7 +514,7 @@ class Grid(object):
         lines += [
             '-' * 60,
             '  Plots   grid.plot.clusters() / .vars() / .cluster_pts() / .rand_dist()',
-            '          grid.plot_sample_area()',
+            '          grid.plot.sample_area()',
             '  Export  grid.save_sparse_grid(filename)      non-empty cells + cluster ids',
             '          grid.save_full_grid(filename)         all cells (dense)',
             '          grid.save_cell_clusters(filename)     cluster polygons',
@@ -845,7 +843,9 @@ class Grid(object):
         if tgt is not None and len(getattr(tgt, 'c', [])):
             self._search_internals.row_name = tgt.row_name
             self._search_internals.col_name = tgt.col_name
-            self.aggregate_pts_to_output_cells(tgt.pts, val_cols=list(tgt.c), x=tgt.x, y=tgt.y, agg='sum', overwrite=True)
+            _agg_cols = [col for col in tgt.c if col in tgt.pts.columns]
+            if _agg_cols:
+                self.aggregate_pts_to_output_cells(tgt.pts, val_cols=_agg_cols, x=tgt.x, y=tgt.y, agg='sum', overwrite=True)
             self.assign_output_cell_ids(tgt.pts, x=tgt.x, y=tgt.y, row_name=tgt.row_name, col_name=tgt.col_name)
 
         self._spacing_computed = True
@@ -965,27 +965,11 @@ class Grid(object):
     # save_sparse_grid = Clustering.save_sparse_grid
     # save_cell_clusters = Clustering.save_cell_clusters
 
-    def plot_sample_area(self,
-        pts:_pd_DataFrame=None,
-        x:str=None,
-        y:str=None,
-        filename:str='',
-        plot_kwargs:dict={},
-        show:bool=True,
-        display_dpi:int=100,
-        save_kwargs:dict={},):
-        from aabpl.illustrations.plot_sample_area import plot_sample_area
-        plot_sample_area(
-            grid=self,
-            pts=pts or self.pts if hasattr(self,"pts") else None,
-            x=x or self.x if hasattr(self,"x") else None,
-            y=y or self.y if hasattr(self,"y") else None,
-            filename=filename,
-            plot_kwargs=plot_kwargs,
-            show=show,
-            display_dpi=display_dpi,
-            save_kwargs=save_kwargs,
-        )
+    def plot_sample_area(self, *args, **kwargs):
+        import warnings
+        warnings.warn("grid.plot_sample_area() is deprecated. Use grid.plot.sample_area() instead.", DeprecationWarning, stacklevel=2)
+        return self.plot.sample_area(*args, **kwargs)
+
     def create_full_grid_df(self, target_crs:str=['initial','local','EPSG:4326'][0], max_column_name_length:int=10):
         """returns geopandas.GeoDataFrame with entry for each grid cell with attributes on its Polygon, centroid, sum of indicator(s), and cluster id
         
@@ -1011,7 +995,7 @@ class Grid(object):
         polys = []
         centroids_x_local = _np_zeros(n_cells, float)
         centroids_y_local = _np_zeros(n_cells, float)
-        target_crs = self.input_crs if target_crs=='initial' else self.proj_crs if target_crs=='local' else target_crs
+        target_crs = self.proj_crs if target_crs in ('initial', 'local') else target_crs
         if target_crs != self.proj_crs:
             transformer = Transformer.from_crs(crs_from=self.proj_crs, crs_to=target_crs, always_xy=True)
         clusters_for_columns = list(self.clustering.by_column.values())
@@ -1081,7 +1065,7 @@ class Grid(object):
         out_col_ids = self.col_ids
         n_out_cells = len(out_row_ids) * len(out_col_ids)
         polys = []
-        target_crs = self.input_crs if target_crs=='initial' else self.proj_crs if target_crs=='local' else target_crs
+        target_crs = self.proj_crs if target_crs in ('initial', 'local') else target_crs
         if target_crs != self.proj_crs:
             transformer = Transformer.from_crs(crs_from=self.proj_crs, crs_to=target_crs, always_xy=True)
         centroids_x = _np_zeros(n_out_cells, float)
@@ -1176,7 +1160,7 @@ class Grid(object):
             geometry = [cluster.geometry for cluster in clusters_for_column.clusters],
             crs=self.proj_crs)
         
-        target_crs = self.input_crs if target_crs=='initial' else self.proj_crs if target_crs=='local' else target_crs
+        target_crs = self.proj_crs if target_crs in ('initial', 'local') else target_crs
         if target_crs != self.proj_crs:
             transformer = Transformer.from_crs(crs_from=self.proj_crs, crs_to=target_crs, always_xy=True)
             df['centroid_x'], df['centroid_y'] = transformer.transform(df['centroid_x'], df['centroid_y'])

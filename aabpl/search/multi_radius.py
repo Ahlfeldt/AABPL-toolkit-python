@@ -59,11 +59,12 @@ _TEMP_COL_MARKER = '__mr__'
 
 
 def _fmt_r(r: float) -> str:
-    """Format a radius value for embedding in column names (mirrors _default_suffix)."""
-    r_str = f'{r:.4g}' if r != int(r) else str(int(r))
-    if 'e' in r_str:
-        r_str = str(int(round(r)))
-    return r_str
+    """Format a radius value for embedding in column names.
+    Always uses fixed-point notation (never scientific) and is exact for integer-valued
+    floats.  Non-integers use fixed decimal with trailing zeros stripped."""
+    if r == int(r):
+        return str(int(r))
+    return f'{r:f}'.rstrip('0').rstrip('.')
 
 
 def _parse_r_spec(r):
@@ -140,6 +141,107 @@ def _agg_at_r0(pts: _pd.DataFrame, cols: list, x: str, y: str,
         else:
             result[col] = _pd.Series(_np.zeros(len(pts), dtype=float), index=pts.index)
     return result
+
+
+def _combine_bands_on_df(
+    dataframe,
+    spec_type,
+    spec_data,
+    value_cols,
+    stat_str,
+    radius_col_fn,
+    wgt_col_suffix=None,
+    keep_band_cols=False,
+    k_th_percentiles=None,
+):
+    """
+    Apply band or weighted-band combination to a DataFrame in-place.
+
+    Called for both the real data DataFrame (pts) and the null-distribution
+    DataFrame so that band algebra lives in exactly one place.
+
+    Parameters
+    ----------
+    dataframe : pd.DataFrame
+        Modified in-place.  Must already contain per-radius columns whose names
+        are returned by radius_col_fn.
+    spec_type : str
+        'bands' or 'wbands'.
+    spec_data : list
+        Band specs — (r_inner, r_outer) for 'bands' or
+        (r_inner, r_outer, weight) for 'wbands'.
+    value_cols : list[str]
+        Original value column names (e.g. ['employment']).
+    stat_str : str
+        Short stat identifier embedded in output column names (e.g. 'sum').
+    radius_col_fn : callable(col: str, radius: float) -> str
+        Returns the per-radius aggregate column name for a given value column
+        and radius.  The caller maps to the correct naming convention:
+        temporary columns (with _TEMP_COL_MARKER) when building pts, or
+        permanent '{col}_{stat_str}_{radius}' columns when building null_df.
+    wgt_col_suffix : str | None
+        For wbands: the suffix appended to the value column name for the
+        final weighted aggregate.  None uses the default '{col}_{stat_str}_wgt'.
+    keep_band_cols : bool
+        Keep intermediate per-band columns when spec_type='wbands' (default False).
+    k_th_percentiles : list[float] | None
+        If provided, compute a threshold for each output column as the given
+        percentile of its values.  Must have one entry per entry in value_cols.
+        When None no thresholds are computed and an empty dict is returned.
+
+    Returns
+    -------
+    thresholds : dict {output_col: threshold_value}
+        Empty when k_th_percentiles is None.
+    output_cols : set[str]
+        Names of the final output columns written to dataframe.
+    """
+    thresholds = {}
+    output_cols = set()
+    band_columns = []
+
+    # Subtract inner-radius aggregate from outer-radius aggregate for each band.
+    for r_inner, r_outer, *_ in spec_data:
+        for col in value_cols:
+            outer_col = radius_col_fn(col, r_outer)
+            inner_col = radius_col_fn(col, r_inner)
+            band_col = f'{col}_{stat_str}_{_fmt_r(r_inner)}_{_fmt_r(r_outer)}'
+            dataframe[band_col] = dataframe[outer_col].values - dataframe[inner_col].values
+            band_columns.append(band_col)
+            if spec_type == 'bands':
+                output_cols.add(band_col)
+
+    if spec_type == 'bands':
+        if k_th_percentiles is not None:
+            for r_inner, r_outer, *_ in spec_data:
+                for col in value_cols:
+                    band_col = f'{col}_{stat_str}_{_fmt_r(r_inner)}_{_fmt_r(r_outer)}'
+                    percentile_for_col = k_th_percentiles[value_cols.index(col)]
+                    thresholds[band_col] = _np.percentile(dataframe[band_col].values, percentile_for_col)
+
+    elif spec_type == 'wbands':
+        total_weight = sum(weight for _, _, weight in spec_data)
+        for col in value_cols:
+            weighted_values = _np.zeros(len(dataframe), dtype=float)
+            for r_inner, r_outer, weight in spec_data:
+                band_col = f'{col}_{stat_str}_{_fmt_r(r_inner)}_{_fmt_r(r_outer)}'
+                weighted_values += (weight / total_weight) * dataframe[band_col].values
+            if wgt_col_suffix is not None:
+                weighted_col = f'{col}{wgt_col_suffix}'
+            else:
+                weighted_col = f'{col}_{stat_str}_wgt'
+            dataframe[weighted_col] = weighted_values
+            output_cols.add(weighted_col)
+            if k_th_percentiles is not None:
+                percentile_for_col = k_th_percentiles[value_cols.index(col)]
+                thresholds[weighted_col] = _np.percentile(weighted_values, percentile_for_col)
+
+        if not keep_band_cols:
+            for band_col in band_columns:
+                if band_col in dataframe.columns:
+                    dataframe.drop(columns=[band_col], inplace=True)
+
+    return thresholds, output_cols
 
 
 def _multi_radius_search(
@@ -258,39 +360,27 @@ def _multi_radius_search(
         for i, radius in enumerate(spec_data):
             for col in value_cols:
                 temp_col = radius_to_temp_cols[radius][col]
-                output_col = (f'{col}{suffix}{i}' if suffix is not None
-                              else f'{col}_{stat_str}_r{i}')
+                output_col = (f'{col}{suffix}{_fmt_r(radius)}' if suffix is not None
+                              else f'{col}_{stat_str}_{_fmt_r(radius)}')
                 pts[output_col] = pts[temp_col].values
                 output_columns.add(output_col)
 
     else:  # bands or wbands
-        r_index = {i: (r_in, r_out) for i, (r_in, r_out, *_) in enumerate(spec_data)}
-        band_columns: list = []
-        for i, (r_in, r_out, *_) in enumerate(spec_data):
-            for col in value_cols:
-                outer_temp = radius_to_temp_cols[r_out][col]
-                inner_temp = radius_to_temp_cols[r_in][col]
-                band_col = f'{col}_{stat_str}_b{i}'
-                pts[band_col] = pts[outer_temp].values - pts[inner_temp].values
-                band_columns.append(band_col)
-                if spec_type == 'bands':
-                    output_columns.add(band_col)
-
-        if spec_type == 'wbands':
-            total_weight = sum(w for _, _, w in spec_data)
-            for col in value_cols:
-                weighted_sum = _np.zeros(len(pts), dtype=float)
-                for i, (r_in, r_out, weight) in enumerate(spec_data):
-                    band_col = f'{col}_{stat_str}_b{i}'
-                    weighted_sum += (weight / total_weight) * pts[band_col].values
-                weighted_col = (f'{col}{suffix}' if suffix is not None
-                                else f'{col}_{stat_str}_wgt')
-                pts[weighted_col] = weighted_sum
-                output_columns.add(weighted_col)
-            if not keep_cols:
-                for band_col in band_columns:
-                    if band_col in pts.columns:
-                        pts.drop(columns=[band_col], inplace=True)
+        r_index = {i: (r_inner, r_outer)
+                   for i, (r_inner, r_outer, *_) in enumerate(spec_data)}
+        temp_col_fn = lambda col, radius: radius_to_temp_cols[radius][col]
+        # The band combination logic is shared with the null-distribution path
+        # via _combine_bands_on_df so both DataFrames always use the same algebra.
+        _, output_columns = _combine_bands_on_df(
+            dataframe=pts,
+            spec_type=spec_type,
+            spec_data=spec_data,
+            value_cols=value_cols,
+            stat_str=stat_str,
+            radius_col_fn=temp_col_fn,
+            wgt_col_suffix=suffix,   # None → '{col}_{stat_str}_wgt', else '{col}{suffix}'
+            keep_band_cols=keep_cols,
+        )
 
     # ── remove temporary intermediate columns ────────────────────────────────
     for col_name in list(pts.columns):
@@ -303,8 +393,8 @@ def _multi_radius_search(
         if cols_to_drop:
             pts.drop(columns=list(cols_to_drop), inplace=True)
 
-    # Attach grids_by_radius to the returned grid so compute_null_distribution
-    # can reuse the already-built search structures for each radius.
+    # Attach grids_by_radius to the returned grid so detect_cluster_pts can
+    # reuse the already-built search structures for the null distribution.
     if last_grid is not None:
         last_grid._mr_grids = grids_by_radius
         last_grid._r_index = r_index

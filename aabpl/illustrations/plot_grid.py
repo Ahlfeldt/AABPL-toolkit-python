@@ -13,7 +13,7 @@ from matplotlib.collections import PatchCollection as _plt_PatchCollection
 from matplotlib.colors import LogNorm as _plt_LogNorm, Normalize as _plt_Normalize
 import matplotlib.colors as _plt_colors
 from mpl_toolkits.axes_grid1 import make_axes_locatable as _make_axes_locatable
-from aabpl.illustrations.plot_utils import truncate_colormap, map_2D_to_rgb, get_2D_rgb_colobar_kwargs, add_color_bar_ax, set_map_frame
+from aabpl.illustrations.plot_utils import truncate_colormap, map_2D_to_rgb, get_2D_rgb_colobar_kwargs, add_color_bar_ax, set_map_frame, draw_radius_indicator, format_col_title
 from aabpl.illustrations.plot_pt_vars import create_plots_for_vars
 
 class GridPlots(object):
@@ -55,6 +55,7 @@ class GridPlots(object):
     cluster_vars   : Scatter of source points coloured by aggregated value.
     rand_dist      : Comparison of random vs. observed radius-sum distribution.
     cluster_pts    : Source points coloured by cluster membership.
+    sample_area    : Sample area used for null-distribution random points.
     grid_ids       : Grid cell row/col indices and point counts (diagnostic).
 
     Examples
@@ -65,6 +66,40 @@ class GridPlots(object):
     """
     def __init__(self, grid):
         self.grid = grid
+
+    def sample_area(self, filename:str='', show:bool=True, display_dpi:int=100,
+                    save_kwargs:dict={}, show_grid_bounds:bool=False, **plot_kwargs):
+        """
+        Plot the sample area used for drawing null-distribution random points.
+
+        Parameters
+        ----------
+        filename : str
+            Save path. Empty string skips saving (default ``''``).
+        show : bool
+            Display the figure (default ``True``).
+        display_dpi : int
+            Resolution for inline/screen display (default ``100``).
+        save_kwargs : dict
+            Forwarded to ``fig.savefig()``.
+        show_grid_bounds : bool
+            Draw the full grid extent as a dashed rectangle (default ``False``).
+        **plot_kwargs
+            figsize : tuple, default ``(10, 8)``
+            s : float — scatter marker size
+            fig, ax — existing Figure/Axes to draw into
+
+        Returns
+        -------
+        matplotlib.figure.Figure
+        """
+        from aabpl.illustrations.plot_sample_area import plot_sample_area as _plot_sa
+        return _plot_sa(
+            grid=self.grid,
+            filename=filename, show=show, display_dpi=display_dpi,
+            save_kwargs=save_kwargs, show_grid_bounds=show_grid_bounds,
+            **plot_kwargs,
+        )
 
     def vars(self, colnames=None, filename='', show:bool=True, display_dpi:int=100, save_kwargs:dict={}, **plot_kwargs):
         """
@@ -113,10 +148,9 @@ class GridPlots(object):
         if colnames is None:
             _sc = self.grid._search_class
             colnames = np.array(_sc.target.c)
-        _r = getattr(self.grid, '_r', None)
         return create_plots_for_vars(grid=self.grid, colnames=colnames, filename=filename,
                                      show=show, display_dpi=display_dpi, save_kwargs=save_kwargs,
-                                     plot_kwargs=plot_kwargs, r=_r)
+                                     plot_kwargs=plot_kwargs)
 
     def cell_aggregates(
         self,
@@ -204,10 +238,18 @@ class GridPlots(object):
             cb = _plt_colorbar(pc, cax=add_color_bar_ax(fig,ax))
             ax.set_xlabel('x/lon')
             ax.set_ylabel('y/lat')
-            ax.title.set_text('Aggregated value per cell for '+str(column))
-            set_map_frame(ax=ax, xmin=extent[0], xmax=extent[1], ymin=extent[3], ymax=extent[2], r=getattr(self.grid, '_r', None))
+            _col_meta_entry = getattr(self.grid, '_aabpl_col_meta', {}).get(str(column), {})
+            ax.title.set_text(format_col_title(str(column), _col_meta_entry))
+            _col_meta  = getattr(self.grid, '_aabpl_col_meta', {})
+            _r_agg     = (_col_meta.get(str(column), {}) or {}).get('r', None)
+            _xmin_agg, _xmax_agg = extent[0], extent[1]
+            _ymin_agg, _ymax_agg = extent[3], extent[2]
+            set_map_frame(ax=ax, xmin=_xmin_agg, xmax=_xmax_agg, ymin=_ymin_agg, ymax=_ymax_agg)
         if not fig is None:
             if filename:
+                if _r_agg is not None:
+                    fig.canvas.draw()
+                    draw_radius_indicator(fig, ax, _r_agg, _xmin_agg, _xmax_agg, _ymin_agg, _ymax_agg)
                 fig.savefig(filename, **save_kwargs)
             if not show:
                 _plt_close(fig)
@@ -215,11 +257,62 @@ class GridPlots(object):
 
     #
 
-    def clusters(self, filename:str='', fig=None, axs=None, show:bool=True, display_dpi:int=100, save_kwargs:dict={}, **plot_kwargs):
+    def rand_dist(self, filename='', show=True, display_dpi=100, save_kwargs={}, **plot_kwargs):
+        """
+        Observed radius-sum distribution vs. null distribution (cumulative plot).
+
+        Requires ``detect_cluster_pts`` to have been run on this grid first.
+        The threshold line shows the k-th percentile of the null distribution.
+        """
+        if not hasattr(self.grid, '_cluster_result'):
+            raise RuntimeError(
+                "grid.plot.rand_dist() is only available on a grid returned by "
+                "detect_cluster_pts() or detect_cluster_cells(). "
+                "The grid you are using was created with radius_search(), which does not "
+                "run the null distribution or cluster detection steps."
+            )
+        from aabpl.illustrations.distribution_plot import create_distribution_plot
+        result = self.grid._cluster_result
+        sc = self.grid._search_class.source
+        create_distribution_plot(
+            filename=filename, plot_kwargs=plot_kwargs,
+            pts=sc.pts, x=sc.x, y=sc.y,
+            radius_sum_columns=result['aggregate_cols'],
+            grid=self.grid,
+            rndm_pts=self.grid.null_distribution,
+            cluster_threshold_values=list(result['thresholds'].values()),
+            k_th_percentile=result['k_th_percentiles'],
+            r=result['display_radius'],
+            show=show, display_dpi=display_dpi, save_kwargs=save_kwargs,
+        )
+
+    def cluster_pts(self, filename='', show=True, display_dpi=100, save_kwargs={}, **plot_kwargs):
+        """
+        Source points coloured by cluster membership and radius-sum value.
+
+        Requires ``detect_cluster_pts`` to have been run on this grid first.
+        """
+        if not hasattr(self.grid, '_cluster_result'):
+            raise RuntimeError(
+                "grid.plot.cluster_pts() is only available on a grid returned by "
+                "detect_cluster_pts() or detect_cluster_cells(). "
+                "The grid you are using was created with radius_search(), which does not "
+                "run the null distribution or cluster detection steps."
+            )
+        from aabpl.illustrations.plot_pt_vars import create_plots_for_vars
+        result = self.grid._cluster_result
+        return create_plots_for_vars(
+            grid=self.grid,
+            colnames=result['plot_colnames'],
+            filename=filename, show=show, display_dpi=display_dpi,
+            save_kwargs=save_kwargs, plot_kwargs=plot_kwargs,
+        )
+
+    def clusters(self, filename:str='', fig=None, axs=None, show:bool=True, display_dpi:int=100, save_kwargs:dict={}, cluster_columns=None, **plot_kwargs):
         """
         Plot detected cluster polygons overlaid on aggregated cell values.
-        One subplot per column in ``c``. Cluster outlines are drawn in red
-        with hatching, labelled by cluster id.
+        One subplot per cluster column (one per radius/band for multi-radius runs).
+        Cluster outlines are drawn in red with hatching, labelled by cluster id.
 
         Parameters
         ----------
@@ -234,8 +327,11 @@ class GridPlots(object):
             Existing Figure / Axes array to draw into.
         save_kwargs : dict
             Forwarded to ``fig.savefig()``.
+        cluster_columns : list[str] or None
+            Subset of cluster column names to plot.  ``None`` (default) plots all
+            cluster columns, which gives one subplot per radius/band.
         **plot_kwargs
-            figsize : tuple, default ``(10, 10 * n_indicators)``
+            figsize : tuple, default ``(10, 10 * n_cluster_cols)``
             cmap : str or Colormap, default ``'binary'``
             cluster_color : str, default ``'red'``
                 Edge colour of the cluster polygon outline.
@@ -255,20 +351,54 @@ class GridPlots(object):
         fig = grid.plot.clusters(filename='clusters.png', show=False)
         fig = grid.plot.clusters(figsize=(20, 15), cmap='Greys')
         fig = grid.plot.clusters(cluster_color='#2255cc', cluster_hatch='xxxx')
+        fig = grid.plot.clusters(cluster_columns=['employment_sum_10000_cluster'])
         """
-        if len(self.grid.clustering.by_column)==0:
+        if len(self.grid.clustering.by_column) == 0:
             print("No clustering performed. Run detect_cell_clusters or grid.create_clusters first.")
             return
         save_kwargs = {'dpi': 300, 'bbox_inches': 'tight', **save_kwargs}
         _sc2 = self.grid._search_class
-        n = len(_sc2.target.c)
-        figsize         = plot_kwargs.pop('figsize', (10, 10 * n))
-        cmap_arg        = plot_kwargs.pop('cmap', 'binary')
-        cluster_color   = plot_kwargs.pop('cluster_color', 'red')
-        cluster_hatch   = plot_kwargs.pop('cluster_hatch', '////')
-        cluster_alpha   = plot_kwargs.pop('cluster_alpha', 0.0)
+
+        # Determine which cluster columns to plot
+        all_cluster_cols = list(self.grid.clustering.by_column.keys())
+        if cluster_columns is None:
+            columns_to_plot = all_cluster_cols
+        else:
+            columns_to_plot = [c for c in cluster_columns if c in self.grid.clustering.by_column]
+        n = len(columns_to_plot)
+        if n == 0:
+            print("No matching cluster columns to plot.")
+            return
+
+        # Build a map from cluster column → index in cell_aggregates (= index in target.c).
+        # Multi-radius uses _cluster_col_map {cluster_col: orig_col}; single-radius
+        # can be derived from _aabpl_col_meta which stores the originating column.
+        input_cols = list(_sc2.target.c) if hasattr(_sc2, 'target') else []
+        input_col_to_agg_index = {col: idx for idx, col in enumerate(input_cols)}
+        col_meta = getattr(self.grid, '_aabpl_col_meta', {})
+        cluster_col_map = getattr(self.grid, '_cluster_col_map', {})
+
+        def _agg_index_for_cluster_col(cluster_col):
+            # Try _cluster_col_map first (multi-radius path)
+            if cluster_col in cluster_col_map:
+                orig = cluster_col_map[cluster_col]
+                return input_col_to_agg_index.get(orig, 0)
+            # Fallback: look in _aabpl_col_meta
+            orig = col_meta.get(cluster_col, {}).get('c', None)
+            if orig is not None:
+                return input_col_to_agg_index.get(orig, 0)
+            # Last resort: 0
+            return 0
+
+        figsize       = plot_kwargs.pop('figsize', (10, 5 * n))
+        cmap_arg      = plot_kwargs.pop('cmap', 'binary')
+        cluster_color = plot_kwargs.pop('cluster_color', 'red')
+        cluster_hatch = plot_kwargs.pop('cluster_hatch', '////')
+        cluster_alpha = plot_kwargs.pop('cluster_alpha', 0.0)
         if axs is None:
-            fig, axs = _plt_subplots(ncols=n, figsize=figsize, dpi=display_dpi)
+            fig, axs = _plt_subplots(nrows=n, ncols=1, figsize=figsize, dpi=display_dpi,
+                                     constrained_layout=True,
+                                     sharex=(n > 1))
 
         # Output grid + cached per-output-cell aggregates built lazily here; the
         # background matches grid.plot.cell_aggregates. Cluster outlines are drawn in
@@ -276,21 +406,39 @@ class GridPlots(object):
         self.grid.update_spacing()
         sx, sy = self.grid.cell_size, self.grid.cell_size_y
         ox, oy = self.grid.x_steps_bounds[0], self.grid.y_steps_bounds[0]
-        extent = [self.grid.x_steps_bounds[0], self.grid.x_steps_bounds[-1],
-                  self.grid.y_steps_bounds[-1], self.grid.y_steps_bounds[0]]
         out_sums = self.grid.cell_aggregates
 
-        for i, (cluster_column, clusters_for_column) in enumerate(self.grid.clustering.by_column.items()):
-            ax = axs.flat[i] if n > 1 else axs
-            ax.set_xlabel('x/lon '+str(self.grid.proj_crs))
-            ax.set_ylabel('y/lat '+str(self.grid.proj_crs))
-            clusters = clusters_for_column.clusters
-            ax.title.set_text(str(len(clusters))+' cluster'+ ('s' if len(clusters)!=1 else '') +' for '+str(cluster_column))
+        _xmin_cl = self.grid._search_internals.x_steps.min()
+        _xmax_cl = self.grid._search_internals.x_steps.max()
+        _ymin_cl = self.grid._search_internals.y_steps.min()
+        _ymax_cl = self.grid._search_internals.y_steps.max()
 
-            # one coloured square per non-empty output cell (sparse, no dense raster)
+        axes_with_r = []  # (ax, r_spec) pairs for radius indicator
+
+        for i, cluster_column in enumerate(columns_to_plot):
+            clusters_for_column = self.grid.clustering.by_column[cluster_column]
+            ax = axs.flat[i] if n > 1 else axs
+            ax.set_xlabel('x/lon ' + str(self.grid.proj_crs))
+            ax.set_ylabel('y/lat ' + str(self.grid.proj_crs))
+            clusters = clusters_for_column.clusters
+            n_clusters = len(clusters)
+            cluster_label = format_col_title(
+                cluster_column,
+                col_meta.get(cluster_column, {}),
+            )
+            # format_col_title already prepends 'Clusters - '; strip and re-add count
+            cluster_label_base = cluster_label.replace('Clusters - ', '', 1)
+            plural = 's' if n_clusters != 1 else ''
+            ax.title.set_text(
+                str(n_clusters) + ' cluster' + plural + ' - ' + cluster_label_base
+            )
+
+            # cell background: use the aggregated values for this cluster column's
+            # originating input column (not the enumerate index i)
+            agg_val_idx = _agg_index_for_cluster_col(cluster_column)
             rects, vals = [], []
             for (row, col), v in out_sums.items():
-                val = v[i]
+                val = v[agg_val_idx] if agg_val_idx < len(v) else 0
                 if val == 0:
                     continue
                 rects.append(_plt_Rectangle((ox + int(col) * sx, oy + int(row) * sy), sx, sy))
@@ -301,12 +449,14 @@ class GridPlots(object):
             if vals:
                 vals = _np_array(vals)
                 vmin, vmax = vals[vals != 0].min(), vals.max()
-                norm = _plt_LogNorm(vmin=vmin,vmax=vmax,clip=False) if vmin>0 else _plt_Normalize(vmin=vmin,vmax=vmax,clip=False)
+                norm = (_plt_LogNorm(vmin=vmin, vmax=vmax, clip=False) if vmin > 0
+                        else _plt_Normalize(vmin=vmin, vmax=vmax, clip=False))
                 pc = _plt_PatchCollection(rects, cmap=cmap, norm=norm)
                 pc.set_array(vals)
                 ax.add_collection(pc)
             for cluster in clusters:
-                geoms = [cluster.geometry] if hasattr(cluster.geometry, 'exterior') else cluster.geometry.geoms
+                geoms = ([cluster.geometry] if hasattr(cluster.geometry, 'exterior')
+                         else cluster.geometry.geoms)
                 for geom in geoms:
                     ax.add_patch(_plt_Polygon(
                         xy=geom.exterior.coords,
@@ -314,17 +464,29 @@ class GridPlots(object):
                         facecolor=(*_plt_colors.to_rgba(cluster_color)[:3], cluster_alpha),
                         edgecolor=cluster_color,
                     ))
-                ax.annotate(cluster.id, xy=cluster.centroid, fontsize=15, weight='bold', color=cluster_color)
+                ax.annotate(cluster.id, xy=cluster.centroid, fontsize=15,
+                            weight='bold', color=cluster_color)
 
-            _r = getattr(self.grid, '_r', None)
-            set_map_frame(ax=ax, xmin=self.grid._search_internals.x_steps.min(), xmax=self.grid._search_internals.x_steps.max(),
-                          ymin=self.grid._search_internals.y_steps.min(), ymax=self.grid._search_internals.y_steps.max(), r=_r)
+            set_map_frame(ax=ax, xmin=_xmin_cl, xmax=_xmax_cl, ymin=_ymin_cl, ymax=_ymax_cl)
             if len(vals) > 0:
                 _divider = _make_axes_locatable(ax)
                 _cax = _divider.append_axes("right", size="3%", pad=0.05)
                 _plt_colorbar(pc, cax=_cax)
 
-        if not fig is None:
+            # Collect per-axis radius: prefer column-level meta, fall back to search class
+            r_for_ax = col_meta.get(cluster_column, {}).get('r', None)
+            if r_for_ax is None:
+                r_for_ax = getattr(getattr(self.grid, '_search_class', None), 'r', None)
+            if r_for_ax is not None:
+                axes_with_r.append((ax, r_for_ax))
+
+        if fig is not None:
+            if axes_with_r:
+                fig.canvas.draw()
+                for _indicator_ax, _indicator_r in axes_with_r:
+                    draw_radius_indicator(fig, _indicator_ax, _indicator_r,
+                                          _xmin_cl, _xmax_cl, _ymin_cl, _ymax_cl,
+                                          placement='y')
             if filename:
                 fig.savefig(filename, **save_kwargs)
             if not show:
@@ -469,7 +631,7 @@ class GridPlots(object):
         ax.flat[1].set_ylabel('col nr') 
         ax.flat[1].title.set_text("Grid row / col indices")
         
-        from aabpl.radius_search.point_grid_assignment import cell_count as _cell_count
+        from aabpl.search.point_assignment import cell_count as _cell_count
         X = _np_array([[_cell_count(self.grid, row_id, col_id) for col_id in self.grid._search_internals.col_ids] for row_id in reversed(self.grid._search_internals.row_ids)])
         # p = ax.flat[2].pcolormesh(X, cmap='Reds')
         p = ax.flat[2].imshow(X=X, interpolation='none', extent=extent, cmap='Reds')

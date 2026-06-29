@@ -142,7 +142,7 @@ def aggregate_point_data_to_cells(
 
     # -- optional: auto-reduce nest_depth when cells are too sparse to benefit --
     if False and nest_depth > 0:
-        from aabpl.radius_search.spacing_topology import count_cells_per_level, recommend_max_nest_depth
+        from aabpl.search.spacing_topology import count_cells_per_level, recommend_max_nest_depth
         _x_arr = pts[x].values
         _y_arr = pts[y].values
         _cell_counts = count_cells_per_level(

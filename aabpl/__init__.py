@@ -16,9 +16,9 @@ from .main import (
     detect_cluster_cells,
     detect_cluster_cells_from_labeled_pts,
 )
-from .radius_search.grid_class import Grid
-from .radius_search.sample_area import infer_sample_area_from_pts
-from .radius_search.null_distribution import draw_random_coords
+from .search.grid_class import Grid
+from .search.sample_area import infer_sample_area_from_pts
+from .search.null_distribution import draw_random_coords
 
 __version__ = version('aabpl')
 if not getattr(_builtins, '_aabpl_imported', False):

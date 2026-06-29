@@ -10,8 +10,8 @@ from aabpl.utils.progress import SearchProgress, progress_print
 from aabpl.illustrations.plot_disk import illustrate_point_disk
 from aabpl.testing.test_performance import time_func_perf
 from math import pi as math_pi
-from .sample_area import compute_disk_cell_overlap
-from .point_grid_assignment import cell_count_iter, _lvl0_packed
+from ..sample_area import compute_disk_cell_overlap
+from ..point_assignment import cell_count_iter, _lvl0_packed
 from aabpl import config as _cfg
 
 # Points per block when forming the (block x candidates) distance matrix. Bounds

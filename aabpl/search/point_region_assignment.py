@@ -18,9 +18,9 @@ from math import log10 as _math_log10
 from aabpl.utils.misc import arr_to_tpls, find_column_name
 from aabpl.illustrations.plot_region_assignment import (illustrate_point_to_cell_region_assignment)
 from aabpl.illustrations.plot_region_assignment_viz import visualize_pt_to_cell_region_assignment
-from .region_tree import recursive_cell_region_inference
+from .algorithm.region_tree import recursive_cell_region_inference
 from aabpl.testing.test_performance import time_func_perf
-from .disk_region_geometry import build_disk_region_lookups
+from .algorithm.disk_geometry import build_disk_region_lookups
 # from aabpl.doc.docstrings import fixdocstring
 
 ################ classify_point_triangle ######################################################################################
@@ -585,7 +585,7 @@ def assign_points_to_mirco_regions(
 
     # Pre-compute region_and_trgl_id: encodes (region_id, triangle_id) so that the
     # search loop can look up triangle-specific nested cells without any triangle logic.
-    from .disk_region_geometry import _REGION_AND_TRGL_MULT
+    from .algorithm.disk_geometry import _REGION_AND_TRGL_MULT
     pts['region_and_trgl_id'] = (
         pts[cell_region_name].astype('int64') * _REGION_AND_TRGL_MULT
         + pts['triangle_id'].astype('int64')

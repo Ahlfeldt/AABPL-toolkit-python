@@ -4,7 +4,7 @@ from matplotlib.pyplot import close as _plt_close
 from matplotlib.colors import LogNorm as _plt_LogNorm, Normalize as _plt_Normalize, LinearSegmentedColormap as _plt_LinearSegmentedColormap, ListedColormap as _plt_ListedColormap, BoundaryNorm as _plt_BoundaryNorm
 from matplotlib.patches import Patch as _plt_Patch
 from numpy import array as _np_array, zeros as _np_zeros
-from aabpl.illustrations.plot_utils import truncate_colormap, set_map_frame, plot_polygon
+from aabpl.illustrations.plot_utils import truncate_colormap, set_map_frame, draw_radius_indicator, plot_polygon, format_col_title
 from shapely.geometry import Polygon as _shapely_Polygon, MultiPoint as _shapely_MultiPoint
 
 def handle_plot_kwargs(default_kwargs:dict={}, **kwargs):
@@ -47,7 +47,6 @@ def create_plots_for_vars(
         plot_kwargs:dict={},
         show:bool=True,
         display_dpi:int=100,
-        r:float=None,
 ):
     """
     Scatter plot of source points coloured by the value of one or more columns.
@@ -126,12 +125,11 @@ def create_plots_for_vars(
                                   sharex=(ncols == 1 and nrows > 1),
                                   sharey=(nrows == 1 and ncols > 1))
     if not grid.sample_grid_bounds is None and not grid.sample_area is None:
+        _sa_xmin, _sa_ymin, _sa_xmax, _sa_ymax = grid.sample_area.bounds
         non_valid_area = _shapely_Polygon([
-            (grid.sample_grid_bounds[0], grid.sample_grid_bounds[1]),
-            (grid.sample_grid_bounds[2], grid.sample_grid_bounds[1]),
-            (grid.sample_grid_bounds[2], grid.sample_grid_bounds[3]),
-            (grid.sample_grid_bounds[0], grid.sample_grid_bounds[3])
-            ]).difference(grid.sample_area) 
+            (_sa_xmin, _sa_ymin), (_sa_xmax, _sa_ymin),
+            (_sa_xmax, _sa_ymax), (_sa_xmin, _sa_ymax),
+        ]).difference(grid.sample_area)
         xmin, xmax, ymin, ymax = grid._search_internals.bounds.xmin, grid._search_internals.bounds.xmax, grid._search_internals.bounds.ymin, grid._search_internals.bounds.ymax,
     else:    
         xmin, xmax, ymin, ymax = grid._search_internals.bounds.xmin, grid._search_internals.bounds.xmax, grid._search_internals.bounds.ymin, grid._search_internals.bounds.ymax,
@@ -140,6 +138,8 @@ def create_plots_for_vars(
     src = _sc.source
     xs = src.pts[x_col]
     ys = src.pts[y_col]
+    _col_meta = getattr(grid, '_aabpl_col_meta', {})
+    _axes_with_r = []  # list of (ax, r) pairs — radius indicator drawn on every axis
     for i, colname in enumerate(colnames.flat):
         # SELECT AX (IF MULTIPLE)
         ax = axs.flat[i] if nrows > 1 else axs
@@ -147,8 +147,7 @@ def create_plots_for_vars(
         col_idx = i % ncols
 
         # SET TITLE
-        ax_title = (colname)
-        ax.set_title(ax_title)
+        ax.set_title(format_col_title(colname, _col_meta.get(colname, {})))
         # suppress redundant axis labels on shared axes
         if ncols == 1 and nrows > 1 and row_idx < nrows - 1:
             ax.set_xlabel('')
@@ -220,11 +219,17 @@ def create_plots_for_vars(
             scttr = ax.scatter(x=xs, y=ys, c=c, norm=norm, cmap=cmap, rasterized=True, linewidths=0.3, **scatter_kwargs)
             fig.colorbar(scttr, ax=ax, fraction=0.046, pad=0.04)
         plot_polygon(poly=non_valid_area, ax=ax, facecolor="none", edgecolor='black', linewidth=sample_area_lw)
-        is_last = (i == colnames.size - 1)
-        set_map_frame(ax=ax, xmin=xmin, xmax=xmax, ymin=ymin, ymax=ymax,
-                      r=r if is_last else None)
+        set_map_frame(ax=ax, xmin=xmin, xmax=xmax, ymin=ymin, ymax=ymax)
+        _col_r = _col_meta.get(colname, {}).get('r', None)
+        if _col_r is not None:
+            _axes_with_r.append((ax, _col_r))
 
     if not fig is None:
+        if _axes_with_r:
+            fig.canvas.draw()
+            for _indicator_ax, _indicator_r in _axes_with_r:
+                draw_radius_indicator(fig, _indicator_ax, _indicator_r, xmin, xmax, ymin, ymax,
+                                      placement='y')
         if filename:
             fig.savefig(filename, **save_kwargs)
         if not show:

@@ -145,7 +145,15 @@ class Clustering(object):
         """
         self.grid = grid
         self.by_column = {}
-    
+
+    @property
+    def thresholds(self):
+        """Dict mapping cluster column name to {k_percentile: threshold_value}."""
+        return {
+            col: {getattr(cfc, 'k', None): getattr(cfc, 'threshold', None)}
+            for col, cfc in self.by_column.items()
+        }
+
     def create_clusters(
         self,
         pts:_pd_DataFrame,
@@ -207,7 +215,7 @@ class Clustering(object):
                 column=column,
                 column_id=i,
             )
-            self.by_column[column] = clusters_for_column
+            self.by_column[cluster_column] = clusters_for_column
             largest_cluster = max([0]+[cluster.total for cluster in clusters_for_column.clusters])
             if queen_contingency:
                 clusters_for_column.merge_clusters(check_if_merge=merge_condition_queen_contingency(queen_contingency))
@@ -590,11 +598,13 @@ class Clustering(object):
             ]].values):
                 if (row, col) in cell_to_cluster:
                     vals[i] = cell_to_cluster[(row, col)]
-            # derive cluster_id column name from cluster_column: insert '_id' before the suffix
-            # e.g. employment_cluster_sum_5000 → employment_cluster_id_sum_5000
-            # cluster_id column: 0 = not in any cluster polygon, positive int = cluster ID
-            # (polygon may include convex hull / contingency cells beyond threshold seeds)
-            cluster_id_column = cluster_column.replace('_cluster_', '_cluster_id_', 1)
+            # derive cluster_id column name from cluster_column
+            # e.g. employment_cluster_sum_5000  → employment_cluster_id_sum_5000  (_cluster_ present)
+            #      employment_sum_0_15000_cluster  → employment_sum_0_15000_cluster_id  (ends with _cluster)
+            if '_cluster_' in cluster_column:
+                cluster_id_column = cluster_column.replace('_cluster_', '_cluster_id_', 1)
+            else:
+                cluster_id_column = cluster_column + '_id'
             pts[cluster_id_column] = vals
         #
     #

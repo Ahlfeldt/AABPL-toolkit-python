@@ -18,8 +18,8 @@ Decorate a function with ``@attach_params``:
 
 Then at runtime:
 
-    aabpl.radius_search.params.r      # → "Search radius in metres."
-    aabpl.radius_search.params        # → full listing of all params
+    aabpl.search.params.r      # → "Search radius in metres."
+    aabpl.search.params        # → full listing of all params
 
 Descriptions are parsed lazily from the existing docstring on first access —
 no duplication, no extra maintenance.

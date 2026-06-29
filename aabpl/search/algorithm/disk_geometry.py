@@ -10,7 +10,7 @@ from aabpl.utils.misc import make_bins_from_vals, get_vals_from_bins
 from aabpl.utils.cell_geometry import (get_cell_closest_point_to_point, get_cell_farthest_vertex_to_point,
  cells_never_contain, cells_always_overlap,
  classify_disk_cells, classify_disk_cells_by_level)
-from .region_classes import OffsetRegion, Vertex, LineSegment, Circle, Edge
+from .regions import OffsetRegion, Vertex, LineSegment, Circle, Edge
 from aabpl.illustrations.plot_cell_pattern import plot_cell_pattern
 from aabpl.testing.test_performance import time_func_perf
 from matplotlib.patches import (Rectangle as _plt_Rectangle, Polygon as _plt_Polygon, Circle as _plt_Circle)
@@ -2579,7 +2579,7 @@ def _evict_disk_region_cache():
     The most-recently-used entry is never a candidate (unless the cache size is 1).
     Falls back to plain LRU eviction when the candidate pool is exhausted.
     """
-    from .spacing_topology import predict_geo_build_time as _predict_build
+    from ..spacing_topology import predict_geo_build_time as _predict_build
     cache = _config.disk_region_cache
     while len(cache) > _config.DISK_REGION_CACHE_MAXSIZE:
         keys = list(cache.keys())  # ordered oldest → newest

@@ -1,5 +1,5 @@
 """
-Comprehensive test suite for aabpl.radius_search.
+Comprehensive test suite for aabpl.search.
 
 Covers:
 - All stat methods (sum, count, mean, variance, std, cv, skewness, kurtosis)
@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 import aabpl
 import aabpl.config as config
-from aabpl.radius_search.point_grid_assignment import cell_count, cell_count_iter, _lvl0_packed
+from aabpl.search.point_assignment import cell_count, cell_count_iter, _lvl0_packed
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -58,7 +58,7 @@ section("1 · Basic single-agg: sum / count / mean  (crs='', nd=2)")
 
 for stat, suf in [('sum', '_r_sum'), ('count', '_r_count'), ('mean', '_r_mean')]:
     pts = pts_base.copy()
-    aabpl.radius_search(pts=pts, crs='', r=R, c=['val'], x='x', y='y',
+    aabpl.search(pts=pts, crs='', r=R, c=['val'], x='x', y='y',
                         stat=stat, suffix=suf, silent=True, _dev=DEV)
     out = [c for c in pts.columns if c.endswith(suf)]
     check(len(out) == 1, f"stat={stat}: expected 1 output col ending with {suf!r}, got {[c for c in pts.columns]}")
@@ -72,7 +72,7 @@ section("2 · Moment aggs: variance / std / cv / skewness / kurtosis  (nd=2)")
 
 for stat in ['variance', 'std', 'cv', 'skewness', 'kurtosis']:
     pts = pts_base.copy()
-    aabpl.radius_search(pts=pts, crs='', r=R, c=['val'], x='x', y='y',
+    aabpl.search(pts=pts, crs='', r=R, c=['val'], x='x', y='y',
                         stat=stat, silent=True, _dev=DEV)
     out_cols = [c for c in pts.columns if c.startswith('val_')]
     check(len(out_cols) == 1, f"stat={stat}: expected 1 output col, got {out_cols}")
@@ -86,7 +86,7 @@ section("3 · Multi-agg lists  (crs='', nd=2)")
 
 # 3a: sum + count + mean — verify mean == sum/count
 pts = pts_base.copy()
-aabpl.radius_search(pts=pts, crs='', r=R, c=['val'], x='x', y='y',
+aabpl.search(pts=pts, crs='', r=R, c=['val'], x='x', y='y',
                     stat=['sum', 'count', 'mean'], silent=True, _dev=DEV)
 for expected in [f'val_sum_{R}', f'val_cnt_{R}', f'val_avg_{R}']:
     check(expected in pts.columns, f"multi-stat: missing {expected}; cols={[c for c in pts.columns if 'val' in c]}")
@@ -97,7 +97,7 @@ print(f"  ['sum','count','mean']  mean_err={diff:.2e}  OK")
 
 # 3b: sum + variance
 pts = pts_base.copy()
-aabpl.radius_search(pts=pts, crs='', r=R, c=['val'], x='x', y='y',
+aabpl.search(pts=pts, crs='', r=R, c=['val'], x='x', y='y',
                     stat=['sum', 'variance'], silent=True, _dev=DEV)
 check(f'val_sum_{R}' in pts.columns and f'val_var_{R}' in pts.columns, "multi-stat sum+variance: missing cols")
 leaked = [c for c in pts.columns if '__rs_int__' in c]
@@ -106,7 +106,7 @@ print(f"  ['sum','variance']  no_leak=True  OK")
 
 # 3c: two columns, sum + mean
 pts = pts_base.copy()
-aabpl.radius_search(pts=pts, crs='', r=R, c=['val', 'val2'], x='x', y='y',
+aabpl.search(pts=pts, crs='', r=R, c=['val', 'val2'], x='x', y='y',
                     stat=['sum', 'mean'], silent=True, _dev=DEV)
 for col_base in ['val', 'val2']:
     for suf in [f'_sum_{R}', f'_avg_{R}']:
@@ -115,7 +115,7 @@ print(f"  two-col ['sum','mean']  OK")
 
 # 3d: custom suffix dict
 pts = pts_base.copy()
-aabpl.radius_search(pts=pts, crs='', r=R, c=['val'], x='x', y='y',
+aabpl.search(pts=pts, crs='', r=R, c=['val'], x='x', y='y',
                     stat=['sum', 'count'],
                     suffix={'sum': '_s5k', 'count': '_n5k'},
                     silent=True, _dev=DEV)
@@ -130,7 +130,7 @@ section("4 · nest_depth variants: 0, 2, 3  (sum)")
 sums = {}
 for nd in [0, 2, 3]:
     pts = pts_base.copy()
-    aabpl.radius_search(pts=pts, crs='', r=R, c=['val'], x='x', y='y',
+    aabpl.search(pts=pts, crs='', r=R, c=['val'], x='x', y='y',
                         stat='sum', silent=True,
                         _dev={'nest_depth': nd, 'spacing_over_radius': 2.0})
     col = [c for c in pts.columns if c.startswith('val_')][0]
@@ -148,7 +148,7 @@ section("5 · Multiple c columns  (nd=2, sum)")
 # ═══════════════════════════════════════════════════════════════════════════════
 
 pts = pts_base.copy()
-aabpl.radius_search(pts=pts, crs='', r=R, c=['val', 'val2'], x='x', y='y',
+aabpl.search(pts=pts, crs='', r=R, c=['val', 'val2'], x='x', y='y',
                     stat='sum', silent=True, _dev=DEV)
 for expected in [f'val_sum_{R}', f'val2_sum_{R}']:
     check(expected in pts.columns, f"multi-col: missing {expected}")
@@ -160,7 +160,7 @@ section("6 · Separate pts_target  (nd=2, sum)")
 
 pts_source = pts_base.copy()
 pts_target = _make_pts(300, seed=42)
-grid = aabpl.radius_search(pts=pts_target, crs='', r=R, c=['val'], x='x', y='y',
+grid = aabpl.search(pts=pts_target, crs='', r=R, c=['val'], x='x', y='y',
                            pts_target=pts_source, silent=True, _dev=DEV)
 check(f'val_sum_{R}' in pts_target.columns, "pts_target: missing val_sum_{R}")
 check(f'val_sum_{R}' not in pts_source.columns, "pts_source should NOT have result col")
@@ -170,7 +170,7 @@ print(f"  pts_target separate  sum={pts_target[f'val_sum_{R}'].sum():.1f}  OK")
 section("7 · cell_count / cell_count_iter helpers")
 # ═══════════════════════════════════════════════════════════════════════════════
 
-from aabpl.radius_search.point_grid_assignment import (
+from aabpl.search.point_assignment import (
     assign_points_to_cells, aggregate_point_data_to_cells,
 )
 
@@ -207,7 +207,7 @@ section("8 · config.VALIDATE=True correctness check  (nd=2, sum)")
 config.VALIDATE = True
 pts = pts_base.copy()
 try:
-    grid = aabpl.radius_search(pts=pts, crs='', r=R, c=['val'], x='x', y='y',
+    grid = aabpl.search(pts=pts, crs='', r=R, c=['val'], x='x', y='y',
                                stat='sum', silent=True, _dev=DEV)
     print(f"  VALIDATE=True run completed without error  OK")
 except Exception as e:
@@ -222,7 +222,7 @@ section("9 · weight_valid_area  (nd=2, sum)")
 config.VALIDATE = False
 pts = pts_base.copy()
 try:
-    grid = aabpl.radius_search(pts=pts, crs='', r=R, c=['val'], x='x', y='y',
+    grid = aabpl.search(pts=pts, crs='', r=R, c=['val'], x='x', y='y',
                                stat='sum', weight_valid_area='estimate',
                                silent=True, _dev=DEV)
     check(f'val_sum_{R}' in pts.columns, f"weight_valid_area: missing val_sum_{R}")
@@ -236,7 +236,7 @@ section("10 · count-only mode with explicit c  (nd=2)")
 
 # c=['val'] + stat='count' → output is val_r_count (copied from count helper)
 pts = pts_base.copy()
-aabpl.radius_search(pts=pts, crs='', r=R, c=['val'], x='x', y='y',
+aabpl.search(pts=pts, crs='', r=R, c=['val'], x='x', y='y',
                     stat='count', suffix='_r_count', silent=True, _dev=DEV)
 check('val_r_count' in pts.columns, f"stat='count': missing val_r_count; cols={list(pts.columns)}")
 check((pts['val_r_count'] >= 0).all(), "stat='count': negative values")
@@ -252,7 +252,7 @@ PROJ_COLS  = {'proj_x', 'proj_y'}
 # 11a: keep_cols=False (default) — only requested output cols added
 pts = pts_base.copy()
 cols_before = set(pts.columns)
-aabpl.radius_search(pts=pts, crs='', r=R, c=['val'], x='x', y='y',
+aabpl.search(pts=pts, crs='', r=R, c=['val'], x='x', y='y',
                     stat='sum', silent=True, _dev=DEV)
 added = set(pts.columns) - cols_before
 check(added == {f'val_sum_{R}'}, f"keep_cols=False: unexpected cols added: {added}")
@@ -261,7 +261,7 @@ print(f"  keep_cols=False (sum)  added={added}  OK")
 # 11b: keep_cols=True — grid/proj cols kept, but NO internal helpers
 pts = pts_base.copy()
 cols_before = set(pts.columns)
-aabpl.radius_search(pts=pts, crs='', r=R, c=['val'], x='x', y='y',
+aabpl.search(pts=pts, crs='', r=R, c=['val'], x='x', y='y',
                     stat='sum', keep_cols=True, silent=True, _dev=DEV)
 added = set(pts.columns) - cols_before
 internal_leaked = [c for c in added if '__rs_int__' in c]
@@ -272,7 +272,7 @@ print(f"  keep_cols=True (sum)  added={sorted(added)}  OK")
 # 11c: keep_cols=None — grid index cols kept, proj cols kept, no helpers
 pts = pts_base.copy()
 cols_before = set(pts.columns)
-aabpl.radius_search(pts=pts, crs='', r=R, c=['val'], x='x', y='y',
+aabpl.search(pts=pts, crs='', r=R, c=['val'], x='x', y='y',
                     stat='sum', keep_cols=None, silent=True, _dev=DEV)
 added = set(pts.columns) - cols_before
 internal_leaked = [c for c in added if '__rs_int__' in c]
@@ -319,7 +319,7 @@ print(f"  radius_variance keep_cols=True  added={sorted(added)}  OK")
 # 11g: multi-stat ['variance','count'] — count IS requested so it must be present
 pts = pts_base.copy()
 cols_before = set(pts.columns)
-aabpl.radius_search(pts=pts, crs='', r=R, c=['val'], x='x', y='y',
+aabpl.search(pts=pts, crs='', r=R, c=['val'], x='x', y='y',
                     stat=['variance', 'count'], silent=True, _dev=DEV)
 added = set(pts.columns) - cols_before
 check(any('var' in c for c in added), f"multi [var,cnt]: variance col missing; added={added}")

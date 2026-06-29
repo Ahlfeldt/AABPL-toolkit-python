@@ -14,7 +14,7 @@ from matplotlib.colors import LogNorm as _plt_LogNorm, Normalize as _plt_Normali
 from matplotlib.pyplot import (subplots as _plt_subplots, colorbar as _plt_colorbar, get_cmap as _plt_get_cmap)
 from matplotlib.ticker import FuncFormatter as _FuncFormatter
 from matplotlib.patches import Patch as _plt_Patch
-from aabpl.illustrations.plot_utils import add_color_bar_ax, set_map_frame, truncate_colormap, plot_polygon
+from aabpl.illustrations.plot_utils import add_color_bar_ax, set_map_frame, draw_radius_indicator, truncate_colormap, plot_polygon, format_col_title
 from shapely.geometry import Polygon as _shapely_Polygon
 
 # Colour used for zero-value points and the colorbar's 'under' extension.
@@ -183,11 +183,11 @@ def create_distribution_plot(
         'color_scale': 'auto',
         'color_cluster': '#2a07ee',
 
-        'figsize': (10, 10),
+        'figsize': (10, 13),
         'maps_side_by_side': None,   # None = auto
-        'hspace': 0.05,
+        'hspace': 0.5,
         'wspace': 0.08,
-        'colorbar_width': 0.04,
+        'colorbar_width': 0.06,
         'dist_map_ratio': 0.3,
 
         'non_valid_area_color': '#bedbe6',
@@ -246,23 +246,59 @@ def create_distribution_plot(
     if fig is None or axs is None:
         fig = plt.figure(figsize=figsize, dpi=display_dpi)
         outer = gridspec.GridSpec(ncols, 1, figure=fig, hspace=0.08,
-                                  top=0.93, bottom=0.06, left=0.08, right=0.97)
+                                  top=0.93, bottom=0.04, left=0.08, right=0.97)
 
-    _auto_title = (
-        "Aggregate for indicator" + ("" if ncols == 1 else "s") +
-        " within " + str(r) + " meters"
-    )
+    _col_meta_dist = getattr(grid, '_aabpl_col_meta', {})
+
+    def _fmt_r_for_title(rv):
+        if isinstance(rv, (int, float)):
+            km = rv / 1000.0
+            if rv >= 1000:
+                return 'within ' + (str(int(km)) if km == int(km) else f'{km:.4g}') + 'km'
+            return 'within ' + str(int(rv)) + 'm'
+        if isinstance(rv, (list, tuple)) and len(rv) > 0:
+            outer = max((t[1] if isinstance(t, (list, tuple)) else t) for t in rv)
+            km = outer / 1000.0
+            if outer >= 1000:
+                return 'within ' + (str(int(km)) if km == int(km) else f'{km:.4g}') + 'km'
+            return 'within ' + str(int(outer)) + 'm'
+        return 'within ' + str(rv)
+
+    _title_parts = []
+    for _cn in radius_sum_columns:
+        _m  = _col_meta_dist.get(_cn, {})
+        _c  = _m.get('c', _cn)
+        _st = _m.get('stat', '')
+        _rv = _m.get('r', r)
+        _title_parts.append(
+            (_c + ' ' + _st + ' ' if _st else _c + ' ') + _fmt_r_for_title(_rv)
+        )
+    _auto_title = ', '.join(_title_parts) + ' - Null distribution vs Data'
     _suptitle = (
         title_override.replace('{auto}', _auto_title) if title_override
         else _auto_title
     )
     fig.suptitle(_suptitle, **suptitle_kwargs)
 
+    _sa_xmin, _sa_ymin, _sa_xmax, _sa_ymax = grid.sample_area.bounds
+    _sa_w = _sa_xmax - _sa_xmin
+    _sa_h = _sa_ymax - _sa_ymin
+    _sa_span = max(_sa_w, _sa_h)
+    # Equal absolute padding in both dimensions (same distance regardless of aspect).
+    _map_pad2 = 0.02 * _sa_span
+    _ax_xmin = _sa_xmin - _map_pad2
+    _ax_xmax = _sa_xmax + _map_pad2
+    _ax_ymin = _sa_ymin - _map_pad2
+    _ax_ymax = _sa_ymax + _map_pad2
+    # Outer rectangle slightly larger so excluded fringe is visible even for bbox sample areas.
+    _map_pad3 = 0.03 * _sa_span
+    _out_xmin = _sa_xmin - _map_pad3
+    _out_xmax = _sa_xmax + _map_pad3
+    _out_ymin = _sa_ymin - _map_pad3
+    _out_ymax = _sa_ymax + _map_pad3
     non_valid_area = _shapely_Polygon([
-        (grid.sample_grid_bounds[0], grid.sample_grid_bounds[1]),
-        (grid.sample_grid_bounds[2], grid.sample_grid_bounds[1]),
-        (grid.sample_grid_bounds[2], grid.sample_grid_bounds[3]),
-        (grid.sample_grid_bounds[0], grid.sample_grid_bounds[3]),
+        (_out_xmin, _out_ymin), (_out_xmax, _out_ymin),
+        (_out_xmax, _out_ymax), (_out_xmin, _out_ymax),
     ]).difference(grid.sample_area)
 
     pct_xmin, pct_xmax = 0, 100
@@ -273,6 +309,8 @@ def create_distribution_plot(
 
     for (i, colname, cluster_threshold_value, k) in zip(
             range(ncols), radius_sum_columns, cluster_threshold_values, k_th_percentile):
+        # Human-readable column label used in default panel titles
+        col_label = format_col_title(colname, _col_meta_dist.get(colname, {}))
 
         # ── Determine map layout ──────────────────────────────────────────────
         map_w = max(
@@ -329,7 +367,7 @@ def create_distribution_plot(
         ax_dist = fig.add_subplot(panel[0])
         ax_title = ax_titles.get('rand_dist', "{col}: {k}th-percentile threshold = {thresh}")
         ax_title = ax_title.format(
-            col=colname, k=k,
+            col=col_label, k=k,
             thresh=round(cluster_threshold_value, sufficient_digits),
             r=r, n=len(rndm_pts),
         )
@@ -366,7 +404,7 @@ def create_distribution_plot(
         ax_dist.set_xlim([pct_xmin, pct_xmax])
         if ymin != ymax:
             ax_dist.set_ylim([ymin, ymax])
-        ax_dist.legend(fontsize=6, markerscale=2)
+        ax_dist.legend(fontsize=6, markerscale=5)
 
         # ── Colormap / norm setup ─────────────────────────────────────────────
         map_xmin = min(_pts_x.min(), _rnd_x.min())
@@ -442,7 +480,7 @@ def create_distribution_plot(
         ax_rnd.set_facecolor(sample_area_color)
         ax_rnd.set_title(
             ax_titles.get('rand_map', "Random points (n={n})").format(
-                col=colname, k=k,
+                col=col_label, k=k,
                 thresh=round(cluster_threshold_value, sufficient_digits),
                 r=r, n=len(rndm_pts),
             ),
@@ -452,7 +490,7 @@ def create_distribution_plot(
             ax_rnd.imshow(X=X, interpolation='none', cmap=cmap_binary, extent=extent)
             non_valid_patch = _plt_Patch(facecolor=non_valid_area_color, label='Non-valid area', edgecolor='black')
             sample_patch    = _plt_Patch(facecolor=sample_area_color,    label='Sample area',    edgecolor='black')
-            ax_rnd.legend(handles=[non_valid_patch, sample_patch], loc='best', fontsize=5)
+            ax_rnd.legend(handles=[non_valid_patch, sample_patch], loc='upper left', fontsize=5)
         plot_polygon(ax=ax_rnd, poly=non_valid_area, facecolor=non_valid_area_color,
                      edgecolor='black', linewidth=sample_area_lw)
         sc = ax_rnd.scatter(
@@ -461,14 +499,14 @@ def create_distribution_plot(
         )
         plot_polygon(ax=ax_rnd, poly=grid.sample_area, facecolor="none",
                      edgecolor='black', linewidth=sample_area_lw)
-        set_map_frame(ax=ax_rnd, xmin=map_xmin, xmax=map_xmax, ymin=map_ymin, ymax=map_ymax, r=r)
+        set_map_frame(ax=ax_rnd, xmin=_ax_xmin, xmax=_ax_xmax, ymin=_ax_ymin, ymax=_ax_ymax, padding_frac=0)
 
         # ── Map: dataset points ───────────────────────────────────────────────
         ax_pts = fig.add_subplot(bottom_gs[1])
         ax_pts.set_facecolor(sample_area_color)
         ax_pts.set_title(
             ax_titles.get('pts_map', "Dataset points (n={n})").format(
-                col=colname, k=k,
+                col=col_label, k=k,
                 thresh=round(cluster_threshold_value, sufficient_digits),
                 r=r, n=len(pts),
             ),
@@ -482,7 +520,7 @@ def create_distribution_plot(
             x=_pts_x, y=_pts_y, c=pts_vals[:, i],
             s=s_map, marker='.', norm=norm, cmap=cmap_scatter, linewidths=0.3,
         )
-        set_map_frame(ax=ax_pts, xmin=map_xmin, xmax=map_xmax, ymin=map_ymin, ymax=map_ymax, r=r)
+        set_map_frame(ax=ax_pts, xmin=_ax_xmin, xmax=_ax_xmax, ymin=_ax_ymin, ymax=_ax_ymax, padding_frac=0)
 
         # ── Coordinate tick formatter ─────────────────────────────────────────
         # Pick scale per axis from actual data magnitude, not a fixed threshold.
@@ -513,17 +551,39 @@ def create_distribution_plot(
             ax_rnd.set_xlabel('')
 
         # ── Shared colorbar ───────────────────────────────────────────────────
-        # Steal space from the rightmost map axis — colorbar then matches its height exactly.
         # 'both': grey triangle at bottom (zero), cluster colour at top (over-threshold).
-        _cbar_ax = ax_pts if maps_side_by_side else None
-        _cbar_axs = None if maps_side_by_side else [ax_rnd, ax_pts]
-        fig.colorbar(
-            sc_pts,
-            ax=_cbar_ax if _cbar_ax is not None else _cbar_axs,
-            extend='both',
-            fraction=colorbar_width,
-            pad=0.02,
-        )
+        # Force a full draw so aspect='equal' axes have their final rendered positions.
+        fig.canvas.draw()
+
+        # aspect='equal' centers maps inside their GridSpec cell, leaving whitespace
+        # above and below.  Shift both maps up so their tops sit just below the chart.
+        if maps_side_by_side:
+            _pos_dist = ax_dist.get_position()
+            _pos_rnd  = ax_rnd.get_position()
+            _pos_pts  = ax_pts.get_position()
+            _gap = _pos_dist.y0 - max(_pos_rnd.y1, _pos_pts.y1)
+            if _gap > 0.005:
+                _shift = _gap * 0.5
+                for _max in [ax_rnd, ax_pts]:
+                    _p = _max.get_position()
+                    _max.set_position([_p.x0, _p.y0 + _shift, _p.width, _p.height])
+            fig.canvas.draw()
+
+        if r is not None:
+            draw_radius_indicator(
+                fig, ax_pts, r,
+                xmin=_ax_xmin, xmax=_ax_xmax, ymin=_ax_ymin, ymax=_ax_ymax,
+                placement='y',
+            )
+
+        pos_rnd = ax_rnd.get_position()
+        pos_pts = ax_pts.get_position()
+        cbar_bottom = min(pos_rnd.y0, pos_pts.y0)
+        cbar_top    = max(pos_rnd.y1, pos_pts.y1)
+        cbar_left   = pos_pts.x1 + 0.01
+        cbar_width_fig = colorbar_width * (pos_pts.x1 - pos_pts.x0)
+        ax_cbar = fig.add_axes([cbar_left, cbar_bottom, cbar_width_fig, cbar_top - cbar_bottom])
+        fig.colorbar(sc_pts, cax=ax_cbar, extend='both')
 
     if filename:
         fig.savefig(filename, **{'dpi': 300, 'bbox_inches': 'tight', **save_kwargs})

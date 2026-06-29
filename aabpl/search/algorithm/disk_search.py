@@ -3,8 +3,8 @@ from pandas import (DataFrame as _pd_DataFrame, cut as _pd_cut, concat as _pd_co
 from aabpl.utils.misc import DataFrameRelation, arr_to_tpls, find_column_name
 from aabpl.utils.cell_geometry import classify_disk_cells
 from .region_tree import gen_weak_order_rel_to_convex_set
-from .point_grid_assignment import assign_points_to_cells, aggregate_point_data_to_cells
-from .point_region_assignment import assign_points_to_mirco_regions
+from ..point_assignment import assign_points_to_cells, aggregate_point_data_to_cells
+from ..point_region_assignment import assign_points_to_mirco_regions
 from .disk_aggregation import search_and_aggregate
 from aabpl.testing.test_performance import time_func_perf
 from aabpl import config as _cfg

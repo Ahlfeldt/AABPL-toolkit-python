@@ -37,7 +37,7 @@ from typing import Optional, Dict, Any
 import numpy as np
 
 from aabpl.main import radius_search, Grid
-from aabpl.radius_search.spacing_topology import compute_spatial_stats, compute_spacing_breakpoints, choose_spacing_and_depth
+from aabpl.search.spacing_topology import compute_spatial_stats, compute_spacing_breakpoints, choose_spacing_and_depth
 from aabpl import config as _aabpl_config
 from aabpl.testing.test_performance import (
     reset_perf_times,
@@ -811,7 +811,7 @@ def compute_static_stats(
     as ``saved_df`` to use saved JSON results.
     """
     import time as _t
-    from aabpl.radius_search import disk_region_geometry
+    from aabpl.search import disk_region_geometry
 
     _key = (r_over_s, nest_depth, include_boundary)
     already_cached = _key in _aabpl_config.disk_region_cache

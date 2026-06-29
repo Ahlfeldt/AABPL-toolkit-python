@@ -1,5 +1,5 @@
 """
-Analyse perf_test/ results.
+Analyse dev/perf/perf_test/ results.
 
 Run cells top-to-bottom in a Jupyter notebook, or execute as a script.
 Requires: pandas, matplotlib, numpy.
@@ -32,6 +32,7 @@ from matplotlib.cm import ScalarMappable
 # ---------------------------------------------------------------------------
 
 PERF_FOLDER = os.path.join(os.path.dirname(__file__), "perf_test")
+PERF_GEN_FOLDER = os.path.join(os.path.dirname(__file__), "perf_test_gen")
 
 # ---------------------------------------------------------------------------
 # Load

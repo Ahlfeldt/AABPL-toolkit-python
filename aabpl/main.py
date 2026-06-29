@@ -8,10 +8,10 @@ from shapely.geometry import Polygon as _shapely_Polygon, MultiPolygon as _shape
 simplefilter(action='ignore', category=_pd_PerformanceWarning)
 simplefilter(action='ignore', category=FutureWarning)
 
-from .radius_search.sample_area import infer_sample_area_from_pts, subtract_invalid_area, intersect_polygon_with_grid
+from .search.sample_area import infer_sample_area_from_pts, subtract_invalid_area, intersect_polygon_with_grid
 from .testing.test_performance import time_func_perf
-from .radius_search.disk_search_state import DiskSearch
-from .radius_search.grid_class import Grid
+from .search.algorithm.disk_search import DiskSearch
+from .search.grid_class import Grid
 from .utils.misc import count_polygon_edges, find_column_name
 from .utils.crs_transformation import convert_MultiPolygon_crs, convert_coords_to_local_crs, convert_pts_to_crs, convert_wgs_to_utm
 from .utils.progress import _OUTER_PROGRESS, RadiusSearchProgress, DetectClusterProgress, progress_print
@@ -163,52 +163,11 @@ def _validate_kwargs(
 #
 
 
-def _unpack_contingency(v):
-    if isinstance(v, (tuple, list)):
-        return int(v[0]), int(v[1])
-    v = int(v)
-    return v, v
-
-def _unpack_merge_dist(v):
-    """
-    Normalise the ``merge_dist`` parameter to a list of ``(centroid_dist, border_dist)``
-    condition tuples used by ``merge_condition_distance_based_dnf``.
-
-    Accepted forms
-    --------------
-    ``None``
-        No distance-based merging → returns ``[]``.
-    ``float`` or ``int``
-        Single threshold applied to both centroid and border (original scalar form)
-        → ``[(v, v)]``.
-    ``(centroid, border)``
-        Single AND-condition (original tuple form, backward-compatible)
-        → ``[(centroid, border)]``.
-    ``[(c1, b1), (c2, b2), ...]``
-        DNF: merge if ANY condition tuple is fully satisfied.
-        OR between tuples; AND within each tuple.
-        A ``None`` element inside a tuple disables that measure for that condition.
-    """
-    if v is None:
-        return []
-    # scalar → same threshold for both measures
-    if isinstance(v, (int, float)):
-        return [(float(v), float(v))]
-    # detect list-of-tuples vs plain pair
-    if isinstance(v, (tuple, list)):
-        # If the first element is itself a tuple/list it's already DNF form.
-        if v and isinstance(v[0], (tuple, list)):
-            return [(t[0], t[1]) for t in v]
-        # Plain pair (centroid, border) — original backward-compatible form.
-        return [(v[0], v[1])]
-    raise TypeError(f"merge_dist must be None, a number, a (centroid, border) tuple, "
-                    f"or a list of such tuples; got {type(v)}")
-
-def _unpack_min_cluster_share(v):
-    if isinstance(v, (tuple, list)):
-        return float(v[0]), float(v[1]), float(v[2])
-    f = float(v)
-    return f, f, f
+from .cluster.params import (
+    unpack_contingency as _unpack_contingency,
+    unpack_merge_dist as _unpack_merge_dist,
+    unpack_min_cluster_share as _unpack_min_cluster_share,
+)
 
 def _parse_sample_area_spec(spec):
     "Parse 'method,key=val,key=val' into (method, {key: val})."
@@ -324,15 +283,19 @@ def resolve_sample_area(
 
         _tol_resolved = _tol if _tol is not None else _buf
         def _fmt(v): return str(int(v)) if v == int(v) else str(v)
+        def _fmt_m(v):
+            if v >= 1000:
+                return f'{v/1000:.3f}'.rstrip('0').rstrip('.') + 'km'
+            return f'{v:.3f}'.rstrip('0').rstrip('.') + 'm'
 
         _param_parts = []
         if hull_type in ('buff_cells', 'buff_pts', 'concave', 'convex', 'bounding_box', 'grid'):
             if hull_type != 'grid':
-                _param_parts.append(f'buf={_fmt(_buf)}')
+                _param_parts.append(f'buf={_fmt_m(_buf)}')
         if hull_type == 'buff_cells':
             _param_parts.append(f'min_pts={_min_pts}')
         if hull_type in ('concave', 'convex', 'buff_pts'):
-            _param_parts.append(f'tol={_fmt(_tol_resolved)}')
+            _param_parts.append(f'tol={_fmt_m(_tol_resolved)}')
         if hull_type == 'concave':
             _param_parts.append(f'concavity={_fmt(_concavity)}')
         _params_str = (', '.join(_param_parts) + '. ') if _param_parts else ''
@@ -454,6 +417,14 @@ _AGG_ABBR = {
     'skewness': 'skw',
     'kurtosis': 'krt',
 }
+
+def _r_scalar(r):
+    """Return a single representative radius from any r spec (scalar, list, bands, wbands)."""
+    if not isinstance(r, (list, tuple)):
+        return float(r)
+    first = r[0]
+    return max(b[1] for b in r) if isinstance(first, (list, tuple)) else max(float(v) for v in r)
+
 
 def _default_suffix(stat, r):
     """Return the auto-generated suffix for a given stat and radius.
@@ -670,7 +641,7 @@ def radius_search(
     # ── multi-radius delegation ───────────────────────────────────────────────
     # When r is not a scalar (list of radii or distance bands), hand off to the
     # dedicated implementation which calls radius_search once per unique radius.
-    from .radius_search.multi_radius import _parse_r_spec, _multi_radius_search
+    from .search.multi_radius import _parse_r_spec, _multi_radius_search
     spec_type, spec_data = _parse_r_spec(r)
     if spec_type != 'single':
         return _multi_radius_search(
@@ -1020,56 +991,64 @@ def radius_search(
     if not _is_internal:
         _OUTER_PROGRESS.reset(_token)
         _prog.done()
+
+    # Store per-column provenance so plot functions can decide whether to show
+    # the radius indicator and what r value(s) to use.
+    # Skip temporary intermediate columns (those written by _multi_radius_search
+    # with the __mr__ marker) — they are cleaned up before the user sees them.
+    from .search.multi_radius import _TEMP_COL_MARKER
+    if not hasattr(grid, '_aabpl_col_meta'):
+        grid._aabpl_col_meta = {}
+    for col in orig_cols:
+        out_col = col + suffix
+        if _TEMP_COL_MARKER not in out_col:
+            grid._aabpl_col_meta[out_col] = {'c': col, 'stat': stat, 'r': r}
+
     return grid
 #
 
 @_wraps(radius_search)
 def radius_sum(pts, crs:str, r:float, c:list=[], suffix=None, **kwargs):
-    """Sum values of neighbouring points within radius r. Wraps ``radius_search(stat='sum')``.\n\n"""
     return radius_search(pts=pts, crs=crs, r=r, c=c, stat='sum', suffix=suffix, **kwargs)
 radius_sum.__doc__ = "Sum values of neighbouring points within radius r. Wraps ``radius_search(stat='sum')``.\n\n" + (radius_search.__doc__ or "")
 
 @_wraps(radius_search)
 def radius_count(pts, crs:str, r:float, c:list=[], suffix=None, **kwargs):
-    """Count neighbouring points within radius r. Wraps ``radius_search(stat='count')``.\n\n"""
     return radius_search(pts=pts, crs=crs, r=r, c=c, stat='count', suffix=suffix, **kwargs)
 radius_count.__doc__ = "Count neighbouring points within radius r. Wraps ``radius_search(stat='count')``.\n\n" + (radius_search.__doc__ or "")
 
 @_wraps(radius_search)
 def radius_mean(pts, crs:str, r:float, c:list=[], suffix=None, **kwargs):
-    """Mean of neighbouring point values within radius r. Wraps ``radius_search(stat='mean')``.\n\n"""
     return radius_search(pts=pts, crs=crs, r=r, c=c, stat='mean', suffix=suffix, **kwargs)
 radius_mean.__doc__ = "Mean of neighbouring point values within radius r. Wraps ``radius_search(stat='mean')``.\n\n" + (radius_search.__doc__ or "")
 
 @_wraps(radius_search)
 def radius_variance(pts, crs:str, r:float, c:list=[], suffix=None, **kwargs):
-    """Variance of neighbouring point values within radius r. Wraps ``radius_search(stat='variance')``.\n\n"""
     return radius_search(pts=pts, crs=crs, r=r, c=c, stat='variance', suffix=suffix, **kwargs)
 radius_variance.__doc__ = "Variance of neighbouring point values within radius r. Wraps ``radius_search(stat='variance')``.\n\n" + (radius_search.__doc__ or "")
 
 @_wraps(radius_search)
 def radius_std(pts, crs:str, r:float, c:list=[], suffix=None, **kwargs):
-    """Standard deviation of neighbouring point values within radius r. Wraps ``radius_search(stat='std')``.\n\n"""
     return radius_search(pts=pts, crs=crs, r=r, c=c, stat='std', suffix=suffix, **kwargs)
 radius_std.__doc__ = "Standard deviation of neighbouring point values within radius r. Wraps ``radius_search(stat='std')``.\n\n" + (radius_search.__doc__ or "")
 
 @_wraps(radius_search)
 def radius_cv(pts, crs:str, r:float, c:list=[], suffix=None, **kwargs):
-    """Coefficient of variation (std/mean) of neighbouring point values within radius r. Wraps ``radius_search(stat='cv')``.\n\n"""
     return radius_search(pts=pts, crs=crs, r=r, c=c, stat='cv', suffix=suffix, **kwargs)
 radius_cv.__doc__ = "Coefficient of variation of neighbouring point values within radius r. Wraps ``radius_search(stat='cv')``.\n\n" + (radius_search.__doc__ or "")
 
 @_wraps(radius_search)
 def radius_skewness(pts, crs:str, r:float, c:list=[], suffix=None, **kwargs):
-    """Skewness of neighbouring point values within radius r. Wraps ``radius_search(stat='skewness')``.\n\n"""
     return radius_search(pts=pts, crs=crs, r=r, c=c, stat='skewness', suffix=suffix, **kwargs)
 radius_skewness.__doc__ = "Skewness of neighbouring point values within radius r. Wraps ``radius_search(stat='skewness')``.\n\n" + (radius_search.__doc__ or "")
 
 @_wraps(radius_search)
 def radius_kurtosis(pts, crs:str, r:float, c:list=[], suffix=None, **kwargs):
-    """Excess kurtosis of neighbouring point values within radius r. Wraps ``radius_search(stat='kurtosis')``.\n\n"""
     return radius_search(pts=pts, crs=crs, r=r, c=c, stat='kurtosis', suffix=suffix, **kwargs)
 radius_kurtosis.__doc__ = "Excess kurtosis of neighbouring point values within radius r. Wraps ``radius_search(stat='kurtosis')``.\n\n" + (radius_search.__doc__ or "")
+
+
+from .cluster.detection import _detect_cluster_pts_multi
 
 
 @attach_params
@@ -1164,94 +1143,37 @@ def detect_cluster_pts(
         import warnings
         warnings.warn("'plot_cluster_points' is deprecated as a function argument. Call grid.plot.cluster_pts() on the returned grid instead.", DeprecationWarning, stacklevel=2)
         kwargs.pop('plot_cluster_points')
-    x_tgt        = kwargs.pop('x_tgt', None)
-    y_tgt        = kwargs.pop('y_tgt', None)
-    row_name_tgt = kwargs.pop('row_name_tgt', None)
-    col_name_tgt = kwargs.pop('col_name_tgt', None)
+    x_tgt         = kwargs.pop('x_tgt', None)
+    y_tgt         = kwargs.pop('y_tgt', None)
+    row_name_tgt  = kwargs.pop('row_name_tgt', None)
+    col_name_tgt  = kwargs.pop('col_name_tgt', None)
+    # _parsed_spec is an internal shortcut passed by detect_cluster_cells so that
+    # _detect_cluster_pts_multi can skip re-parsing r.
+    _parsed_spec  = kwargs.pop('_parsed_spec', None)
     if kwargs:
         raise TypeError(f"detect_cluster_pts() got unexpected keyword argument(s): {sorted(kwargs)}")
     # ── multi-radius delegation ───────────────────────────────────────────────
-    # When r is not a scalar, run a search per unique radius, then build the
-    # null distribution across all bands and label cluster points.
-    from .radius_search.multi_radius import _parse_r_spec, _multi_radius_search
+    from .search.multi_radius import _parse_r_spec
     spec_type, spec_data = _parse_r_spec(r)
     if spec_type != 'single':
-        max_r = max(spec_data) if spec_type == 'list' else max(r_out for _, r_out, *_ in spec_data)
-
-        columns_before = set(pts.columns)
-        sort_order_col = find_column_name('initial_sort', existing_columns=pts.columns)
-        pts[sort_order_col] = range(len(pts))
-
-        # Reproject pts and resolve column names using the largest radius
-        # (build_grid_obj=False avoids building a grid we will not use).
-        vk = _validate_kwargs(
-            pts=pts, crs=crs, r=max_r, c=c,
-            stat=stat, x=x, y=y, row_name=row_name, col_name=col_name,
-            suffix=suffix, pts_target=pts_target, x_tgt=x_tgt, y_tgt=y_tgt,
-            row_name_tgt=row_name_tgt, col_name_tgt=col_name_tgt,
-            build_grid_obj=False, n_pts_src_extra=n_random_points,
-            proj_crs=proj_crs, silent=silent,
-        )
-        pts, local_crs = vk.pts, vk.local_crs
-        value_cols = list(vk.c)
-        x, y, stat = vk.x, vk.y, vk.stat
-        pts_target, x_tgt, y_tgt = vk.pts_target, vk.x_tgt, vk.y_tgt
-        row_name_tgt, col_name_tgt = vk.row_name_tgt, vk.col_name_tgt
-        # For multi-radius, output cols already embed _{stat}_{r}; append _cluster only.
-        if cluster_suffix is None:
-            cluster_suffix = '_cluster'
-
-        # Run the multi-radius search (one radius_search call per unique radius).
-        # keep_cols=True so the output columns are available for null-distribution labelling.
-        last_grid = _multi_radius_search(
-            pts=pts, r=r, c=value_cols, x=x, y=y, stat=stat,
-            keep_cols=True, exclude_self=exclude_self, silent=silent,
-            _radius_search_fn=radius_search,
-            _parsed_spec=(spec_type, spec_data),
-            crs=local_crs or '', proj_crs=local_crs,
+        # Use the already-parsed spec if detect_cluster_cells passed it through.
+        effective_parsed_spec = _parsed_spec if _parsed_spec is not None else (spec_type, spec_data)
+        return _detect_cluster_pts_multi(
+            pts=pts, crs=crs, r=r, c=c, x=x, y=y, stat=stat,
+            exclude_self=exclude_self, cell_size=cell_size,
+            sample_area=sample_area, weight_valid_area=weight_valid_area,
+            k_th_percentile=k_th_percentile, null_distribution=null_distribution,
+            random_seed=random_seed, proj_crs=proj_crs,
             row_name=row_name, col_name=col_name,
-            pts_target=pts_target, x_tgt=x_tgt, y_tgt=y_tgt,
-            row_name_tgt=row_name_tgt, col_name_tgt=col_name_tgt,
-            weight_valid_area=weight_valid_area,
-        )
-
-        # Build the sampling area and compute null-distribution thresholds.
-        last_grid.sample_area = resolve_sample_area(
-            pts=pts, r=max_r, sample_area=sample_area,
-            crs=crs, local_crs=local_crs,
-            x=x, y=y, grid=last_grid,
-            min_pts_to_sample_cell=min_pts_to_sample_cell, no_plot=True,
-        )
-        intersect_polygon_with_grid(grid=last_grid)
-        from .radius_search.null_distribution import compute_null_distribution
-        (thresholds_by_col, random_pts) = compute_null_distribution(
-            grid=last_grid, pts=pts, sample_area=last_grid.sample_area,
+            cluster_suffix=cluster_suffix, pts_target=pts_target,
+            keep_cols=keep_cols, overwrite=overwrite, silent=silent,
+            parsed_spec=effective_parsed_spec,
             min_pts_to_sample_cell=min_pts_to_sample_cell,
-            c=value_cols, x=x, y=y, row_name=row_name, col_name=col_name,
-            suffix='__mr_null__', null_distribution=null_distribution,
-            k_th_percentile=k_th_percentile, random_seed=random_seed,
-            silent=silent, r=r, stat=stat,
+            _dev=_dev, grid_bounds=grid_bounds,
+            x_tgt=x_tgt, y_tgt=y_tgt,
+            row_name_tgt=row_name_tgt, col_name_tgt=col_name_tgt,
         )
-
-        # Label each output column: True where the aggregate exceeds its threshold.
-        for output_col, threshold in thresholds_by_col.items():
-            if output_col in pts.columns:
-                pts[output_col + cluster_suffix] = pts[output_col] > threshold
-
-        # Drop intermediate search columns unless the caller wants them.
-        if not keep_cols:
-            intermediate_cols = [col for col in pts.columns
-                                  if col not in columns_before
-                                  and not col.endswith(cluster_suffix)
-                                  and col != sort_order_col]
-            if intermediate_cols:
-                pts.drop(columns=intermediate_cols, inplace=True)
-
-        pts.sort_values(sort_order_col, inplace=True)
-        pts.drop(columns=[sort_order_col], inplace=True)
-        last_grid.null_distribution = random_pts
-        return last_grid
-    # ── end multi-radius ──────────────────────────────────────────────────────
+    # ── single-radius path ────────────────────────────────────────────────────
 
     _cols_before = set(pts.columns)
     init_sort = find_column_name('initial_sort', existing_columns=pts.columns)
@@ -1336,7 +1258,7 @@ def detect_cluster_pts(
             "pts were reprojected automatically but null_distribution is used as-is. "
             "Use draw_random_coords() with the projected sample_area to generate valid coordinates."
         )
-    from .radius_search.null_distribution import compute_null_distribution
+    from .search.null_distribution import compute_null_distribution
     (_cluster_thresholds_dict, rndm_pts) = compute_null_distribution(
         grid=grid,
         pts=pts,
@@ -1386,56 +1308,23 @@ def detect_cluster_pts(
     for j, cname in enumerate(c):
         pts[str(cname)+str(cluster_suffix)] = disk_sums_for_pts.values[:,j]>cluster_threshold_values[j]
 
-    def plot_rand_dist(
-            filename:str="",
-            pts=pts,
-            x=x,
-            y=y,
-            radius_sum_columns=[n+suffix for n in c],
-            rndm_pts=rndm_pts,
-            cluster_threshold_values=cluster_threshold_values,
-            k_th_percentile=k_th_percentile,
-            r=r,
-            grid=grid,
-            show:bool=True,
-            display_dpi:int=100,
-            save_kwargs:dict={},
-            **plot_kwargs
-    ):
-        from .illustrations.distribution_plot import create_distribution_plot
-        create_distribution_plot(
-            filename=filename,
-            plot_kwargs=plot_kwargs,
-            pts=pts,
-            x=x,
-            y=y,
-            radius_sum_columns=radius_sum_columns,
-            grid=grid,
-            rndm_pts=rndm_pts,
-            cluster_threshold_values=cluster_threshold_values,
-            k_th_percentile=k_th_percentile,
-            r=r,
-            show=show,
-            display_dpi=display_dpi,
-            save_kwargs=save_kwargs,
-            )
-    grid.plot.rand_dist = plot_rand_dist
-
-    plot_colnames = list(c) + [n+suffix for n in c] + [str(cname)+str(cluster_suffix) for cname in c]
-    def plot_cluster_pts(
-            self=grid,
-            colnames=_np_array(plot_colnames),
-            filename:str="",
-            **plot_kwargs,
-    ):
-        from .illustrations.plot_pt_vars import create_plots_for_vars
-        return create_plots_for_vars(
-            grid=self,
-            colnames=colnames,
-            filename=filename,
-            plot_kwargs=plot_kwargs,
-        )
-    grid.plot.cluster_pts = plot_cluster_pts
+    aggregate_cols = [col + suffix for col in orig_cols]
+    cluster_cols   = [col + cluster_suffix for col in orig_cols]
+    _k_th_list = k_th_percentile if isinstance(k_th_percentile, list) else [k_th_percentile]
+    n_agg = len(aggregate_cols)
+    k_ths_expanded = (_k_th_list * ((n_agg + len(_k_th_list) - 1) // len(_k_th_list)))[:n_agg]
+    col_threshold_info = {
+        col: {k_ths_expanded[i]: _cluster_thresholds_dict[col]}
+        for i, col in enumerate(aggregate_cols)
+    }
+    grid._cluster_result = {
+        'aggregate_cols':     aggregate_cols,
+        'thresholds':         _cluster_thresholds_dict,
+        'k_th_percentiles':   k_ths_expanded,
+        'col_threshold_info': col_threshold_info,
+        'display_radius':     r,
+        'plot_colnames':      _np_array(list(orig_cols) + aggregate_cols + cluster_cols),
+    }
 
     # Cluster detection always materialises the output grid (cell aggregates etc.).
     grid.update_spacing()
@@ -1455,6 +1344,13 @@ def detect_cluster_pts(
     if not _is_internal:
         _OUTER_PROGRESS.reset(_token)
         _prog.done()
+
+    if not hasattr(grid, '_aabpl_col_meta'):
+        grid._aabpl_col_meta = {}
+    for col in orig_cols:
+        grid._aabpl_col_meta[col + suffix] = {'c': col, 'stat': stat, 'r': r}
+        grid._aabpl_col_meta[col + cluster_suffix] = {'c': col, 'stat': stat, 'r': r}
+
     return grid
 # done
 
@@ -1764,15 +1660,28 @@ def detect_cluster_cells(
     c, x, y, suffix = vk.c, vk.x, vk.y, vk.suffix
     pts_target, x_tgt, y_tgt = vk.pts_target, vk.x_tgt, vk.y_tgt
     row_name_tgt, col_name_tgt, stat = vk.row_name_tgt, vk.col_name_tgt, vk.stat
-    if suffix is None:
-        suffix = _default_suffix(stat, r)
-    if cluster_suffix is None:
-        cluster_suffix = f'_cluster{_default_suffix(stat, r)}'
+    from .search.multi_radius import _parse_r_spec
+    _spec_type, _spec_data = _parse_r_spec(r)
+    if _spec_type != 'single':
+        if suffix is not None or cluster_suffix is not None:
+            progress_print("WARNING: custom suffix/cluster_suffix is not supported for multi-radius or distance-band r. Ignoring.")
+        suffix = None
+        if cluster_suffix is None:
+            cluster_suffix = '_cluster'
+    else:
+        if suffix is None:
+            suffix = _default_suffix(stat, r)
+        if cluster_suffix is None:
+            cluster_suffix = f'_cluster{_default_suffix(stat, r)}'
     if centroid_dist_threshold is None:
-        centroid_dist_threshold = r * 10/3
+        centroid_dist_threshold = _r_scalar(r) * 10/3
     if border_dist_threshold is None:
-        border_dist_threshold = r * 4/3
+        border_dist_threshold = _r_scalar(r) * 4/3
 
+    if isinstance(sample_area, (_shapely_Polygon, _shapely_MultiPolygon, _shapely_GeometryCollection)) and crs and local_crs and crs != local_crs:
+        sample_area = convert_MultiPolygon_crs(sample_area, initial_crs=crs, target_crs=local_crs)
+
+    _cols_before_dcp = set(pts.columns)
     grid = detect_cluster_pts(
         pts=pts,
         crs=local_crs if local_crs is not None else '',
@@ -1804,17 +1713,16 @@ def detect_cluster_cells(
         overwrite=overwrite,
         _dev=_dev,
         silent=silent,
+        _parsed_spec=(_spec_type, _spec_data),
     )
     # TODO: replace with actual output names once spacing/nesting changes column naming
     if not hasattr(grid, 'cell_row_name'):
         grid.cell_row_name = row_name
         grid.cell_col_name = col_name
 
-    # Inject DNF conditions so assign_clusters can use the full list of tuples.
-    grid.clustering._merge_dist_conditions_for_col = {col: _merge_dist_conditions for col in c}
-    grid.clustering.create_clusters(
+    # Shared keyword arguments for every create_clusters call.
+    _clustering_kwargs = dict(
         pts=pts,
-        c=c,
         queen_contingency=queen_contingency,
         rook_contingency=rook_contingency,
         centroid_dist_threshold=centroid_dist_threshold,
@@ -1825,35 +1733,112 @@ def detect_cluster_cells(
         make_convex=make_convex,
         row_name=grid.cell_row_name,
         col_name=grid.cell_col_name,
-        cluster_suffix=cluster_suffix,
+    )
+
+    if _spec_type == 'single':
+        # Single radius: one create_clusters call covering all original columns.
+        grid.clustering._merge_dist_conditions_for_col = {col: _merge_dist_conditions for col in c}
+        grid.clustering.create_clusters(
+            c=list(c),
+            cluster_suffix=cluster_suffix,
+            **_clustering_kwargs,
         )
+    else:
+        # Multi-radius / bands: one create_clusters call per cluster column.
+        # _detect_cluster_pts_multi stored a map {cluster_col: originating_value_col}
+        # so we can pass c=[orig_col] (column_id=0 is always valid) with the exact
+        # suffix that reconstructs the cluster column name.
+        cluster_col_map = getattr(grid, '_cluster_col_map', {})
+        for cluster_col, orig_col in cluster_col_map.items():
+            if cluster_col not in pts.columns:
+                if not silent:
+                    progress_print(
+                        f'Warning: cluster column "{cluster_col}" missing from pts '
+                        f'(pts has {len(pts.columns)} cols); skipping create_clusters. '
+                        f'This is a bug — please report it.'
+                    )
+                continue
+            adapted_suffix = cluster_col[len(orig_col):]  # e.g. '_sum_wgt_cluster'
+            grid.clustering._merge_dist_conditions_for_col = {orig_col: _merge_dist_conditions}
+            grid.clustering.create_clusters(
+                c=[orig_col],
+                cluster_suffix=adapted_suffix,
+                **_clustering_kwargs,
+            )
+
+    # Attach threshold + k to each ClustersForColumn so the user can inspect
+    # e.g. grid.clustering.by_column['employment_sum_15000_cluster'].threshold
+    _cti = getattr(grid, '_cluster_result', {}).get('col_threshold_info', {})
+    for _cluster_col, _cfc in grid.clustering.by_column.items():
+        for _agg_col, _kt in _cti.items():
+            if _cluster_col.startswith(_agg_col):
+                _cfc.k, _cfc.threshold = next(iter(_kt.items()))
+                break
+
+    # Always update spacing so grid.cell_size and grid.row_ids are current.
+    grid.update_spacing()
 
     if not grid._silent:
-        grid.update_spacing()
         nr, nc = len(grid.row_ids), len(grid.col_ids)
         n_nonempty = len(grid._search_internals.id_to_sums)
-        s = grid._search_internals.spacing
-        n_clusters = sum(len(col_cl.clusters) for col_cl in grid.clustering.by_column.values())
-        n_cluster_cells = sum(
-            len(set(cl.cells))
-            for col_cl in grid.clustering.by_column.values()
-            for cl in col_cl.clusters
-        )
         _cs = grid.cell_size
         _cs_str = (f'{_cs/1000:g} km' if _cs >= 1000 else f'{_cs:g} m') if grid._proj_is_metric else f'{_cs:g}'
-        _cl_str = f'Detected {n_clusters} cluster{"s" if n_clusters != 1 else ""} spanning {n_cluster_cells} cells.'
+
+        per_col_clusters = [
+            len(col_cl.clusters) for col_cl in grid.clustering.by_column.values()
+        ]
+        per_col_cells = [
+            len(set(cell for cl in col_cl.clusters for cell in cl.cells))
+            for col_cl in grid.clustering.by_column.values()
+        ]
+        n_cols = len(per_col_clusters)
+        if n_cols <= 1:
+            n_cl = per_col_clusters[0] if per_col_clusters else 0
+            n_ce = per_col_cells[0] if per_col_cells else 0
+            _cl_str = (
+                f'Detected {n_cl} cluster{"s" if n_cl != 1 else ""}'
+                f' spanning {n_ce} cells.'
+            )
+        else:
+            cl_lo, cl_hi = min(per_col_clusters), max(per_col_clusters)
+            ce_lo, ce_hi = min(per_col_cells), max(per_col_cells)
+            cl_range = str(cl_lo) if cl_lo == cl_hi else f'{cl_lo}-{cl_hi}'
+            ce_range = str(ce_lo) if ce_lo == ce_hi else f'{ce_lo}-{ce_hi}'
+            _cl_str = (
+                f'Detected {cl_range} cluster{"s" if cl_hi != 1 else ""}'
+                f' spanning {ce_range} cells'
+                f' (across {n_cols} cluster columns).'
+            )
+
+        _thr_parts = []
+        for _col, _cfc in grid.clustering.by_column.items():
+            _k   = getattr(_cfc, 'k', None)
+            _thr = getattr(_cfc, 'threshold', None)
+            if _k is not None and _thr is not None:
+                _thr_parts.append(f'{_col}: {{{_k}: {_thr:g}}}')
+        _thr_str = ('  |  thresholds: ' + ', '.join(_thr_parts)) if _thr_parts else ''
         progress_print(
             f'Output grid: {nr}x{nc} = {nr*nc:,} cells'
-            f'  |  {n_nonempty:,} non-empty  |  cell size {_cs_str}  |  {_cl_str}'
+            f'  |  {n_nonempty:,} non-empty  |  cell size {_cs_str}  |  {_cl_str}{_thr_str}'
         )
 
     if not keep_cols:
-        _cluster_id_suffix = cluster_suffix.replace('_cluster_', '_cluster_id_', 1)
-        _outer_output_cols = (
-            set(str(col)+suffix for col in c) |
-            set(str(col)+cluster_suffix for col in c) |
-            set(str(col)+_cluster_id_suffix for col in c)
-        )
+        _cluster_id_suffix = cluster_suffix.replace('_cluster', '_cluster_id', 1)
+        if _spec_type == 'single':
+            _outer_output_cols = (
+                set(str(col)+suffix for col in c) |
+                set(str(col)+cluster_suffix for col in c) |
+                set(str(col)+_cluster_id_suffix for col in c)
+            )
+        else:
+            # Multi-radius: output cols are what _detect_cluster_pts_multi stored
+            # plus any cluster_id cols that create_clusters added.
+            _mr_output = getattr(grid, '_multi_radius_output_cols', set())
+            _cluster_id_cols = {
+                col.replace(cluster_suffix, _cluster_id_suffix)
+                for col in _mr_output if col.endswith(cluster_suffix)
+            }
+            _outer_output_cols = _mr_output | _cluster_id_cols
         _keep_extra = {grid.cell_row_name, grid.cell_col_name, x, y}
         _to_drop = [
             col for col in pts.columns
@@ -1976,9 +1961,9 @@ def detect_cluster_cells_from_labeled_pts(
                 "Pass overwrite=True to overwrite them."
             )
     if centroid_dist_threshold is None:
-        centroid_dist_threshold = r * 10/3
+        centroid_dist_threshold = _r_scalar(r) * 10/3
     if border_dist_threshold is None:
-        border_dist_threshold = r * 4/3
+        border_dist_threshold = _r_scalar(r) * 4/3
 
     # Assign points to grid cells and pre-aggregate per-cell mass (used for cluster
     # totals). No radius search and no null distribution is performed.

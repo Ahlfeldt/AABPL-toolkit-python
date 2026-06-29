@@ -13,6 +13,7 @@ from matplotlib.colors import Normalize as _plt_Normalize
 from matplotlib.axes._axes import Axes as _plt_Axes
 from matplotlib.cm import ScalarMappable as _plt_ScalarMappable
 from matplotlib.pyplot import subplots as _plt_subplots
+from matplotlib.ticker import FuncFormatter as _plt_FuncFormatter
 from math import (
     log10 as _math_log10,
     sin as _math_sin,
@@ -60,45 +61,341 @@ from shapely.geometry import (Polygon as _shapely_Polygon, MultiPolygon as _shap
 #                        pad=0.6,sep=4, linekw=dict(color="crimson"),) 
 # ax.add_artist(ob)
 
-def set_map_frame(ax, xmin:float, xmax:float, ymin:float, ymax:float, r:float=None):
-    pad_x, pad_y = (xmax-xmin)/50, (ymax-ymin)/50
+def _fmt_radius_label(v):
+    """Format a single radius value as a compact distance string (e.g. '15km', '500m')."""
+    if v >= 1000:
+        scaled = v / 1000.0
+        suffix = 'km'
+    else:
+        scaled = float(v)
+        suffix = 'm'
+    # Use a plain integer when the value is whole, otherwise up to 4 significant figures.
+    if scaled == int(scaled):
+        return str(int(scaled)) + suffix
+    text = f'{scaled:.4g}'
+    return text + suffix
+
+
+_STAT_VERB = {
+    'sum':   'Sum of',
+    'mean':  'Mean',
+    'count': 'Count of',
+    'max':   'Max',
+    'min':   'Min',
+}
+
+
+def format_col_title(colname, meta=None):
+    """
+    Convert a raw column name to a human-readable plot title.
+
+    Uses ``meta`` (a dict from ``grid._aabpl_col_meta``) when available.  Falls
+    back to a space-separated capitalised version of ``colname`` when no meta is
+    supplied.
+
+    Examples::
+
+        'employment'                   no meta     -> 'Employment'
+        'employment_sum_15000'         r=15000     -> 'Sum of employment (r = 15km)'
+        'employment_sum_0_15000'        r=(0,15000) -> 'Sum of employment (within 15km)'
+        'employment_sum_5000_15000'     r=(5k,15k)  -> 'Sum of employment (5km-15km band)'
+        'employment_sum_wgt'           r=[...]     -> 'Weighted sum of employment'
+        'employment_sum_15000_cluster' r=15000     -> 'Clusters - sum of employment (r = 15km)'
+    """
+    if meta is None:
+        meta = {}
+
+    orig_col = meta.get('c', None)
+    stat     = meta.get('stat', None)
+    r_spec   = meta.get('r', None)
+
+    is_cluster_col = colname.endswith('_cluster')
+
+    if orig_col is None or stat is None:
+        name = colname[:-len('_cluster')] if is_cluster_col else colname
+        return ('Clusters - ' + name) if is_cluster_col else name
+
+    stat_verb = _STAT_VERB.get(stat, stat.capitalize())
+    base = stat_verb + ' ' + orig_col
+
+    if r_spec is None:
+        r_annotation = ''
+    elif isinstance(r_spec, (int, float)):
+        r_annotation = 'r = ' + _fmt_radius_label(r_spec)
+    elif isinstance(r_spec, tuple) and len(r_spec) == 2:
+        r_inner, r_outer = float(r_spec[0]), float(r_spec[1])
+        if r_inner == 0:
+            r_annotation = 'within ' + _fmt_radius_label(r_outer)
+        else:
+            r_annotation = _fmt_radius_label(r_inner) + '-' + _fmt_radius_label(r_outer) + ' band'
+    elif isinstance(r_spec, list) and r_spec:
+        first = r_spec[0]
+        if isinstance(first, (int, float)):
+            r_annotation = ' / '.join(_fmt_radius_label(v) for v in r_spec)
+        elif len(first) == 3:
+            r_annotation = None  # weighted bands handled separately below
+        else:
+            r_inner_all = float(r_spec[0][0])
+            r_outer_all = float(r_spec[-1][1])
+            if r_inner_all == 0:
+                r_annotation = 'within ' + _fmt_radius_label(r_outer_all)
+            else:
+                r_annotation = (_fmt_radius_label(r_inner_all) + '-' +
+                                _fmt_radius_label(r_outer_all) + ' band')
+    else:
+        r_annotation = ''
+
+    is_wbands = (
+        isinstance(r_spec, list) and r_spec and
+        isinstance(r_spec[0], tuple) and len(r_spec[0]) == 3
+    )
+    if is_wbands:
+        label = 'Weighted ' + stat_verb.lower() + ' ' + orig_col
+    elif r_annotation:
+        label = base + ' (' + r_annotation + ')'
+    else:
+        label = base
+
+    if is_cluster_col:
+        return 'Clusters - ' + label
+    return label
+
+
+def _fmt_coord(v, _=None):
+    a = abs(v)
+    if a >= 1e6:
+        s = f'{v/1e6:.3f}'.rstrip('0').rstrip('.')
+        return s + 'M'
+    if a >= 1e3:
+        s = f'{v/1e3:.3f}'.rstrip('0').rstrip('.')
+        return s + 'k'
+    return f'{v:.3f}'.rstrip('0').rstrip('.')
+
+def set_map_frame(ax, xmin:float, xmax:float, ymin:float, ymax:float, r:float=None, padding_frac:float=0.02):
+    pad_x, pad_y = (xmax-xmin)*padding_frac, (ymax-ymin)*padding_frac
     ax.set_aspect('equal', adjustable='box')
     ax.set_xlim([xmin-pad_x, xmax+pad_x])
     ax.set_ylim([ymin-pad_y, ymax+pad_y])
     xticks = [xmin, (xmin+xmax)/2, xmax]
     yticks = [ymin, (ymin+ymax)/2, ymax]
-    ndigits = int(max([0, _math_log10(100/(xticks[1]-xticks[0])), _math_log10(100/(yticks[1]-yticks[0]))]))
-    ax.set_xticks(xticks, labels=[int(round(t,ndigits)) if ndigits==0 else round(t,ndigits) for t in xticks])
-    ax.set_yticks(yticks, labels=[int(round(t,ndigits)) if ndigits==0 else round(t,ndigits) for t in yticks])
+    ax.set_xticks(xticks)
+    ax.set_yticks(yticks)
+    ax.xaxis.set_major_formatter(_plt_FuncFormatter(_fmt_coord))
+    ax.yaxis.set_major_formatter(_plt_FuncFormatter(_fmt_coord))
+    # r= indicator is drawn separately via draw_radius_indicator() after canvas.draw()
 
-    if r is not None:
-        x_range = xmax - xmin
-        y_range = ymax - ymin
-        r_label = str(int(r)) if r == int(r) else repr(r)
-        use_x_axis = x_range >= y_range  # more horizontal space → horizontal bar at bottom
-        if use_x_axis:
-            # between middle and last x-tick, just outside the bottom of the map
-            cx = (xmin + 3 * xmax) / 4
-            cy = ymin - y_range * 0.07
-            tick_h = y_range * 0.012
-            ax.set_ylim(bottom=cy - y_range * 0.03)
-            ax.plot([cx - r, cx + r], [cy, cy], '-', color='k', lw=0.6)
-            ax.plot([cx - r, cx - r], [cy - tick_h, cy + tick_h], '-', color='k', lw=0.6)
-            ax.plot([cx + r, cx + r], [cy - tick_h, cy + tick_h], '-', color='k', lw=0.6)
-            ax.plot([cx], [cy], '+', color='k', ms=4, mew=0.5)
-            ax.text(cx, cy - tick_h * 2, f'r={r_label}', ha='center', va='top', fontsize=5)
+
+def draw_radius_indicator(fig, ax, r, xmin, xmax, ymin, ymax, placement='x'):
+    """
+    Draw a circle/ring scale indicator in the x-axis tick-label zone.
+
+    ``r`` may be:
+    - a scalar ``15000``                         → single outline circle
+    - a list of scalars ``[10000, 15000]``        → concentric rings, one per radius
+    - a band tuple ``(r_inner, r_outer)``         → grey donut between inner and outer
+    - a list of band tuples
+        ``[(r_inner, r_outer), ...]``             → stacked grey donuts
+    - a list of weighted band tuples
+        ``[(r_inner, r_outer, weight), ...]``     → donuts shaded grey with alpha
+                                                    proportional to normalised weight;
+                                                    inner boundaries drawn thinner
+
+    Must be called after ``fig.canvas.draw()`` so tick-label bounding boxes are
+    finalised.  All geometry uses figure-fraction coordinates (DPI-independent).
+    Circles are drawn as Ellipses to compensate for non-square figure dimensions.
+
+    Clipping rules (driven by the outermost radius)
+    ------------------------------------------------
+    - Fits fully  → full circle(s), no dot, ``r=`` inside outer if large enough
+    - Too tall    → crop top/bottom to spine-to-figure-bottom zone, center dot
+    - Too wide    → left semicircle(s) (flat edge at cx), dot, ``r=`` to the right
+    """
+    from matplotlib.patches import Ellipse as _Ellipse, Rectangle as _Rectangle
+
+    # ── Classify r into one of three canonical forms ──────────────────────────
+    # Returns (mode, circles, bands, wbands) where only one list is filled.
+
+    def _classify(r_arg):
+        if isinstance(r_arg, (int, float)):
+            return 'circles', [float(r_arg)], None, None
+        if isinstance(r_arg, tuple):
+            if len(r_arg) == 3:
+                return 'wbands', None, None, [(float(r_arg[0]), float(r_arg[1]), float(r_arg[2]))]
+            return 'bands', None, [(float(r_arg[0]), float(r_arg[1]))], None
+        # List — detect contents by examining the first element
+        if not r_arg:
+            return 'circles', [], None, None
+        first = r_arg[0]
+        if isinstance(first, (int, float)):
+            return 'circles', sorted(float(v) for v in r_arg), None, None
+        if isinstance(first, tuple) and len(first) == 3:
+            return 'wbands', None, None, [(float(a), float(b), float(c)) for a, b, c in r_arg]
+        return 'bands', None, [(float(a), float(b)) for a, b, *_ in r_arg], None
+
+    mode, circles, bands, wbands = _classify(r)
+
+    if mode == 'circles':
+        r_outer = circles[-1] if circles else 0
+    elif mode == 'bands':
+        r_outer = max(b[1] for b in bands)
+    else:
+        r_outer = max(b[1] for b in wbands)
+
+    if r_outer == 0:
+        return
+
+    renderer = fig.canvas.get_renderer()
+    trans    = ax.transData
+
+    # ── Step 1: display-pixel geometry ───────────────────────────────────────
+    fig_bb = fig.get_window_extent(renderer)
+    fw, fh = fig_bb.width, fig_bb.height
+
+    _pt = lambda x, y: trans.transform((x, y))
+
+    xmin_disp = _pt(xmin, ymin)[0]
+    xmax_disp = _pt(xmax, ymin)[0]
+
+    data_to_disp = (xmax_disp - xmin_disp) / (xmax - xmin)
+    r_outer_disp = r_outer * data_to_disp
+
+    ax_bb = ax.get_window_extent(renderer)
+
+    if placement == 'y':
+        # ── y-axis zone (left margin) ─────────────────────────────────────────
+        spine_x   = ax_bb.x0
+        ytick_bbs = [
+            tick.label1.get_window_extent(renderer)
+            for tick in ax.yaxis.get_major_ticks()
+            if tick.label1.get_visible() and tick.label1.get_text()
+        ]
+        cx_disp      = (sum((b.x0 + b.x1) / 2 for b in ytick_bbs) / len(ytick_bbs)
+                        if ytick_bbs else spine_x - 15)
+        cy_disp      = _pt(xmin, (ymin + 3 * ymax) / 4)[1]
+        avail_w_disp = max(spine_x - fig_bb.x0, 12)
+        avail_h_disp = ax_bb.height / 2
+    else:
+        # ── x-axis zone (bottom margin) ───────────────────────────────────────
+        xmid_disp = _pt((xmin + xmax) / 2, ymin)[0]
+        cx_disp   = _pt((xmin + 3 * xmax) / 4, ymin)[0]
+        spine_y   = ax_bb.y0
+        xtick_bbs = [
+            tick.label1.get_window_extent(renderer)
+            for tick in ax.xaxis.get_major_ticks()
+            if tick.label1.get_visible() and tick.label1.get_text()
+        ]
+        cy_disp      = (sum((b.y0 + b.y1) / 2 for b in xtick_bbs) / len(xtick_bbs)
+                        if xtick_bbs else spine_y - 15)
+        avail_w_disp = xmax_disp - xmid_disp
+        avail_h_disp = max(spine_y - fig_bb.y0, 12)
+
+    too_wide   = 2 * r_outer_disp > avail_w_disp
+    too_tall   = 2 * r_outer_disp > avail_h_disp
+    is_clipped = too_wide or too_tall
+
+    # ── Step 2: figure-fraction helpers ──────────────────────────────────────
+    def _f(xd, yd):
+        return (xd - fig_bb.x0) / fw, (yd - fig_bb.y0) / fh
+
+    cx_f, cy_f = _f(cx_disp, cy_disp)
+    T           = fig.transFigure
+    bg_color    = fig.get_facecolor()
+
+    px_x       = 1.0 / fw
+    px_y       = 1.0 / fh
+    clip_pad_x = 0.0 if too_wide else px_x
+    clip_pad_y = 0.0 if too_tall else px_y
+
+    if placement == 'y':
+        clip_h_disp = r_outer_disp if too_tall else 2 * r_outer_disp
+        clip_x_f = (cx_disp - avail_w_disp / 2 - fig_bb.x0) / fw - clip_pad_x
+        clip_y_f = (cy_disp - clip_h_disp / 2 - fig_bb.y0) / fh - clip_pad_y
+        clip_w_f = avail_w_disp / fw + 2 * clip_pad_x
+        clip_h_f = clip_h_disp / fh + 2 * clip_pad_y
+    else:
+        clip_w_disp = r_outer_disp if too_wide else 2 * r_outer_disp
+        clip_x_f = (cx_disp - r_outer_disp - fig_bb.x0) / fw - clip_pad_x
+        clip_y_f = (cy_disp - avail_h_disp / 2 - fig_bb.y0) / fh - clip_pad_y
+        clip_w_f = clip_w_disp / fw + 2 * clip_pad_x
+        clip_h_f = avail_h_disp / fh + 2 * clip_pad_y
+
+    clip_rect = _Rectangle((clip_x_f, clip_y_f), clip_w_f, clip_h_f, transform=T)
+
+    def _add_ellipse(radius_data, *, facecolor='none', edgecolor='black',
+                     linewidth=0.8, alpha=1.0, zorder=10):
+        rd   = radius_data * data_to_disp
+        rx_f = rd / fw
+        ry_f = rd / fh
+        ell  = _Ellipse(
+            (cx_f, cy_f), 2 * rx_f, 2 * ry_f,
+            facecolor=facecolor, edgecolor=edgecolor,
+            linewidth=linewidth, alpha=alpha,
+            transform=T, clip_on=True, zorder=zorder,
+        )
+        ell.set_clip_path(clip_rect)
+        fig.add_artist(ell)
+
+    # ── Step 3: draw geometry depending on mode ───────────────────────────────
+
+    if mode == 'circles':
+        for i, rad in enumerate(reversed(circles)):
+            is_outermost = (i == 0)
+            _add_ellipse(rad, linewidth=0.8 if is_outermost else 0.3)
+
+    elif mode == 'bands':
+        for r_inner, r_outer_band in sorted(bands, key=lambda b: b[1], reverse=True):
+            _add_ellipse(r_outer_band, facecolor='grey', edgecolor='grey',
+                         linewidth=0.5, alpha=0.35)
+            if r_inner > 0:
+                # Punch out the inner area with background colour.
+                _add_ellipse(r_inner, facecolor=bg_color, edgecolor='black',
+                             linewidth=0.3, zorder=11)
+        _add_ellipse(r_outer, facecolor='none', edgecolor='black', linewidth=0.8, zorder=12)
+
+    else:  # wbands
+        total_weight = sum(w for _, _, w in wbands) or 1.0
+        for r_inner, r_outer_band, weight in sorted(wbands, key=lambda b: b[1], reverse=True):
+            band_alpha = 0.15 + 0.55 * (weight / total_weight)
+            _add_ellipse(r_outer_band, facecolor='grey', edgecolor='grey',
+                         linewidth=0.5, alpha=band_alpha)
+            if r_inner > 0:
+                _add_ellipse(r_inner, facecolor=bg_color, edgecolor='black',
+                             linewidth=0.3, zorder=11)
+        _add_ellipse(r_outer, facecolor='none', edgecolor='black', linewidth=0.8, zorder=12)
+
+    # ── Step 4: center dot when clipped ──────────────────────────────────────
+    if is_clipped:
+        fig.add_artist(_Ellipse(
+            (cx_f, cy_f), 2 * 2.5 / fw, 2 * 2.5 / fh,
+            color='black', transform=T, zorder=13, clip_on=False,
+        ))
+
+    # ── Step 5: r= label (outermost radius, formatted as km/m) ───────────────
+    def _fmt_r_label(v):
+        if v >= 1000:
+            return 'r=' + f'{v/1000:.3f}'.rstrip('0').rstrip('.') + 'km'
+        return 'r=' + f'{v:.3f}'.rstrip('0').rstrip('.') + 'm'
+
+    r_str = _fmt_r_label(r_outer)
+    _fs   = 6
+    if not is_clipped and 2 * r_outer_disp > 28:
+        fig.text(cx_f, cy_f, r_str, fontsize=_fs, ha='center', va='center', zorder=14)
+    elif placement == 'y':
+        if too_wide:
+            # no horizontal room: text above the circle (still in the y-axis margin)
+            lx_f, ly_f = _f(cx_disp, cy_disp + r_outer_disp + 2)
+            fig.text(lx_f, ly_f, r_str, fontsize=_fs, ha='center', va='bottom', zorder=14)
         else:
-            # lower quarter of the right margin, between last and middle y-tick
-            cy = (3 * ymin + ymax) / 4
-            rx = xmax + x_range * 0.09
-            tick_w = x_range * 0.012
-            ax.set_xlim(right=rx + x_range * 0.05)
-            ax.plot([rx, rx], [cy - r, cy + r], '-', color='k', lw=0.6)
-            ax.plot([rx - tick_w, rx + tick_w], [cy - r, cy - r], '-', color='k', lw=0.6)
-            ax.plot([rx - tick_w, rx + tick_w], [cy + r, cy + r], '-', color='k', lw=0.6)
-            ax.plot([rx], [cy], '+', color='k', ms=4, mew=0.5)
-            ax.text(rx + tick_w * 2, cy, f'r={r_label}', ha='left', va='center', fontsize=5)
-    
+            # too tall: text below the circle, centered in the y-axis margin
+            lx_f, ly_f = _f(cx_disp, cy_disp - r_outer_disp - 2)
+            fig.text(lx_f, ly_f, r_str, fontsize=_fs, ha='center', va='top', zorder=14)
+    elif too_wide:
+        lx_f, ly_f = _f(cx_disp + 4, cy_disp)
+        fig.text(lx_f, ly_f, r_str, fontsize=_fs, ha='left', va='center', zorder=14)
+    else:
+        lx_f, ly_f = _f(cx_disp, cy_disp - r_outer_disp - 2)
+        fig.text(lx_f, ly_f, r_str, fontsize=_fs, ha='center', va='top', zorder=14)
+
 
 # def _plt_colorbar(sc, extend='min', cax=add_color_bar_ax(fig,ax))
 

@@ -33,7 +33,7 @@ from .plot_utils import (
 )
 from aabpl.utils.cell_geometry import ( classify_disk_cells, get_cell_farthest_vertex_to_point,  )
 
-from aabpl.radius_search.region_classes import OffsetRegion
+from aabpl.search.algorithm.regions import OffsetRegion
 
 def visualize_pt_to_cell_region_assignment(
     grid,

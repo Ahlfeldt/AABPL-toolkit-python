@@ -25,13 +25,17 @@ output_data/*
 output_gis/*
 output_maps/*
 temp/*
-perf_test
-perf_test/*
-perf_test_gen
-perf_test_gen/*
 
-Test*.ipynb
-Test.ipynb
-README.diverged.md
-region_stats
-region_stats/*
+# dev artefacts (perf results, scratch notebooks)
+dev/perf/perf_test/
+dev/perf/perf_test_gen/
+dev/notebooks/
+dev/README.diverged.md
+region_stats/
+
+# pytest network-path cache workaround directories
+pytest-cache-files-*/
+
+# local output folders
+plots/
+testing_outputs/

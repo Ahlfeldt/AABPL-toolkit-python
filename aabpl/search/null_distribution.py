@@ -344,7 +344,7 @@ def compute_null_distribution(
             'Values for k_th_percentile must be >0 and <100. Provided values do not fullfill that condition',
             set([k_th_percentile for k_th_percentile in k_th_percentiles if k_th_percentile >= 100 or k_th_percentile <= 0])
         )
-    from aabpl.radius_search.point_grid_assignment import cell_count_iter as _cell_count_iter
+    from aabpl.search.point_assignment import cell_count_iter as _cell_count_iter
     grid._search_internals.cells_rndm_sample = True if min_pts_to_sample_cell == 0 else set((row, col) for row, col, cnt in _cell_count_iter(grid) if cnt >= min_pts_to_sample_cell)
     grid.sample_area = sample_area
 
@@ -358,9 +358,12 @@ def compute_null_distribution(
             cell_height=grid._search_internals.spacing,
         )
         rndm_pts = _pd_DataFrame(data=random_point_coords, columns=[x, y])
+    elif isinstance(null_distribution, _pd_DataFrame):
+        # Reuse existing DataFrame: keep all columns, treat first two as x/y coords.
+        rndm_pts = null_distribution.copy().reset_index(drop=True)
     else:
-        # User-supplied coordinates — array (N,2) or DataFrame (columns ignored, x-first).
-        arr = _np_array(null_distribution.values if isinstance(null_distribution, _pd_DataFrame) else null_distribution)
+        # User-supplied coordinate array (N, 2), x-first.
+        arr = _np_array(null_distribution)
         if arr.ndim != 2 or arr.shape[1] < 2:
             raise ValueError(
                 "null_distribution array/DataFrame must have shape (N, 2) with x in the first "
@@ -372,99 +375,7 @@ def compute_null_distribution(
 
     cols_c = [c] if isinstance(c, str) else list(c)
 
-    # ── multi-radius path ─────────────────────────────────────────────────────
-    _mr_grids = getattr(grid, '_mr_grids', None)
-    if r is not None and _mr_grids is not None:
-        from aabpl.radius_search.multi_radius import _parse_r_spec, _fmt_r, _AGG_ABBR
-        spec_type, data = _parse_r_spec(r)
-
-        if spec_type != 'single':
-            stat_str = _AGG_ABBR.get(stat, stat)
-            _INT = '__mrnull__'
-
-            if spec_type == 'list':
-                unique_radii = sorted(set(data))
-                bands = None
-            else:
-                bands = data
-                unique_radii = sorted(set(rv for a, b, *_ in bands for rv in (a, b)))
-
-            # aggregate rndm_pts at each unique radius using the pre-built grids
-            for ri in unique_radii:
-                int_sfx = f'{_INT}{_fmt_r(ri)}'
-                if ri == 0.0:
-                    # No real pts share random point coords → r=0 contribution is zero
-                    for col in cols_c:
-                        rndm_pts[f'{col}{int_sfx}'] = 0.0
-                else:
-                    grid_i = _mr_grids.get(ri)
-                    if grid_i is None:
-                        raise ValueError(
-                            f"No grid for radius {ri} in grid._mr_grids. "
-                            "Ensure multi_radius_search was called before compute_null_distribution."
-                        )
-                    _gi_sc = grid_i._search_class
-                    _gi_sc.set_source(
-                        pts=rndm_pts, c=cols_c, x=x, y=y,
-                        row_name=row_name, col_name=col_name,
-                        suffix=int_sfx, silent=True,
-                    )
-                    _gi_sc.set_target(
-                        pts=pts, c=cols_c, x=x, y=y,
-                        row_name=row_name, col_name=col_name, silent=silent,
-                    )
-                    _excl_orig = _gi_sc.exclude_self
-                    _gi_sc.exclude_self = False
-                    _gi_sc.perform_search(silent=True)
-                    _gi_sc.exclude_self = _excl_orig
-
-            # build output columns and thresholds
-            thresholds: dict = {}
-            band_cols_tmp: list = []
-
-            if spec_type == 'list':
-                for i, ri in enumerate(data):
-                    for col in cols_c:
-                        src = f'{col}{_INT}{_fmt_r(ri)}'
-                        final = f'{col}_{stat_str}_r{i}'
-                        rndm_pts[final] = rndm_pts[src].values
-                        ki = k_th_percentiles[cols_c.index(col)]
-                        thresholds[final] = _np_percentile(rndm_pts[final].values, ki, axis=0)
-            else:
-                for i, band in enumerate(bands):
-                    r_in, r_out = band[0], band[1]
-                    for col in cols_c:
-                        outer = f'{col}{_INT}{_fmt_r(r_out)}'
-                        inner = f'{col}{_INT}{_fmt_r(r_in)}'
-                        bname = f'{col}_{stat_str}_b{i}'
-                        rndm_pts[bname] = rndm_pts[outer].values - rndm_pts[inner].values
-                        band_cols_tmp.append(bname)
-                        if spec_type == 'bands':
-                            ki = k_th_percentiles[cols_c.index(col)]
-                            thresholds[bname] = _np_percentile(rndm_pts[bname].values, ki, axis=0)
-
-                if spec_type == 'wbands':
-                    total_w = sum(band[2] for band in bands)
-                    for col in cols_c:
-                        arr = _np_empty(len(rndm_pts))
-                        arr[:] = 0.0
-                        for i, band in enumerate(bands):
-                            r_in, r_out, w = band
-                            bname = f'{col}_{stat_str}_b{i}'
-                            arr += (w / total_w) * rndm_pts[bname].values
-                        wgt_col = f'{col}_{stat_str}_wgt'
-                        rndm_pts[wgt_col] = arr
-                        ki = k_th_percentiles[cols_c.index(col)]
-                        thresholds[wgt_col] = _np_percentile(rndm_pts[wgt_col].values, ki, axis=0)
-
-            # clean up temp __mrnull__ cols
-            for tmp_col in list(rndm_pts.columns):
-                if _INT in tmp_col:
-                    rndm_pts.drop(columns=[tmp_col], inplace=True)
-
-            return (thresholds, rndm_pts)
-
-    # ── single-radius path (original) ────────────────────────────────────────
+    # ── single-radius path ────────────────────────────────────────────────────
     _sc = grid._search_class
     _sc.set_source(
         pts=rndm_pts,
