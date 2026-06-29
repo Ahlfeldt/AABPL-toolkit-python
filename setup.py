@@ -13,7 +13,7 @@ except (UnicodeDecodeError, FileNotFoundError):
     long_description = ''
 setup(
     name=name,
-    version="0.3.6.9",
+    version="0.3.6.10",
     description='.',
     long_description=long_description,
     long_description_content_type='text/markdown',

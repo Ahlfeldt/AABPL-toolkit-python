@@ -2,7 +2,8 @@ from numpy import (
     array as _np_array, arange as _np_arange,
     exp as _np_exp,
     unique, linspace, invert, flip, transpose, concatenate, sign, zeros,
-    min as _np_min, max as _np_max, equal, where, logical_or, logical_and, all, newaxis)
+    min as _np_min, max as _np_max, equal, where, logical_or, logical_and, all, newaxis,
+    mgrid as _np_mgrid)
 from math import inf as _math_inf, pi as _math_pi, acos as _math_acos, sin as _math_sin, log2 as _math_log2
 from shapely.geometry import (
     Polygon as _shapely_Polygon,
@@ -233,18 +234,39 @@ def intersect_polygon_with_grid(
     _ormax = _mceil((_by1 - _oy) / _sy)
     _out_fully = set()
     _out_partly = set()
-    for _r in range(_ormin, _ormax + 1):
-        for _c in range(_ocmin, _ocmax + 1):
-            _cp = _shapely_Polygon([
-                (_ox + _c * _sx,       _oy + _r * _sy),
-                (_ox + (_c+1) * _sx,   _oy + _r * _sy),
-                (_ox + (_c+1) * _sx,   _oy + (_r+1) * _sy),
-                (_ox + _c * _sx,       _oy + (_r+1) * _sy),
-            ])
-            if grid.sample_area.contains(_cp):
-                _out_fully.add((_r, _c))
-            elif grid.sample_area.intersects(_cp):
-                _out_partly.add((_r, _c))
+    try:
+        from shapely import box as _shapely_box
+        from shapely import contains_properly as _shapely_contains_properly
+        from shapely import intersects as _shapely_intersects
+        _R, _C = _np_mgrid[_ormin:_ormax+1, _ocmin:_ocmax+1]
+        _rf, _cf = _R.ravel(), _C.ravel()
+        _CHUNK = 500_000
+        for _i in range(0, len(_rf), _CHUNK):
+            _sl = slice(_i, _i + _CHUNK)
+            _rf_c, _cf_c = _rf[_sl], _cf[_sl]
+            _boxes = _shapely_box(
+                _ox + _cf_c * _sx, _oy + _rf_c * _sy,
+                _ox + (_cf_c + 1) * _sx, _oy + (_rf_c + 1) * _sy,
+            )
+            _fully = _shapely_contains_properly(grid.sample_area, _boxes)
+            _partly = ~_fully & _shapely_intersects(grid.sample_area, _boxes)
+            _out_fully.update(zip(_rf_c[_fully].tolist(), _cf_c[_fully].tolist()))
+            _out_partly.update(zip(_rf_c[_partly].tolist(), _cf_c[_partly].tolist()))
+    except ImportError:
+        from shapely.prepared import prep as _prep
+        _prep_area = _prep(grid.sample_area)
+        for _r in range(_ormin, _ormax + 1):
+            for _c in range(_ocmin, _ocmax + 1):
+                _cp = _shapely_Polygon([
+                    (_ox + _c * _sx,       _oy + _r * _sy),
+                    (_ox + (_c+1) * _sx,   _oy + _r * _sy),
+                    (_ox + (_c+1) * _sx,   _oy + (_r+1) * _sy),
+                    (_ox + _c * _sx,       _oy + (_r+1) * _sy),
+                ])
+                if _prep_area.contains(_cp):
+                    _out_fully.add((_r, _c))
+                elif _prep_area.intersects(_cp):
+                    _out_partly.add((_r, _c))
     grid.output_cells_fully_valid = _out_fully
     grid.output_cells_partly_valid = _out_partly
     grid._output_sample_spacing_x = _sx
@@ -636,7 +658,7 @@ def infer_sample_area_from_pts(
             # grid.cells_fully_valid = cells_fully_valid
             # grid.cells_partly_valid = cells_partly_valid
 
-            sample_poly = _shapely_MultiPolygon(polygons).buffer(buffer, quadsegs=3)
+            sample_poly = _shapely_MultiPolygon(polygons).buffer(buffer, quad_segs=3)
             # don't simplify this shape
         area_missing_from_hull = 0
            

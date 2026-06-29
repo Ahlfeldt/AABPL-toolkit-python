@@ -34,6 +34,11 @@ _OUTER_PROGRESS: _contextvars.ContextVar = _contextvars.ContextVar(
 # progress_print() uses it to erase the line before printing and redraw after.
 _ACTIVE_BAR = None
 
+# True after any _render() writes \r content; False after a proper \n clear.
+# Lets progress_print clean up even when _ACTIVE_BAR is None (e.g. bar just
+# finished, or a fast run never activated a bar but a sub-call did write one).
+_LINE_DIRTY: bool = False
+
 # Wall time: used for ETA display (what the user actually waits for).
 _wall = _time.perf_counter
 # CPU time: used for EMA learning (immune to parallel load on a busy machine).
@@ -67,12 +72,24 @@ def progress_print(*args, **kwargs) -> None:
     RadiusSearchProgress, SweepProgress) — whichever called start() most
     recently is tracked in _ACTIVE_BAR.
     """
+    global _LINE_DIRTY
     bar = _ACTIVE_BAR
     if bar is not None and getattr(bar, '_active', False):
         _sys.stdout.write(f"\r{' ' * _LINE_WIDTH}\r")
         _sys.stdout.flush()
+        _LINE_DIRTY = False
+        _LINE_DIRTY = False
         print(*args, **kwargs)
         bar._render()
+    elif _LINE_DIRTY:
+        # No active bar but a \r line was written (e.g. bar just finished or a
+        # fast run never activated it) — clear before printing so the message
+        # doesn't appear appended to the old bar content.
+        _sys.stdout.write(f"\r{' ' * _LINE_WIDTH}\r")
+        _sys.stdout.flush()
+        _LINE_DIRTY = False
+        _LINE_DIRTY = False
+        print(*args, **kwargs)
     else:
         print(*args, **kwargs)
 
@@ -174,6 +191,7 @@ class DiskRegionProgress:
             _ACTIVE_BAR = None
         _sys.stdout.write("\r" + " " * _LINE_WIDTH + "\r")
         _sys.stdout.flush()
+        _LINE_DIRTY = False
         wall_actual = _wall() - self._run_start_wall
         cpu_actual  = _cpu()  - self._run_start_cpu
         _BUILD_EST_SECONDS = (1 - _EMA_ALPHA) * _BUILD_EST_SECONDS + _EMA_ALPHA * cpu_actual
@@ -189,6 +207,7 @@ class DiskRegionProgress:
             _ACTIVE_BAR = None
         _sys.stdout.write("\r" + " " * _LINE_WIDTH + "\r")
         _sys.stdout.flush()
+        _LINE_DIRTY = False
 
     def _render(self) -> None:
         try:
@@ -207,6 +226,7 @@ class DiskRegionProgress:
             line = f"  [{bar}] {pct:3d}%  {info:<14}  {desc:<18}  {remaining:<14}"
             _sys.stdout.write(f"\r{line:<{_LINE_WIDTH}}")
             _sys.stdout.flush()
+            _LINE_DIRTY = True
         except Exception:
             self._active = False
 
@@ -278,6 +298,7 @@ class SearchProgress:
             line = f"  [{bar}]   0%  {n_str:<14}                    {remaining:<14}"
             _sys.stdout.write(f"\r{line:<{_LINE_WIDTH}}")
             _sys.stdout.flush()
+            _LINE_DIRTY = True
         else:
             self._active = False  # lazily activated in update() if run is slow
 
@@ -312,6 +333,7 @@ class SearchProgress:
             line = f"  [{bar}] {pct:3d}%  {n_str:<14}                    {remaining:<14}"
             _sys.stdout.write(f"\r{line:<{_LINE_WIDTH}}")
             _sys.stdout.flush()
+            _LINE_DIRTY = True
         except Exception:
             self._active = False
             return self._n_pts + 1
@@ -335,6 +357,7 @@ class SearchProgress:
             _ACTIVE_BAR = None
         _sys.stdout.write("\r" + " " * _LINE_WIDTH + "\r")
         _sys.stdout.flush()
+        _LINE_DIRTY = False
         wall_actual = _wall() - self._run_start_wall
         cpu_actual  = _cpu()  - self._run_start_cpu
         _SEARCH_EST_SECONDS = (1 - _EMA_ALPHA) * _SEARCH_EST_SECONDS + _EMA_ALPHA * cpu_actual
@@ -416,6 +439,7 @@ class _CombinedProgress:
         _update_ratio(wall_elapsed, cpu_elapsed)
         _sys.stdout.write("\r" + " " * _LINE_WIDTH + "\r")
         _sys.stdout.flush()
+        _LINE_DIRTY = False
 
     def cancel(self) -> None:
         global _ACTIVE_BAR
@@ -426,6 +450,7 @@ class _CombinedProgress:
             _ACTIVE_BAR = None
         _sys.stdout.write("\r" + " " * _LINE_WIDTH + "\r")
         _sys.stdout.flush()
+        _LINE_DIRTY = False
 
     def _render(self) -> None:
         try:
@@ -448,6 +473,7 @@ class _CombinedProgress:
             line = f"  {self._label}  [{bar}] {pct:3d}%  {stage:<22}  {n_str:<14}  {elapsed:.1f}s  {remaining:<12}"
             _sys.stdout.write(f"\r{line:<{_LINE_WIDTH}}")
             _sys.stdout.flush()
+            _LINE_DIRTY = True
         except Exception:
             self._active = False
 
@@ -522,6 +548,7 @@ class SweepProgress:
             return
         _sys.stdout.write(f"\r{' ' * _LINE_WIDTH}\r")
         _sys.stdout.flush()
+        _LINE_DIRTY = False
 
     def redraw(self) -> None:
         """Redraw the bar after external prints have moved the cursor."""

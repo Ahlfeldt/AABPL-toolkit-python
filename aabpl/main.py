@@ -843,7 +843,8 @@ def radius_search(
         pts=pts,r=r,sample_area=sample_area,
         crs=crs,local_crs=local_crs,x=x,y=y,
         grid=grid, min_pts_to_sample_cell=0)
-    intersect_polygon_with_grid(grid)
+    if sample_area is not False:
+        intersect_polygon_with_grid(grid)
 
     if not _is_internal:
         _prog.step("searching")

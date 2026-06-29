@@ -38,16 +38,17 @@ def compute_spatial_stats(
         _np_random.seed(random_seed)
 
     N_full = len(target_points)
+    radii_list = [float(r) for r in _np_atleast_1d(search_radii)]
+    stats = {}
+
+    # --- 1. Bounding box & aspect ratio (always from full dataset) ---
+    p_min = _np_min(target_points, axis=0)
+    p_max = _np_max(target_points, axis=0)
+
     if N_full > max_pts:
         idx = _np_random.choice(N_full, size=max_pts, replace=False)
         target_points = target_points[idx]
     N = len(target_points)
-    radii_list = [float(r) for r in _np_atleast_1d(search_radii)]
-    stats = {}
-
-    # --- 1. Bounding box & aspect ratio ---
-    p_min = _np_min(target_points, axis=0)
-    p_max = _np_max(target_points, axis=0)
     W = float(p_max[0] - p_min[0])
     H = float(p_max[1] - p_min[1])
     max_world_dim = max(W, H)
@@ -86,15 +87,16 @@ def compute_spatial_stats(
         # Radius-aware skewness: cell size = 2r (search diameter).
         # Uses 90th percentile of non-empty cells / global mean — focuses on
         # the dense tail while ignoring empty cells.
+        # Sparse counter: O(n_pts) memory regardless of how small r is.
         nx = max(int(W / (2.0 * r)), 1)
         ny = max(int(H / (2.0 * r)), 1)
         xi = _np_clip(((target_points[:, 0] - p_min[0]) / denom_x * nx).astype(int), 0, nx - 1)
         yi = _np_clip(((target_points[:, 1] - p_min[1]) / denom_y * ny).astype(int), 0, ny - 1)
-        gc = _np_zeros((nx, ny))
-        _np_add.at(gc, (xi, yi), 1)
+        from collections import Counter as _Counter
+        cell_counts = _Counter(zip(xi.tolist(), yi.tolist()))
+        nonempty = list(cell_counts.values())
         cell_area_2r = (W / nx) * (H / ny) if nx > 0 and ny > 0 else 1.0
-        nonempty = gc.ravel()[gc.ravel() > 0]
-        if len(nonempty) > 0 and global_mean_density > 0 and cell_area_2r > 0:
+        if nonempty and global_mean_density > 0 and cell_area_2r > 0:
             p90_density = float(_np_percentile(nonempty, 90)) / cell_area_2r
             skewness_2r_list.append(p90_density / global_mean_density)
         else:

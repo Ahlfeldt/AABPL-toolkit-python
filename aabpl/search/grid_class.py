@@ -174,6 +174,16 @@ class Grid(object):
                 silent=silent
             )
 
+        _extent_r_ratio = max(xmax - xmin, ymax - ymin) / r if r > 0 else 0
+        if _extent_r_ratio > 10_000_000:
+            from aabpl.utils.progress import progress_print as _pp
+            _approx_cells = int((xmax - xmin) / r * 1.414) * int((ymax - ymin) / r * 1.414)
+            _pp(
+                f'Warning: max(W,H)/r = {_extent_r_ratio:,.0f} (extent {max(xmax-xmin,ymax-ymin):,.0f}, r={r}). '
+                f'Search grid ~{_approx_cells:,.0f} cells — will require very large arrays and may exhaust memory. '
+                f'Check that r is in the same units as your coordinates.'
+            )
+
         # auto choose spacing ratio and depth unless explictly set by the user via config.
         spacing, nest_depth = choose_spacing_and_depth(
             r=r,
