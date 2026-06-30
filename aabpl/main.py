@@ -538,13 +538,9 @@ def radius_search(
         Statistic to compute within the search radius. One of ``'sum'``, ``'count'``,
         ``'mean'``, ``'variance'``, ``'std'``, ``'cv'``, ``'skewness'``, ``'kurtosis'``
         (default=``'sum'``). Pass a **list** to compute multiple statistics in a single
-        search pass, e.g. ``stat=['sum', 'mean', 'variance']``. When used with
-        ``detect_cluster_pts`` / ``detect_cluster_cells`` the **first** stat in the list
-        drives cluster detection; any additional stats are appended to the output grid as
-        extra cell-level aggregates.
+        search pass, e.g. ``stat=['sum', 'mean', 'variance']``.
     exclude_self (bool):
-        If True, each point's own value is subtracted from its radius aggregate (default=True).
-        Formerly ``exclude_pt_itself`` (deprecated).
+        If True, each point's own value is subtracted from its radius aggregate (default=False).
     proj_crs (str):
         Metric CRS used internally. ``'auto'`` selects the appropriate UTM zone from the data extent.
         Pass an explicit EPSG string (e.g. ``'EPSG:32632'``) to override, or ``None`` to skip
@@ -571,21 +567,22 @@ def radius_search(
         resolution of the output grid used for exports and plots — NOT the internal search grid,
         whose cell size is chosen automatically for speed. Per-point aggregates are exact
         regardless of this value, so a finer output grid is well-defined. When None, defaults to
-        ``r/3`` (default=None). Formerly ``spacing=`` (deprecated).
-    sample_area (shapely.Polygon | shapely.MultiPolygon | str):
-        Area used for valid-area weighting. Accepted string values:
-            - ``'buff_non_empty_cells'``: non-empty grid cells plus a radius-sized buffer (default)
-            - ``'buf_cells_min_pts'``: grid cells with at least 'min_pts_to_sample_cell' plus a radius-sized buffer (default)
+        ``r/3`` (default=None).
+    sample_area (shapely.Polygon | shapely.MultiPolygon | str | False):
+        Study area polygon used for valid-area weighting (only relevant when
+        ``weight_valid_area`` is set). ``False`` disables sample-area processing entirely
+        and is the correct default when no edge-effect weighting is needed (default=False).
+        Accepted string values:
+            - ``'buff_cells,min_pts=1'``: grid cells with at least 1 point plus a radius-sized buffer
+            - ``'buff_non_empty_cells'``: non-empty grid cells plus a radius-sized buffer
             - ``'concave'``: concave hull around points
             - ``'convex'``: convex hull around points
             - ``'buffer'``: buffer around individual points (slow for large datasets)
             - ``'bounding_box'``: axis-aligned bounding box
             - ``'grid'`` or ``None``: full grid extent
         Alternatively pass any Shapely ``Polygon`` or ``MultiPolygon`` directly. The geometry
-        is assumed to be in ``crs`` and is reprojected to ``local_crs`` automatically. If your
-        geometry is already in the projected CRS (``local_crs``), pass ``crs=local_crs`` to
-        prevent a double reprojection.
-        See ``infer_sample_area_from_pts`` for finer control (default=False).
+        is assumed to be in ``crs`` and is reprojected to the projected CRS automatically.
+        Append ``,min_pts=N`` to any string option to require at least N data points per cell.
     suffix (str):
         Suffix appended to each column name in ``c`` to form the result column names.
         When None (default), derived from ``stat`` and ``r``: ``_{stat}_{r}``
@@ -605,10 +602,6 @@ def radius_search(
         Grid row-index column name for ``pts_target``. Defaults to ``row_name`` when None (default=None).
     col_name_tgt (str):
         Grid column-index column name for ``pts_target``. Defaults to ``col_name`` when None (default=None).
-    _dev (dict):
-        Development only. Dict of kwargs for internal debug plots. Supported keys:
-        ``plot_pt_disk``, ``plot_cell_reg_assign``, ``plot_offset_checks``,
-        ``plot_offset_regions``, ``plot_offset_raster``. None disables all (default=None).
     silent (bool):
         If True, suppresses all progress output. None is treated as False (default=None).
 
@@ -844,7 +837,7 @@ def radius_search(
         crs=crs,local_crs=local_crs,x=x,y=y,
         grid=grid, min_pts_to_sample_cell=0)
     if sample_area is not False:
-        intersect_polygon_with_grid(grid)
+        intersect_polygon_with_grid(grid, weight_valid_area=weight_valid_area)
 
     if not _is_internal:
         _prog.step("searching")
@@ -1081,24 +1074,95 @@ def detect_cluster_pts(
     **kwargs,
 ):
     """
-    For all points in a DataFrame it searches for all other points (potentially of another DataFrame) within the specified radius and aggregate the values for specified column(s).
-    It draws random the bounding box containing all points from DataFrame(s) and aggregate the values within the radius to obtain a random distribution.
-    Then all points from DataFrame which exceed the k_th_percentile of the random distribution are labeld as clustered.
-    The results will be appended to DataFrame.
+    Compute radius aggregates for all points, compare them against a null distribution of
+    randomly placed points within the study area, and label each **point** above the k-th
+    percentile as clustered. A boolean column ``{c}{cluster_suffix}`` is appended to ``pts``
+    in-place. Use ``detect_cluster_cells`` instead to get spatial cluster polygons.
 
+    Args:
+    -------
+    pts (pandas.DataFrame):
+        Points for which neighborhood aggregates are computed. Results are appended to this DataFrame in-place.
+        Note: row order of ``pts`` may change after the call.
+    crs (str):
+        CRS of the coordinates in ``pts``, e.g. ``'EPSG:4326'``.
+        Pass ``crs=''`` to skip reprojection entirely — use this when your
+        coordinates are already in a Cartesian/projected plane and ``r`` is in
+        the same units as ``x``/``y``.
+    r (float or list or list of tuples):
+        Search radius or multiple radii, or (weighted) distance bands.
+        Same format as ``radius_search`` — see its docstring for full details.
+    c (str or list):
+        Column name or list of column names to aggregate within the search radius.
+        If empty or None, points within the radius are counted.
+        Columns must exist in ``pts`` (or in ``pts_target`` if provided).
+    x (str):
+        Column name of the x-coordinate (longitude) in ``pts`` (default=``'lon'``).
+    y (str):
+        Column name of the y-coordinate (latitude) in ``pts`` (default=``'lat'``).
+    stat (str or list):
+        Statistic to compute within the search radius. One of ``'sum'``, ``'count'``,
+        ``'mean'``, ``'variance'``, ``'std'``, ``'cv'``, ``'skewness'``, ``'kurtosis'``
+        (default=``'sum'``). The **first** stat drives cluster detection; additional stats
+        are appended as extra columns.
+    exclude_self (bool):
+        If True, each point's own value is subtracted from its radius aggregate (default=True).
+    cell_size (float):
+        Output cell size in metres (or coordinate units when ``crs=''``). Controls the output
+        grid resolution — NOT the internal search grid. Defaults to ``r/3`` (default=None).
+    sample_area (shapely.Polygon | shapely.MultiPolygon | str):
+        Study area from which random null-distribution points are drawn. Accepted string values:
+            - ``'buff_cells,min_pts=1'``: grid cells with at least 1 point plus a radius-sized buffer (default)
+            - ``'buff_non_empty_cells'``: non-empty grid cells plus a radius-sized buffer
+            - ``'concave'``: concave hull around points
+            - ``'convex'``: convex hull around points
+            - ``'buffer'``: buffer around individual points (slow for large datasets)
+            - ``'bounding_box'``: axis-aligned bounding box
+            - ``'grid'`` or ``None``: full grid extent
+        Alternatively pass any Shapely ``Polygon`` or ``MultiPolygon`` directly.
+        Append ``,min_pts=N`` to any string option to require at least N data points per cell.
+    weight_valid_area (str):
+        Inverse-area weighting for edge effects. ``'estimate'`` uses a fast approximation;
+        ``'precise'`` is exact but slow. ``None`` disables weighting (default=None).
+    k_th_percentile (float):
+        Percentile of the null distribution a point must exceed to be labelled as clustered (default=99.5).
     null_distribution (int | numpy.ndarray | pandas.DataFrame):
         Controls the null distribution used for cluster detection (default ``100_000``):
 
         - **int**: draw this many points uniformly at random within ``sample_area``.
-        - **numpy.ndarray of shape (N, 2)**: use these coordinates directly as the reference
-          distribution — **first column x, second column y**, both in the projected CRS (metres).
-          The radius sums are still computed by the package.
+        - **numpy.ndarray of shape (N, 2)**: use these coordinates directly — **first column x,
+          second column y**, both in the projected CRS (metres).
         - **pandas.DataFrame**: treated as an (N, 2) array via ``.values`` — **first column x,
           second column y** (column names are ignored).
 
-        **Important for coordinate inputs:** coordinates must be in the same projected CRS that
-        ``pts`` is reprojected into (metres), not the original input CRS. Use
-        ``aabpl.draw_random_coords()`` with ``grid.sample_area`` to generate compatible coordinates.
+        **Important for coordinate inputs:** coordinates must be in the projected CRS (metres),
+        not the original input CRS. Use ``aabpl.draw_random_coords()`` with ``grid.sample_area``
+        to generate compatible coordinates.
+    random_seed (int):
+        Random seed for reproducibility. None means no seed is set (default=None).
+    proj_crs (str):
+        Metric CRS used internally. ``'auto'`` selects the appropriate UTM zone from the data extent.
+        Pass an explicit EPSG string (e.g. ``'EPSG:32632'``) to override (default=``'auto'``).
+    row_name (str):
+        Name for the grid row-index column appended to ``pts`` (default=``'id_y'``).
+    col_name (str):
+        Name for the grid column-index column appended to ``pts`` (default=``'id_x'``).
+    suffix (str):
+        Suffix for the radius-aggregate column names. Defaults to ``'_{stat}_{r}'`` (default=None).
+    pts_target (pandas.DataFrame):
+        Points to aggregate over. If None, ``pts`` is used as both source and target (default=None).
+    keep_cols (bool):
+        If False, intermediate columns are removed from ``pts`` before returning (default=False).
+    overwrite (bool):
+        If True, existing output columns are overwritten. Raises ValueError on collision when False (default=False).
+    silent (bool):
+        If True, suppresses all progress output (default=None).
+
+    Returns:
+    -------
+    grid (aabpl.Grid):
+        The Grid object used for the search. Boolean cluster columns ``{c}_cluster_{stat}_{r}``
+        and radius aggregates ``{c}{suffix}`` are appended to ``pts``.
     """
     # backward-compat: spacing= was renamed to cell_size=
     if 'spacing' in kwargs:
@@ -1249,7 +1313,7 @@ def detect_cluster_pts(
         sample_area=sample_area, crs=crs, local_crs=local_crs, x=x, y=y, grid=grid,
         min_pts_to_sample_cell=min_pts_to_sample_cell,
         no_plot=True)
-    intersect_polygon_with_grid(grid=grid)
+    intersect_polygon_with_grid(grid=grid, weight_valid_area=weight_valid_area)
 
     if not _is_internal: _prog.step("null distribution")
     if not isinstance(null_distribution, int) and local_crs and local_crs != crs:
@@ -1386,10 +1450,10 @@ def detect_cluster_cells(
     **kwargs,
 ):
     """
-    For all points in a DataFrame it searches for all other points (potentially of another DataFrame) within the specified radius and aggregate the values for specified column(s).
-    It draws random the bounding box containing all points from DataFrame(s) and aggregate the values within the radius to obtain a random distribution.
-    Then all points from DataFrame which exceed the k_th_percentile of the random distribution are labeld as clustered.
-    The results will be appended to DataFrame.
+    Compute radius aggregates for all points, compare them against a null distribution of
+    randomly placed points within the study area, and label points above the k-th percentile
+    as clustered. Results are appended to ``pts`` in-place and spatial cluster polygons are
+    stored on the returned Grid object.
 
     Args:
     -------
@@ -1423,14 +1487,12 @@ def detect_cluster_cells(
         Statistic to compute within the search radius. One of ``'sum'``, ``'count'``,
         ``'mean'``, ``'variance'``, ``'std'``, ``'cv'``, ``'skewness'``, ``'kurtosis'``
         (default=``'sum'``). Pass a **list** to compute multiple statistics in a single
-        search pass, e.g. ``stat=['sum', 'mean', 'variance']``. When used with
-        ``detect_cluster_pts`` / ``detect_cluster_cells`` the **first** stat in the list
-        drives cluster detection; any additional stats are appended to the output grid as
+        search pass, e.g. ``stat=['sum', 'mean', 'variance']``. The **first** stat in the
+        list drives cluster detection; any additional stats are appended to the output grid as
         extra cell-level aggregates.
     exclude_self (bool):
         If True, each point's own value is subtracted from its radius aggregate (default=True).
-        Formerly ``exclude_pt_itself`` (deprecated).
-    spacing (float):
+    cell_size (float):
         Output cell size, in the same unit as ``r`` (metres after reprojection). Controls the
         resolution of the output grid used for exports and plots — NOT the internal search grid,
         whose cell size is chosen automatically for speed. Per-point aggregates are exact
@@ -1438,20 +1500,17 @@ def detect_cluster_cells(
         ``r/3`` (default=None).
     sample_area (shapely.Polygon | shapely.MultiPolygon | str):
         Area used for drawing random comparison points. Accepted string values:
-            - ``'buff_non_empty_cells'``: non-empty grid cells plus a radius-sized buffer (default)
-            - ``'buf_cells_min_pts'``: grid cells with at least 'min_pts_to_sample_cell' plus a radius-sized buffer (default)
+            - ``'buff_cells,min_pts=1'``: grid cells with at least 1 point plus a radius-sized buffer (default)
+            - ``'buff_non_empty_cells'``: non-empty grid cells plus a radius-sized buffer
             - ``'concave'``: concave hull around points
             - ``'convex'``: convex hull around points
             - ``'buffer'``: buffer around individual points (slow for large datasets)
             - ``'bounding_box'``: axis-aligned bounding box
             - ``'grid'`` or ``None``: full grid extent
         Alternatively pass any Shapely ``Polygon`` or ``MultiPolygon`` directly. The geometry
-        is assumed to be in ``crs`` and is reprojected to ``local_crs`` automatically. If your
-        geometry is already in the projected CRS (``local_crs``), pass ``crs=local_crs`` to
-        prevent a double reprojection.
-        See ``infer_sample_area_from_pts`` for finer control (default='buff_non_empty_cells').
-    min_pts_to_sample_cell (int):
-        Minimum number of data points a grid cell must contain for random points to be drawn in it (default=0).
+        is assumed to be in ``crs`` and is reprojected to the projected CRS automatically.
+        Append ``,min_pts=N`` to any string option to require at least N data points per cell
+        before random points are drawn there (e.g. ``'buff_cells,min_pts=2'``).
     weight_valid_area (str):
         If set to ``'estimate'`` or ``'precise'`` the radius aggregate will be weighted
         inversely by the share of valid area within the search radius. ``'precise'`` is
@@ -1466,7 +1525,7 @@ def detect_cluster_cells(
         method-string sample areas (``'buff_non_empty_cells'``, ``'concave'``, etc.) the
         boundary follows cell edges exactly and this bias does not occur.
     k_th_percentile (float):
-        Percentile of the random distribution a point must exceed to be labelled as clustered (default=99.5).
+        Percentile of the null distribution a point must exceed to be labelled as clustered (default=99.5).
     null_distribution (int | numpy.ndarray | pandas.DataFrame):
         Controls the null distribution used for cluster detection (default ``100_000``):
 
@@ -1481,12 +1540,13 @@ def detect_cluster_cells(
         to generate compatible coordinates.
     random_seed (int):
         Random seed for reproducibility. None means no seed is set (default=None).
-    queen_contingency (int):
-        Merge neighbouring clustered cells (including diagonals) into the same cluster.
-        Values ≥ 2 also pull in cells that many steps away (default=1).
-    rook_contingency (int):
-        Merge horizontally/vertically neighbouring clustered cells into the same cluster.
-        Ignored when ``queen_contingency`` is set higher. Values ≥ 2 extend the reach (default=1).
+    contingency (int or tuple):
+        Controls how adjacent clustered cells are merged into clusters. Accepts:
+
+        - **int** — queen contingency (includes diagonals); values >= 2 extend the reach by
+          that many steps (default=1).
+        - **``(queen, rook)``** — explicit queen and rook values. Rook contingency merges only
+          horizontally/vertically adjacent cells and is ignored when queen is higher.
     merge_dist (None | float | tuple | list of tuples):
         Distance threshold(s) for merging clusters after contingency merging.
         Each condition is a ``(centroid_dist, border_dist)`` pair — both must hold (AND).
@@ -1496,21 +1556,13 @@ def detect_cluster_cells(
 
         - ``None``                         — no distance merging (default).
         - ``float``                        — same threshold for both centroid and border.
-        - ``(centroid, border)``           — single AND-condition (original form).
-        - ``[(c1,b1), (c2,b2), ...]``      — merge if condition 1 OR condition 2 OR … is met.
-
-        Defaults to ``(r*10/3, r*4/3)`` when ``centroid_dist_threshold``/``border_dist_threshold``
-        are passed directly (deprecated).
-    centroid_dist_threshold (float):
-        Deprecated — use ``merge_dist=(centroid, border)`` instead.
-    border_dist_threshold (float):
-        Deprecated — use ``merge_dist=(centroid, border)`` instead.
-    min_cluster_share_after_contingency (float):
-        Minimum share of total clustered points a cluster must represent after contingency merging to be retained (default=0.05).
-    min_cluster_share_after_centroid_dist (float):
-        Minimum share after centroid-distance merging (default=0.00).
-    min_cluster_share_after_convex (float):
-        Minimum share after convex-hull infill (default=0.00).
+        - ``(centroid, border)``           — single AND-condition.
+        - ``[(c1,b1), (c2,b2), ...]``      — merge if condition 1 OR condition 2 OR ... is met.
+    min_cluster_share (float or tuple):
+        Minimum share of total clustered points a cluster must represent to be retained.
+        Pass a single float to apply the same threshold at all three stages, or a
+        ``(after_contingency, after_merge_dist, after_convex)`` tuple for stage-specific
+        thresholds (default=``(0.05, 0.0, 0.0)``).
     make_convex (bool):
         If True, all grid cells within the convex hull of each cluster are added to it (default=True).
     x (str):
@@ -1524,9 +1576,6 @@ def detect_cluster_cells(
     suffix (str):
         Suffix appended to each column name in ``c`` to form the radius-aggregate column names.
         When None (default), auto-generates ``'_{stat}_{r}'`` (e.g. ``'_sum_750'`` for ``stat='sum', r=750``).
-    cluster_suffix (str):
-        Suffix appended to each column name in ``c`` to form the boolean cluster indicator column names.
-        When None (default), auto-generates ``'_cluster_{stat}_{r}'`` (e.g. ``'_cluster_sum_750'``).
     proj_crs (str):
         Metric CRS used internally. ``'auto'`` selects the appropriate UTM zone from the data extent.
         Pass an explicit EPSG string (e.g. ``'EPSG:32632'``) to override, or ``None`` to skip
@@ -1552,20 +1601,13 @@ def detect_cluster_cells(
         **xmin/ymin are binding** (west edge of col 0, south edge of row 0; points outside
         get negative indices). **xmax/ymax are soft minimums** — grid extends to
         ``max(data_extent, specified_value)``. x = easting/longitude, y = northing/latitude.
-        A large expansion (> 20 000 cells AND > 50 % of data extent) prints an info message.
         Default: ``(None, None, None, None)``.
-    plot_distribution (dict):
-        *Deprecated.* Call ``grid.plot.rand_dist()`` on the returned grid instead.
-    plot_cluster_points (dict):
-        *Deprecated.* Call ``grid.plot.cluster_pts()`` on the returned grid instead.
     keep_cols (bool):
         If False, intermediate columns added during processing (grid indices, offsets, proj x+y, etc.)
         are removed from ``pts`` before returning. If None proj x+y are retained. If True they are retained (default=False).
     overwrite (bool):
         If True, existing output columns with the same names are overwritten. Raises ValueError
         when False and a collision is detected (default=False).
-    _dev (dict):
-        *Deprecated kwarg.* Development only. Dict of kwargs for internal debug plots.
     silent (bool):
         If True, suppresses all progress output. None is treated as False (default=None).
 
@@ -1573,7 +1615,7 @@ def detect_cluster_cells(
     -------
     grid (aabpl.Grid):
         The Grid object used for the search, with spatial cluster polygons stored at
-        ``grid.clustering``. Boolean cluster columns ``{c}{cluster_suffix}`` and radius
+        ``grid.clustering``. Boolean cluster columns ``{c}_cluster_{stat}_{r}`` and radius
         aggregates ``{c}{suffix}`` are appended to ``pts``.
     """
     # backward-compat: spacing= was renamed to cell_size=
@@ -1880,20 +1922,75 @@ def detect_cluster_cells_from_labeled_pts(
     **kwargs,
 ):
     """
-    Build spatial cell-clusters from points that are ALREADY labelled as clustered.
+    Build spatial cell-clusters from points that are already labelled as clustered,
+    skipping the radius search and null distribution entirely.
 
-    Unlike ``detect_cluster_cells`` this skips the radius search AND the random null
-    distribution entirely. The caller supplies ``pts`` with a boolean column
-    ``is_cluster_column`` (default ``'cluster'``) marking which points belong to a
-    cluster. The points are assigned to grid cells, per-cell mass is aggregated for
-    the column(s) in ``c`` (defaults to counting the clustered points), and contiguous
-    clustered cells are merged into clusters and output exactly as in
-    ``detect_cluster_cells``.
+    The caller supplies ``pts`` with a boolean column (``is_cluster_column``) marking
+    which points belong to a cluster. Those points are assigned to output grid cells,
+    per-cell mass is aggregated for the column(s) in ``c`` (defaults to counting
+    clustered points), and contiguous clustered cells are merged into spatial cluster
+    polygons exactly as in ``detect_cluster_cells``.
 
-    Parameters mirror ``detect_cluster_cells`` minus all null-distribution arguments
-    (``k_th_percentile``, ``n_random_points``, ``sample_area`` ...).
+    Use this when you have already run ``detect_cluster_pts`` (or any other method to
+    label points) and only need the cell-aggregation and polygon-building step.
 
-    Returns the Grid with cluster polygons at ``grid.clustering``.
+    Args:
+    -------
+    pts (pandas.DataFrame):
+        Points with a boolean cluster-membership column. Results are appended in-place.
+    crs (str):
+        CRS of the coordinates in ``pts``, e.g. ``'EPSG:4326'``.
+        Pass ``crs=''`` for Cartesian coordinates already in the same units as ``r``.
+    r (float):
+        Search radius in metres (or coordinate units when ``crs=''``). Determines the
+        internal search grid resolution; no actual radius search is performed.
+    c (str or list):
+        Column(s) to aggregate per output cell. If empty, the ``is_cluster_column``
+        boolean is summed (i.e. clustered-point count per cell).
+    is_cluster_column (str):
+        Name of the boolean column in ``pts`` that marks clustered points (default=``'cluster'``).
+    cluster_suffix (str):
+        Suffix appended to each column in ``c`` to form the boolean cluster-indicator
+        column names (default=``'_cluster'``).
+    exclude_self (bool):
+        If True, each point's own value is excluded from its cell aggregate (default=True).
+    x (str):
+        Column name of the x-coordinate (longitude) in ``pts`` (default=``'lon'``).
+    y (str):
+        Column name of the y-coordinate (latitude) in ``pts`` (default=``'lat'``).
+    row_name (str):
+        Name for the grid row-index column appended to ``pts`` (default=``'id_y'``).
+    col_name (str):
+        Name for the grid column-index column appended to ``pts`` (default=``'id_x'``).
+    contingency (int or tuple):
+        Controls how adjacent clustered cells are merged. An int sets queen contingency
+        (includes diagonals); pass ``(queen, rook)`` for explicit control (default=1).
+    merge_dist (None | float | tuple | list of tuples):
+        Distance threshold(s) for merging clusters after contingency merging.
+        Same format as ``detect_cluster_cells`` (default=None).
+    min_cluster_share (float or tuple):
+        Minimum share of clustered points a cluster must represent to be retained.
+        Pass a float or ``(after_contingency, after_merge_dist, after_convex)`` tuple
+        (default=``(0.0, 0.0, 0.0)``).
+    make_convex (bool):
+        If True, all cells within the convex hull of each cluster are added to it (default=True).
+    cell_size (float):
+        Output cell size in metres. Defaults to ``r/3`` (default=None).
+    suffix (str):
+        Suffix for the per-cell aggregate column names. Defaults to ``'_sum_{r}'`` (default=None).
+    proj_crs (str):
+        Metric CRS used internally. ``'auto'`` selects the appropriate UTM zone (default=``'auto'``).
+    keep_cols (bool):
+        If False, intermediate columns are removed from ``pts`` before returning (default=False).
+    overwrite (bool):
+        If True, existing output columns are overwritten (default=False).
+    silent (bool):
+        If True, suppresses all progress output (default=None).
+
+    Returns:
+    -------
+    grid (aabpl.Grid):
+        Grid object with spatial cluster polygons at ``grid.clustering``.
     """
     # backward-compat: spacing= was renamed to cell_size=
     if 'spacing' in kwargs:

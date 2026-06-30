@@ -126,7 +126,7 @@ def _detect_cluster_pts_multi(
         x=x, y=y, grid=last_grid,
         min_pts_to_sample_cell=min_pts_to_sample_cell, no_plot=True,
     )
-    intersect_polygon_with_grid(grid=last_grid)
+    intersect_polygon_with_grid(grid=last_grid, weight_valid_area=weight_valid_area)
 
     grids_by_radius = last_grid._mr_grids
     k_th_percentiles = (

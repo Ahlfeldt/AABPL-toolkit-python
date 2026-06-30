@@ -23,6 +23,21 @@ from aabpl.utils.intersections import circle_line_segment_intersection
 from aabpl.utils.cell_geometry import (classify_disk_cells, get_cells_by_lvl_ovlpd_by_cell_buffer)
 from aabpl.testing.test_performance import time_func_perf
 from aabpl.utils.progress import progress_print
+
+_shapely2_warning_shown = False
+
+def _warn_shapely1_once():
+    global _shapely2_warning_shown
+    if not _shapely2_warning_shown:
+        _shapely2_warning_shown = True
+        progress_print(
+            "WARNING: Shapely < 2.0 detected. This package was developed for Shapely 2.0+ "
+            "and runs significantly faster with it. The following functions have major "
+            "performance drawbacks on Shapely 1.x: buff_cells sample area construction "
+            "(scales as O(n_occupied_cells) with slow sequential buffering) and "
+            "intersect_polygon_with_grid (unprepared polygon, O(n_vertices) per cell query). "
+            "Upgrade with: pip install 'shapely>=2.0'"
+        )
 # TODO make individual function for each hull type?
 # TODO make clever use of buffered cells s.t. polygon check is only performed in edge cases
 
@@ -191,7 +206,7 @@ def clip_polygon_to_grid(
 def intersect_polygon_with_grid(
         grid,
         rel_tol = 0.00000,
-
+        weight_valid_area = None,
 ):
     _si = grid._search_internals
     grid.sample_col_min = sample_col_min = int((grid.sample_area.bounds[0] - _si.bounds.xmin) // _si.spacing)
@@ -234,10 +249,13 @@ def intersect_polygon_with_grid(
     _ormax = _mceil((_by1 - _oy) / _sy)
     _out_fully = set()
     _out_partly = set()
+    _bfrac = {}
     try:
         from shapely import box as _shapely_box
         from shapely import contains_properly as _shapely_contains_properly
         from shapely import intersects as _shapely_intersects
+        from shapely import prepare as _shapely_prepare
+        _shapely_prepare(grid.sample_area)
         _R, _C = _np_mgrid[_ormin:_ormax+1, _ocmin:_ocmax+1]
         _rf, _cf = _R.ravel(), _C.ravel()
         _CHUNK = 500_000
@@ -252,7 +270,34 @@ def intersect_polygon_with_grid(
             _partly = ~_fully & _shapely_intersects(grid.sample_area, _boxes)
             _out_fully.update(zip(_rf_c[_fully].tolist(), _cf_c[_fully].tolist()))
             _out_partly.update(zip(_rf_c[_partly].tolist(), _cf_c[_partly].tolist()))
+        if weight_valid_area:
+            from shapely import intersection as _shapely_intersection
+            from shapely import area as _shapely_area_arr
+            _s_ormin = max(0, int(_mfloor((_by0 - _y0) / _sp)))
+            _s_ormax = int(_mceil((_by1 - _y0) / _sp))
+            _s_ocmin = max(0, int(_mfloor((_bx0 - _x0) / _sp)))
+            _s_ocmax = int(_mceil((_bx1 - _x0) / _sp))
+            _sR, _sC = _np_mgrid[_s_ormin:_s_ormax+1, _s_ocmin:_s_ocmax+1]
+            _srf, _scf = _sR.ravel(), _sC.ravel()
+            for _i in range(0, len(_srf), _CHUNK):
+                _sl = slice(_i, _i + _CHUNK)
+                _srf_c, _scf_c = _srf[_sl], _scf[_sl]
+                _sboxes = _shapely_box(
+                    _x0 + _scf_c * _sp, _y0 + _srf_c * _sp,
+                    _x0 + (_scf_c + 1) * _sp, _y0 + (_srf_c + 1) * _sp,
+                )
+                _partly_s = (
+                    ~_shapely_contains_properly(grid.sample_area, _sboxes)
+                    & _shapely_intersects(grid.sample_area, _sboxes)
+                )
+                _partly_srf, _partly_scf = _srf_c[_partly_s], _scf_c[_partly_s]
+                if len(_partly_srf):
+                    _isects = _shapely_intersection(grid.sample_area, _sboxes[_partly_s])
+                    _fracs = _shapely_area_arr(_isects) / (_sp * _sp)
+                    for _r, _c, _f in zip(_partly_srf.tolist(), _partly_scf.tolist(), _fracs.tolist()):
+                        _bfrac[(_r, _c)] = float(_f)
     except ImportError:
+        _warn_shapely1_once()
         from shapely.prepared import prep as _prep
         _prep_area = _prep(grid.sample_area)
         for _r in range(_ormin, _ormax + 1):
@@ -292,6 +337,18 @@ def intersect_polygon_with_grid(
     
     
 
+    if not weight_valid_area:
+        # No area weighting requested — skip the expensive recursive polygon clipping.
+        # output_cells_fully_valid/partly_valid (set above) are sufficient for the
+        # null-distribution fast path; _search_internals fields are only needed by
+        # the weight_valid_area code path in disk_aggregation and null_distribution.
+        grid._search_internals.cell_to_poly = {}
+        grid._search_internals.cell_to_poly_partly_valid = {}
+        grid._search_internals.cells_fully_valid = set()
+        grid._search_internals.cells_partly_valid_max_lvl = set()
+        return
+
+    grid._search_internals.boundary_cell_valid_fraction = _bfrac
     lvls_to_store = True
 
     cell_to_poly = clip_polygon_to_grid(
@@ -637,28 +694,19 @@ def infer_sample_area_from_pts(
                 y0 = oy + row * sy; y1 = y0 + sy
                 return ((x0, y0), (x1, y0), (x1, y1), (x0, y1))
 
-            polygons = [[_out_cell_poly(row, col)] for row, col in _cells]
-            
-            # THIS SECTION IS REDUNDANT BECAUSE IT IS HANDLED IN intersect_polygon_with_grid
-            # buffer/spacing
-            # maybe create one np array arround with coords of buffered cell around (0,0) and then add centroids to it 
-            # (cntd_cells, ovlpd_cells
-            # ) = get_cells_by_lvl_ovlpd_by_cell_buffer(grid_spacing=grid._search_spacing, r=buffer, nest_depth=0)
-            # cells_fully_valid = set([(0,(row,col)) for row,col in id_to_pt_ids])
-            
-            # cells_partly_valid = set()
-            # for row,col in id_to_pt_ids:
-            #     for lvl,(d_row,d_col) in cntd_cells:
-            #         tp = int if lvl==0 else float
-            #         cells_fully_valid.add( (lvl, (tp(row+d_row), tp(col+d_col))) )
-            #     for lvl,(d_row,d_col) in ovlpd_cells:
-            #         tp = int if lvl==0 else float
-            #         cells_partly_valid.add( (lvl, (tp(row+d_row), tp(col+d_col))) )        
-            # cells_partly_valid.difference_update(cells_fully_valid)
-            # grid.cells_fully_valid = cells_fully_valid
-            # grid.cells_partly_valid = cells_partly_valid
-
-            sample_poly = _shapely_MultiPolygon(polygons).buffer(buffer, quad_segs=3)
+            try:
+                from shapely import box as _shp_box, buffer as _shp_buffer, unary_union as _shp_union
+                import numpy as _np_local
+                _rc = _np_local.array(_cells)
+                _cell_boxes = _shp_box(
+                    ox + _rc[:, 1] * sx, oy + _rc[:, 0] * sy,
+                    ox + (_rc[:, 1] + 1) * sx, oy + (_rc[:, 0] + 1) * sy,
+                )
+                sample_poly = _shp_union(_shp_buffer(_cell_boxes, buffer, quad_segs=3))
+            except (ImportError, Exception):
+                _warn_shapely1_once()
+                polygons = [[_out_cell_poly(row, col)] for row, col in _cells]
+                sample_poly = _shapely_MultiPolygon(polygons).buffer(buffer, quad_segs=3)
             # don't simplify this shape
         area_missing_from_hull = 0
            

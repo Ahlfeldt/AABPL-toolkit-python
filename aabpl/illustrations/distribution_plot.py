@@ -569,9 +569,11 @@ def create_distribution_plot(
                     _max.set_position([_p.x0, _p.y0 + _shift, _p.width, _p.height])
             fig.canvas.draw()
 
-        if r is not None:
+        _r_indicator = _col_meta_dist.get(colname, {}).get('r', r)
+        _r_indicator_ax = ax_rnd if maps_side_by_side else ax_pts
+        if _r_indicator is not None:
             draw_radius_indicator(
-                fig, ax_pts, r,
+                fig, _r_indicator_ax, _r_indicator,
                 xmin=_ax_xmin, xmax=_ax_xmax, ymin=_ax_ymin, ymax=_ax_ymax,
                 placement='y',
             )

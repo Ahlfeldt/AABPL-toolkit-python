@@ -117,6 +117,9 @@ def search_and_aggregate(
             if (int(row_id), int(col_id)) not in cells_rndm_sample
         )
         invalid_keys = set(int(codec.key(0, rr, cc)) for rr, cc in invalid_cells)
+        _bfrac_raw = getattr(grid._search_internals, 'boundary_cell_valid_fraction', {})
+        _bkeys_frac = {int(codec.key(0, int(r), int(c))): f for (r, c), f in _bfrac_raw.items()}
+        _bkeys_set = set(_bkeys_frac)
         # invalid-cell membership is a level-0 (row,col) test, so force the level to 0.
         # cells may be float32 (N,3) arrays or legacy list-of-tuples; handle both.
         def _l0_offset(cells):
@@ -431,6 +434,15 @@ def search_and_aggregate(
 
     # ---- valid-area term (per point; only built when weighting) ----------------
     if weight_valid_area:
+        progress_print(
+            "NOTE: weight_valid_area is still in development. Valid/invalid cells are "
+            "currently determined by data density (cells with too few points are treated "
+            "as invalid) rather than directly from the sample_area polygon geometry. "
+            "Results may be inaccurate when data coverage and the polygon boundary diverge."
+        )
+        _boundary_cntd_area = None
+        _boundary_overlap_cells_weighted = None
+        _boundary_overlap_area = None
         def invalid_cntd_area(cell_region_id, home_key):
             # NOTE: contained cells are treated as binary (fully valid OR fully invalid).
             # Cells that straddle the sample_area boundary but were classified as fully
@@ -454,6 +466,11 @@ def search_and_aggregate(
             if r2 < 2 * grid_spacing ** 2:
                 progress_print("WARNING: the precise valid-area method assumes r >= sqrt(2)*grid_spacing; "
                       "for smaller radii the valid area may be inaccurate.")
+            if _bkeys_frac:
+                progress_print("WARNING: weight_valid_area='precise' does not yet correct for cells that "
+                      "straddle the sample_area boundary; those cells are treated as fully valid, "
+                      "causing a slight upward bias in valid_area_share near the boundary. "
+                      "Use weight_valid_area='estimate' for boundary-corrected results.")
 
             def overlap_invalid_area(point_offset, point_xy, point_row, point_col, cells):
                 return sum(compute_disk_cell_overlap(
@@ -471,6 +488,34 @@ def search_and_aggregate(
                 centroids = _np_array([get_cell_centroid(int(rr), int(cc)) for rr, cc in cells])
                 share = 1 - 1 / (1.0 + logit_Q * np_exp(-logit_B * (np_norm(point_xy - centroids, axis=1) / r - 1)))
                 return share.sum() * grid_spacing ** 2
+
+            if _bkeys_frac:
+                progress_print("WARNING: weight_valid_area='estimate' approximates cells that straddle "
+                      "the sample_area boundary by scaling the logit estimate by their valid-area "
+                      "fraction (computed at the level-0 search-grid resolution). This assumes the "
+                      "invalid portion is spatially uniform within the cell and may be inaccurate for "
+                      "polygon edges that cut through a cell at a steep angle.")
+
+                def _boundary_cntd_area(cell_region_id, home_key):
+                    abs_keys = cntd_l0_offset[cell_region_id] + home_key
+                    total = 0.0
+                    for k in set(int(k) for k in abs_keys) & _bkeys_set:
+                        total += (1.0 - _bkeys_frac[k]) * grid_spacing ** 2
+                    return total
+
+                def _boundary_overlap_cells_weighted(cell_region_id, home_key):
+                    abs_keys = ovlpd_l0_offset[cell_region_id] + home_key
+                    result = []
+                    for k in set(int(k) for k in abs_keys) & _bkeys_set:
+                        _, (rr, cc) = codec.decode_tuple(k)
+                        result.append((int(rr), int(cc), 1.0 - _bkeys_frac[k]))
+                    return result
+
+                def _boundary_overlap_area(point_xy, bnd_wt):
+                    centroids = _np_array([get_cell_centroid(int(rr), int(cc)) for rr, cc, _ in bnd_wt])
+                    weights = _np_array([w for _, _, w in bnd_wt])
+                    share = 1 - 1 / (1.0 + logit_Q * np_exp(-logit_B * (np_norm(point_xy - centroids, axis=1) / r - 1)))
+                    return (share * weights).sum() * grid_spacing ** 2
 
     # ---- sort points and pull the columns we loop over into arrays -------------
     if suffix is None:
@@ -521,6 +566,8 @@ def search_and_aggregate(
         sums_within_disks[start:end] += cell_sum + sum_over_cells(covered_cell_keys(cntd_offset_by_region[region_and_trgl[start]], hk))
         if weight_valid_area:
             invalid_area[start:end] += invalid_cntd_area(cell_region[start], hk)
+            if _boundary_cntd_area is not None:
+                invalid_area[start:end] += _boundary_cntd_area(cell_region[start], hk)
         if end - 1 >= next_threshold:
             next_threshold = progress.update(end - 1)
 
@@ -546,6 +593,11 @@ def search_and_aggregate(
                 for i in range(start, end):
                     invalid_area[i] += overlap_invalid_area(
                         point_offset[i], point_xy[i], rows[i], cols[i], bad_cells)
+            if _boundary_overlap_cells_weighted is not None:
+                bnd_wt = _boundary_overlap_cells_weighted(cell_region[start], hk)
+                if bnd_wt:
+                    for i in range(start, end):
+                        invalid_area[i] += _boundary_overlap_area(point_xy[i], bnd_wt)
         if end - 1 >= next_threshold:
             next_threshold = progress.update(end - 1)
     progress.done()
