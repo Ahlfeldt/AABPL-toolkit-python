@@ -1586,7 +1586,7 @@ def detect_cluster_cells(
         if 'min_cluster_share_after_convex'        in _dep_cluster: min_cluster_share_after_convex        = float(_dep_cluster['min_cluster_share_after_convex'])
     _max_output_cells = kwargs.pop('max_output_cells', None)
     # Backwards-compat aliases
-    _dep_dcc = {k: kwargs.pop(k) for k in ('weight_valid_area', 'sample_area') if k in kwargs}
+    _dep_dcc = {k: kwargs.pop(k) for k in ('weight_valid_area', 'weight_area', 'sample_area') if k in kwargs}
     if _dep_dcc:
         progress_print(
             f"DeprecationWarning: kwarg(s) {sorted(_dep_dcc)} are deprecated. "

@@ -1,13 +1,25 @@
-from numpy import array as _np_array
+﻿from numpy import array as _np_array
 from pandas import (DataFrame as _pd_DataFrame, cut as _pd_cut, concat as _pd_concat) 
 from aabpl.utils.misc import DataFrameRelation, arr_to_tpls, find_column_name
 from aabpl.utils.cell_geometry import classify_disk_cells
 from .region_tree import gen_weak_order_rel_to_convex_set
-from ..point_assignment import assign_points_to_cells, aggregate_point_data_to_cells
+from ..point_assignment import assign_points_to_cells, aggregate_point_data_to_cells, aggregate_point_data_to_cells_adaptive_nd
 from ..point_region_assignment import assign_points_to_mirco_regions
-from .disk_aggregation import search_and_aggregate
+from .disk_aggregation_chunk import search_and_aggregate as _search_and_aggregate_base
+from .disk_aggregation_chunk_adaptive_nd import search_and_aggregate as _search_and_aggregate_adaptive
+
 from aabpl.testing.test_performance import time_func_perf
 from aabpl import config as _cfg
+
+def search_and_aggregate(*args, **kwargs):
+    # FIXED_NEST_DEPTH now routes through the adaptive file too: nd_choice.py's
+    # best_nd_tag short-circuits to the fixed tag when set, so the adaptive
+    # file's planning (col-splitting, chunking, etc.) degenerates to "always
+    # this one nd" instead of choosing per-chunk. This keeps a single
+    # column-split/chunking implementation to maintain instead of two parallel
+    # ones. _search_and_aggregate_base (disk_aggregation_chunk.py) is kept
+    # importable but unused — left in place rather than deleted.
+    return _search_and_aggregate_adaptive(*args, **kwargs)
 
 
 ################ DiskSearchSource ######################################################################################
@@ -124,6 +136,21 @@ class DiskSearchTarget(DiskSearchBase):
             self,
             silent
     ):
+        if getattr(_cfg, 'USE_ADAPTIVE_ND_AGGREGATION', False):
+            _r = self.grid._search_class.r
+            _spacing = self.grid._search_internals.spacing
+            return aggregate_point_data_to_cells_adaptive_nd(
+                grid=self.grid,
+                pts=self.pts,
+                y=self.y,
+                x=self.x,
+                c=self.c,
+                row_name=self.row_name,
+                col_name=self.col_name,
+                nest_depth=self.grid._search_internals.nest_depth,
+                sr=_r / _spacing,
+                silent=silent,
+            )
         return aggregate_point_data_to_cells(
             grid=self.grid,
             pts=self.pts,
@@ -148,24 +175,29 @@ class DiskSearch(object):
         r:float=0.0075,
         nest_depth:int=None,
         exclude_self:bool=True,
-        weight_valid_area:str=None,
+        area_weight:str=None,
+        weight_valid_area:str=None,  # deprecated alias
         include_boundary:bool=False,
     ):
-            
+
         """
-        
+
         """
+        if weight_valid_area is not None and area_weight is None:
+            from aabpl.utils.progress import progress_print
+            progress_print("Deprecation: 'weight_valid_area' has been renamed to 'area_weight'.")
+            area_weight = weight_valid_area
         # link to grid
         grid._search_class = self
         self.grid = grid
         self.exclude_self = exclude_self
-        self.weight_valid_area = weight_valid_area
+        self.area_weight = area_weight
         self.include_boundary = include_boundary
 
         self.update_search_params(
             grid=grid,
             exclude_self=exclude_self,
-            weight_valid_area=weight_valid_area,
+            area_weight=area_weight,
             r=r,
             nest_depth=nest_depth,
             include_boundary=include_boundary,
@@ -178,7 +210,7 @@ class DiskSearch(object):
         self,
         grid,
         exclude_self:bool=None,
-        weight_valid_area:str=None,
+        area_weight:str=None,
         r:float=None,
         nest_depth:int=None,
         include_boundary:bool=None,
@@ -186,8 +218,8 @@ class DiskSearch(object):
     ):
         if exclude_self is not None:
             self.exclude_self = exclude_self
-        if weight_valid_area is not None:
-            self.weight_valid_area = weight_valid_area
+        if area_weight is not None:
+            self.area_weight = area_weight
         if relation_tgt_to_src is not None:
             self.relation_tgt_to_src = relation_tgt_to_src
         
@@ -417,7 +449,7 @@ class DiskSearch(object):
             cell_region_name=self.source.cell_region_name,
             suffix=self.source.suffix,
             exclude_self=self.exclude_self,
-            weight_valid_area=self.weight_valid_area,
+            area_weight=self.area_weight,
             plot_pt_disk=plot_pt_disk,
             silent=silent,
         )

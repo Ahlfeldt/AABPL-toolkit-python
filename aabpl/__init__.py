@@ -17,7 +17,7 @@ from .main import (
     detect_cluster_cells_from_labeled_pts,
 )
 from .search.grid_class import Grid
-from .search.sample_area import infer_sample_area_from_pts
+from .search.study_area import infer_study_area_from_pts, infer_sample_area_from_pts
 from .search.null_distribution import draw_random_coords
 
 __version__ = version('aabpl')

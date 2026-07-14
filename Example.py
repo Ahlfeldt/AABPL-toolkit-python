@@ -38,9 +38,9 @@ grid = detect_cluster_cells(
     c='employment',                     # column(s) to aggregate within radius; c=['col1','col2'] for multiple
     stat='sum',                         # aggregation statistic: sum|count|mean|std|variance|cv|skewness|kurtosis
     exclude_self=True,                  # exclude the point's own value from its radius sum
-    sample_area='buff_cells,min_pts=1,buf=30000',  # region used to draw null-distribution random points; call aabpl.main.resolve_sample_area.params() for all options
+    study_area='cells,min_pts=1,buf=30000',  # region used to draw null-distribution random points; call aabpl.main.resolve_study_area.params() for all options
                                         # alternatives: 'concave,concavity=0.5' | 'convex' | 'bbox' | 'grid' | Shapely Polygon/MultiPolygon
-    weight_valid_area=None,             # edge-effect correction near sample boundary: None | 'estimate' | 'precise'
+    area_weight=None,                   # edge-effect correction near sample boundary: None | 'exact' (precise, slower) | 'logit' | 'flat' | 'binary' (cheaper approximations)
     k_th_percentile=99.5,               # cluster threshold = this percentile of the null distribution (0–100); lower → more clusters
     null_distribution=100_000,          # int → draw N random points uniformly within sample area for null distribution; or pass an (N,2) array/DataFrame of pre-drawn coords (x first)
     random_seed=0,                      # for reproducibility; None = different result each run

@@ -123,9 +123,9 @@ grid = detect_cluster_cells(
     c='employment',                     # column(s) to aggregate within radius; c=['col1','col2'] for multiple
     stat='sum',                         # aggregation statistic: sum|count|mean|std|variance|cv|skewness|kurtosis
     exclude_self=True,                  # exclude the point's own value from its radius sum
-    sample_area='buff_cells,min_pts=1,buf=30000',  # region used to draw null-distribution random points; call aabpl.main.resolve_sample_area.params() for all options
+    study_area='cells,min_pts=1,buf=30000',  # region used to draw null-distribution random points; call aabpl.main.resolve_study_area.params() for all options
                                         # alternatives: 'concave,concavity=0.5' | 'convex' | 'bbox' | 'grid' | Shapely Polygon/MultiPolygon
-    weight_valid_area=None,             # edge-effect correction near sample boundary: None | 'estimate' | 'precise'
+    area_weight=None,                   # edge-effect correction near sample boundary: None | 'exact' (precise, slower) | 'logit' | 'flat' | 'binary' (cheaper approximations)
     k_th_percentile=99.5,               # cluster threshold = this percentile of the null distribution (0–100); lower → more clusters
     null_distribution=100_000,          # int → draw N random points uniformly within sample area for null distribution; or pass an (N,2) array/DataFrame of pre-drawn coords (x first)
     random_seed=0,                      # for reproducibility; None = different result each run
@@ -216,7 +216,7 @@ Variable names will then be assigned by the script. Of course, with some adjustm
 
 
 
-An **optional input** is a shapefile (or Shapely Polygon/MultiPolygon) that defines the sampling area of the counterfactual distribution, passed via the `sample_area` parameter. Ahlfeldt, Albers, and Behrens (2024) exclude residential and undevelopable areas. Such a shapefile could also restrict the sampling area for counterfactual spatial distributions to inhabitable areas or to areas zoned for the development of tall buildings. The parameter also accepts a method name string with optional inline parameters, e.g. `'buff_cells,min_pts=1'` or `'concave,concavity=0.5,buf=1000'`. Call `aabpl.resolve_sample_area.params()` at any time for a full list of methods and their parameters.
+An **optional input** is a shapefile (or Shapely Polygon/MultiPolygon) that defines the sampling area of the counterfactual distribution, passed via the `study_area` parameter. Ahlfeldt, Albers, and Behrens (2024) exclude residential and undevelopable areas. Such a shapefile could also restrict the sampling area for counterfactual spatial distributions to inhabitable areas or to areas zoned for the development of tall buildings. The parameter also accepts a method name string with optional inline parameters, e.g. `'cells,min_pts=1'` or `'concave,concavity=0.5,buf=1000'`. Call `aabpl.resolve_study_area.params()` at any time for a full list of methods and their parameters.
 
 
 
@@ -277,8 +277,8 @@ All functions are available directly on the `aabpl` module after `import aabpl`.
 | **`detect_cluster_cells(pts, crs, r, c, ...)`** | **Core function.** Full pipeline: runs `radius_search`, builds a null distribution from random points, delineates contiguous clustered cells into cluster polygons. Returns a `Grid` object; polygons at `grid.clustering`. |
 | `detect_cluster_pts(pts, crs, r, c, ...)` | Labels each point as clustered or not. Same pipeline as `detect_cluster_cells` but skips the output grid and polygon steps. |
 | `detect_cluster_cells_from_labeled_pts(pts, crs, r, ...)` | Delineates cluster polygons from points with a pre-existing cluster label column, skipping the radius search and null distribution. |
-| `infer_sample_area_from_pts(pts, grid, ...)` | Derives the valid sample area polygon from the point pattern. Used internally; available for inspection. |
-| `draw_random_coords(n_pts, sample_area, crs, ...)` | Draws `n_pts` random coordinate pairs. `sample_area` accepts a Shapely Polygon/MultiPolygon or a plain coordinate list; coordinates outside it are rejected. Set `crs` to reproject the geometry from a geographic CRS (e.g. `'EPSG:4326'`) into the best UTM zone automatically — the same reprojection used internally by `detect_cluster_pts`. Pass `sample_area=None` with a custom `coord_generator(n, rng)` to accept all produced coordinates. Returns a two-column DataFrame ready to pass as `null_distribution` to `detect_cluster_pts` / `detect_cluster_cells`. |
+| `infer_study_area_from_pts(pts, grid, ...)` | Derives the valid sample area polygon from the point pattern. Used internally; available for inspection. |
+| `draw_random_coords(n_pts, study_area, crs, ...)` | Draws `n_pts` random coordinate pairs. `study_area` accepts a Shapely Polygon/MultiPolygon or a plain coordinate list; coordinates outside it are rejected. Set `crs` to reproject the geometry from a geographic CRS (e.g. `'EPSG:4326'`) into the best UTM zone automatically — the same reprojection used internally by `detect_cluster_pts`. Pass `study_area=None` with a custom `coord_generator(n, rng)` to accept all produced coordinates. Returns a two-column DataFrame ready to pass as `null_distribution` to `detect_cluster_pts` / `detect_cluster_cells`. |
 | `radius_sum(pts, crs, r, c, ...)` | Shorthand for `radius_search(..., stat='sum')`. |
 | `radius_count(pts, crs, r, c, ...)` | Shorthand for `radius_search(..., stat='count')`. |
 | `radius_mean(pts, crs, r, c, ...)` | Shorthand for `radius_search(..., stat='mean')`. |
@@ -303,7 +303,7 @@ The `grid` object returned by `detect_cluster_cells` exposes the following metho
 | `grid.plot.cell_aggregates(filename)` | Heatmap of raw aggregated values per output cell. |
 | `grid.plot.vars(filename)` | Scatter of source points coloured by any column value. |
 | `grid.plot.rand_dist(filename)` | Observed vs null distribution — use to calibrate `k_th_percentile`. |
-| `grid.plot_sample_area(filename)` | Map of the sampling region used for the null distribution. |
+| `grid.plot_study_area(filename)` | Map of the sampling region used for the null distribution. |
 | `grid.save_cell_clusters(filename, file_format)` | Export cluster polygons as shapefile / GeoJSON / GeoParquet / CSV. |
 | `grid.save_sparse_grid(filename, file_format)` | Export non-empty grid cells with cluster IDs and aggregates. |
 | `grid.create_sparse_grid_df()` | Return non-empty grid cells as a GeoDataFrame for custom analysis without saving to disk. |

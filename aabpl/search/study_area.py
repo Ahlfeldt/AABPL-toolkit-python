@@ -24,6 +24,179 @@ from aabpl.utils.cell_geometry import (classify_disk_cells, get_cells_by_lvl_ovl
 from aabpl.testing.test_performance import time_func_perf
 from aabpl.utils.progress import progress_print
 
+# ---------------------------------------------------------------------------
+# Study-area spec parsing
+# ---------------------------------------------------------------------------
+
+_STUDY_AREA_ALIASES = {
+    'buff_cells_min_pts': 'buff_cells',  # old name → canonical (legacy)
+    'buff_non_empty':     'buff_non_empty_cells',
+    'concave_hull':       'concave',
+    'convex_hull':        'convex',
+    'bbox':               'bounding_box',
+}
+
+_STUDY_AREA_SPEC_DOCS = (
+    "study_area spec string:  'method'  or  'method,key=val,key=val'\n"
+    "\n"
+    "Parameter shorthands: min_pts= → m=, buffer= → b= or buf=, quad_segs= → q= or qs=.\n"
+    "\n"
+    "Methods and parameters\n"
+    "----------------------------------------------------------------------\n"
+    "cells  [also: buff_cells (legacy), buff_non_empty_cells (legacy)]\n"
+    "    Union of cells that contain >= min_pts data points, with optional buffer.\n"
+    "    min_pts=<int>   (m=)   Minimum points per cell (default: 1 = non-empty).\n"
+    "    buffer=<float>  (b=)   Buffer radius in metres (default: 0).\n"
+    "    quad_segs=<int> (q=)   Buffer arc segments per quarter circle (default: 3).\n"
+    "\n"
+    "buff_pts\n"
+    "    Buffer around every individual point. (!) Slow for large datasets.\n"
+    "    buffer=<float>  (b=)   Buffer radius in metres (default: 0).\n"
+    "    quad_segs=<int> (q=)   Buffer arc segments per quarter circle (default: derived from tol).\n"
+    "\n"
+    "concave / concave_hull\n"
+    "    Concave hull of all points + buffer.\n"
+    "    concavity=<float>  Shape tightness: 0=very concave, large=convex (default: 1).\n"
+    "    buffer=<float> (b=)    Buffer radius in metres (default: 0).\n"
+    "    quad_segs=<int> (q=)   Buffer arc segments per quarter circle (default: derived from tol).\n"
+    "    tol=<float>            Douglas-Peucker simplification tolerance (default: None).\n"
+    "\n"
+    "convex / convex_hull\n"
+    "    Convex hull of all points + buffer.\n"
+    "    buffer=<float>  (b=)   Buffer radius in metres (default: 0).\n"
+    "    quad_segs=<int> (q=)   Buffer arc segments per quarter circle (default: derived from tol).\n"
+    "    tol=<float>            Simplification tolerance (default: None).\n"
+    "\n"
+    "bounding_box / bbox\n"
+    "    Axis-aligned bounding box of all points + buffer.\n"
+    "    buffer=<float>  (b=)   Buffer radius in metres (default: 0).\n"
+    "    quad_segs=<int> (q=)   Buffer arc segments per quarter circle (default: 3).\n"
+    "\n"
+    "grid\n"
+    "    Full grid extent (no parameters).\n"
+    "\n"
+    "----------------------------------------------------------------------\n"
+    "Examples\n"
+    "    study_area='cells'\n"
+    "    study_area='cells,min_pts=2,buffer=500'\n"
+    "    study_area='cells,m=1,b=500'          # shorthand\n"
+    "    study_area='concave,concavity=0.5,buffer=1000,tol=50'\n"
+    "    study_area='convex'\n"
+    "    study_area='bounding_box'\n"
+    "\n"
+    "You can also pass a Shapely Polygon or MultiPolygon directly (must be\n"
+    "in the same projected CRS as the pts coordinates).\n"
+)
+
+
+def _parse_study_area_spec(spec):
+    "Parse 'method,key=val,key=val' into (method, {key: val})."
+    if ',' not in spec or '=' not in spec:
+        return _STUDY_AREA_ALIASES.get(spec, spec), {}
+    parts = spec.split(',')
+    method = _STUDY_AREA_ALIASES.get(parts[0].strip(), parts[0].strip())
+    params = {}
+    for part in parts[1:]:
+        if '=' in part:
+            k, v = part.split('=', 1)
+            params[k.strip()] = v.strip()
+    _PARAM_ALIASES = {'m': 'min_pts', 'b': 'buffer', 'buf': 'buffer', 'q': 'quad_segs', 'qs': 'quad_segs'}
+    params = {_PARAM_ALIASES.get(k, k): v for k, v in params.items()}
+    return method, params
+
+
+def _infer_sa_kwargs(hull_type, parsed, r, min_pts_fallback=1):
+    """Resolve raw parsed params into clean kwargs for infer_study_area_from_pts.
+
+    Returns (hull_type_internal, kwargs_dict, log_parts) where log_parts is a
+    list of human-readable 'key=val' strings for progress printing.
+    """
+    # Normalise legacy hull_type names → 'cells'
+    if hull_type == 'buff_non_empty_cells':
+        progress_print("study_area='buff_non_empty_cells' is deprecated. Use study_area='cells,m=1' instead.")
+        hull_type = 'cells'
+        parsed.setdefault('min_pts', '1')
+    _buf_explicit = 'buffer' in parsed
+    if hull_type == 'buff_cells':
+        if not _buf_explicit:
+            progress_print(
+                "study_area='buff_cells' is deprecated. Use 'cells' (default buffer=0) "
+                "or 'cells,buffer=<val>' to set an explicit buffer."
+            )
+        hull_type = 'cells'
+
+    _BREAKING_CHANGE_TYPES = ('convex', 'bounding_box', 'concave', 'buff_pts')
+    if hull_type in _BREAKING_CHANGE_TYPES and not _buf_explicit:
+        progress_print(
+            f"Note: default buffer for study_area='{hull_type}' changed from r to 0. "
+            "To restore the previous behaviour pass buffer=r (or b=r) explicitly."
+        )
+
+    _buf_default = 0.0
+    buf        = float(parsed['buffer'])    if _buf_explicit         else _buf_default
+    quad_segs  = int(parsed['quad_segs'])   if 'quad_segs' in parsed else None
+    tol        = float(parsed['tol'])       if 'tol'   in parsed     else None
+    concavity  = float(parsed['concavity']) if 'concavity' in parsed  else 1
+    min_pts    = int(parsed['min_pts']) if 'min_pts' in parsed else (min_pts_fallback if min_pts_fallback else 1)
+
+    def _fmt_m(v):
+        if v >= 1000:
+            return f'{v/1000:.3f}'.rstrip('0').rstrip('.') + 'km'
+        return f'{v:.3f}'.rstrip('0').rstrip('.') + 'm'
+
+    log_parts = []
+    if hull_type in ('cells', 'buff_pts', 'concave', 'convex', 'bounding_box'):
+        log_parts.append(f'buffer={_fmt_m(buf)}')
+    if hull_type == 'cells':
+        log_parts.append(f'min_pts={min_pts}')
+    if hull_type in ('concave', 'convex', 'buff_pts'):
+        log_parts.append(f'tol={_fmt_m(tol if tol is not None else buf)}')
+    if hull_type == 'concave':
+        log_parts.append(f'concavity={concavity}')
+    if quad_segs is not None:
+        log_parts.append(f'quad_segs={quad_segs}')
+
+    kwargs = dict(
+        buffer=buf,
+        quad_segs=quad_segs,
+        tolerance=tol,
+        concavity=concavity,
+        min_pts_to_sample_cell=min_pts,
+    )
+    # Map 'cells' → internal name still used by infer_study_area_from_pts
+    hull_type_internal = 'buff_cells' if hull_type == 'cells' else hull_type
+    return hull_type_internal, kwargs, log_parts, buf
+
+_VALID_AW = ('exact', 'logit', 'flat', 'binary', None)
+
+def _aw_intersect_kwargs(area_weight, _bnd_frac_explicit=False):
+    """Map area_weight variant to intersect_polygon_with_grid optimisation kwargs."""
+    wva = area_weight
+    if isinstance(wva, str):
+        _AW_ALIASES = {'precise': 'exact', 'estimate': 'logit'}
+        wva = _AW_ALIASES.get(wva, wva)
+        if '=' in wva:
+            wva = wva.split('=', 1)[0]
+            _bnd_frac_explicit = True
+        if ',' in wva:
+            wva = wva.split(',', 1)[0].strip()
+    if wva == 'binary':
+        return dict(check_partly=False, compute_fractions=False,
+                    n_sample_non_fully_area_frac=0 if _bnd_frac_explicit else 100)
+    if wva == 'flat':
+        return dict(check_partly=True, compute_fractions=False,
+                    n_sample_partly_area_frac=0 if _bnd_frac_explicit else 100)
+    if wva == 'exact':
+        # exact does Shapely disk∩study_area per point — no cell decomposition needed.
+        return dict(check_partly=False, compute_fractions=False)
+    # logit — full per-cell fractions needed
+    return dict(check_partly=True, compute_fractions=True)
+
+def intersect_polygon_with_grid_aw(grid, area_weight):
+    """Wrapper: calls intersect_polygon_with_grid with kwargs derived from area_weight."""
+    intersect_polygon_with_grid(grid, area_weight=area_weight,
+                                **_aw_intersect_kwargs(area_weight))
+
 _shapely2_warning_shown = False
 
 def _warn_shapely1_once():
@@ -206,13 +379,17 @@ def clip_polygon_to_grid(
 def intersect_polygon_with_grid(
         grid,
         rel_tol = 0.00000,
-        weight_valid_area = None,
+        area_weight = None,
+        check_partly = True,
+        compute_fractions = True,
+        n_sample_partly_area_frac = 0,
+        n_sample_non_fully_area_frac = 0,
 ):
     _si = grid._search_internals
-    grid.sample_col_min = sample_col_min = int((grid.sample_area.bounds[0] - _si.bounds.xmin) // _si.spacing)
-    grid.sample_row_min = sample_row_min = int((grid.sample_area.bounds[1] - _si.bounds.ymin) // _si.spacing)
-    grid.sample_col_max = sample_col_max = int((grid.sample_area.bounds[2] - _si.bounds.xmin) // _si.spacing)
-    grid.sample_row_max = sample_row_max = int((grid.sample_area.bounds[3] - _si.bounds.ymin) // _si.spacing)
+    grid.sample_col_min = sample_col_min = int((grid.study_area.bounds[0] - _si.bounds.xmin) // _si.spacing)
+    grid.sample_row_min = sample_row_min = int((grid.study_area.bounds[1] - _si.bounds.ymin) // _si.spacing)
+    grid.sample_col_max = sample_col_max = int((grid.study_area.bounds[2] - _si.bounds.xmin) // _si.spacing)
+    grid.sample_row_max = sample_row_max = int((grid.study_area.bounds[3] - _si.bounds.ymin) // _si.spacing)
 
     col_min = int(_si.col_ids.min())
     row_min = int(_si.row_ids.min())
@@ -241,7 +418,7 @@ def intersect_polygon_with_grid(
     _oy = grid.y_steps_bounds[0]
     _sx = grid.cell_size
     _sy = grid.cell_size_y
-    _bx0, _by0, _bx1, _by1 = grid.sample_area.bounds
+    _bx0, _by0, _bx1, _by1 = grid.study_area.bounds
     from math import floor as _mfloor, ceil as _mceil
     _ocmin = max(0, _mfloor((_bx0 - _ox) / _sx))
     _ormin = max(0, _mfloor((_by0 - _oy) / _sy))
@@ -252,10 +429,10 @@ def intersect_polygon_with_grid(
     _bfrac = {}
     try:
         from shapely import box as _shapely_box
-        from shapely import contains_properly as _shapely_contains_properly
+        from shapely import contains as _shapely_contains
         from shapely import intersects as _shapely_intersects
         from shapely import prepare as _shapely_prepare
-        _shapely_prepare(grid.sample_area)
+        _shapely_prepare(grid.study_area)
         _R, _C = _np_mgrid[_ormin:_ormax+1, _ocmin:_ocmax+1]
         _rf, _cf = _R.ravel(), _C.ravel()
         _CHUNK = 500_000
@@ -266,40 +443,88 @@ def intersect_polygon_with_grid(
                 _ox + _cf_c * _sx, _oy + _rf_c * _sy,
                 _ox + (_cf_c + 1) * _sx, _oy + (_rf_c + 1) * _sy,
             )
-            _fully = _shapely_contains_properly(grid.sample_area, _boxes)
-            _partly = ~_fully & _shapely_intersects(grid.sample_area, _boxes)
+            _fully = _shapely_contains(grid.study_area, _boxes)
             _out_fully.update(zip(_rf_c[_fully].tolist(), _cf_c[_fully].tolist()))
-            _out_partly.update(zip(_rf_c[_partly].tolist(), _cf_c[_partly].tolist()))
-        if weight_valid_area:
+            if check_partly:
+                _partly = ~_fully & _shapely_intersects(grid.study_area, _boxes)
+                _out_partly.update(zip(_rf_c[_partly].tolist(), _cf_c[_partly].tolist()))
+        # --- Search-grid fraction computation (all three modes share one pass) ---
+        _need_search_pass = area_weight and (
+            compute_fractions or n_sample_partly_area_frac > 0 or n_sample_non_fully_area_frac > 0
+        )
+        if _need_search_pass:
             from shapely import intersection as _shapely_intersection
             from shapely import area as _shapely_area_arr
+            import random as _random
             _s_ormin = max(0, int(_mfloor((_by0 - _y0) / _sp)))
             _s_ormax = int(_mceil((_by1 - _y0) / _sp))
             _s_ocmin = max(0, int(_mfloor((_bx0 - _x0) / _sp)))
             _s_ocmax = int(_mceil((_bx1 - _x0) / _sp))
             _sR, _sC = _np_mgrid[_s_ormin:_s_ormax+1, _s_ocmin:_s_ocmax+1]
-            _srf, _scf = _sR.ravel(), _sC.ravel()
-            for _i in range(0, len(_srf), _CHUNK):
+            _srf_all, _scf_all = _sR.ravel(), _sC.ravel()
+            # need intersects only when boundary cells matter (not pure binary sampling)
+            _need_intersects_test = compute_fractions or n_sample_partly_area_frac > 0
+            _partly_idx_all = []
+            _nf_idx_all = []
+            # Also collect full classification to cache on grid (avoids re-running
+            # Shapely in the chunk path's per-call classification block).
+            _va_fully_rc  = set()   # (r,c) fully inside at search-grid resolution
+            _va_partly_rc = set()   # (r,c) partly inside (boundary)
+            for _i in range(0, len(_srf_all), _CHUNK):
                 _sl = slice(_i, _i + _CHUNK)
-                _srf_c, _scf_c = _srf[_sl], _scf[_sl]
+                _srf_c, _scf_c = _srf_all[_sl], _scf_all[_sl]
                 _sboxes = _shapely_box(
                     _x0 + _scf_c * _sp, _y0 + _srf_c * _sp,
                     _x0 + (_scf_c + 1) * _sp, _y0 + (_srf_c + 1) * _sp,
                 )
-                _partly_s = (
-                    ~_shapely_contains_properly(grid.sample_area, _sboxes)
-                    & _shapely_intersects(grid.sample_area, _sboxes)
+                _fin_s = _shapely_contains(grid.study_area, _sboxes)
+                _va_fully_rc.update(zip(_srf_c[_fin_s].tolist(), _scf_c[_fin_s].tolist()))
+                if _need_intersects_test:
+                    _pin_s = ~_fin_s & _shapely_intersects(grid.study_area, _sboxes)
+                    _va_partly_rc.update(zip(_srf_c[_pin_s].tolist(), _scf_c[_pin_s].tolist()))
+                    if compute_fractions:
+                        _partly_srf = _srf_c[_pin_s]; _partly_scf = _scf_c[_pin_s]
+                        if len(_partly_srf):
+                            _isects = _shapely_intersection(grid.study_area, _sboxes[_pin_s])
+                            _fracs = _shapely_area_arr(_isects) / (_sp * _sp)
+                            for _r, _c, _f in zip(_partly_srf.tolist(), _partly_scf.tolist(), _fracs.tolist()):
+                                _bfrac[(_r, _c)] = float(_f)
+                    if n_sample_partly_area_frac > 0:
+                        _partly_idx_all.extend((_i + j) for j in _pin_s.nonzero()[0].tolist())
+                if n_sample_non_fully_area_frac > 0:
+                    _nf_idx_all.extend((_i + j) for j in (~_fin_s).nonzero()[0].tolist())
+            # Store for chunk path reuse — keyed by search-grid origin + spacing
+            grid._search_internals.va_search_grid_key = (_x0, _y0, _sp)
+            grid._search_internals.va_fully_rc  = _va_fully_rc
+            grid._search_internals.va_partly_rc = _va_partly_rc if _need_intersects_test else None
+            if n_sample_partly_area_frac > 0 and _partly_idx_all:
+                _pidx = _partly_idx_all
+                if len(_pidx) > n_sample_partly_area_frac:
+                    _random.seed(0)
+                    _pidx = _random.sample(_pidx, n_sample_partly_area_frac)
+                _srfs = _srf_all[_pidx]; _scfs = _scf_all[_pidx]
+                _sboxes = _shapely_box(
+                    _x0 + _scfs * _sp, _y0 + _srfs * _sp,
+                    _x0 + (_scfs + 1) * _sp, _y0 + (_srfs + 1) * _sp,
                 )
-                _partly_srf, _partly_scf = _srf_c[_partly_s], _scf_c[_partly_s]
-                if len(_partly_srf):
-                    _isects = _shapely_intersection(grid.sample_area, _sboxes[_partly_s])
-                    _fracs = _shapely_area_arr(_isects) / (_sp * _sp)
-                    for _r, _c, _f in zip(_partly_srf.tolist(), _partly_scf.tolist(), _fracs.tolist()):
-                        _bfrac[(_r, _c)] = float(_f)
+                _fracs = _shapely_area_arr(_shapely_intersection(grid.study_area, _sboxes)) / (_sp * _sp)
+                grid._search_internals.bnd_frac_sampled = float(_fracs.mean())
+            if n_sample_non_fully_area_frac > 0 and _nf_idx_all:
+                _nfidx = _nf_idx_all
+                if len(_nfidx) > n_sample_non_fully_area_frac:
+                    _random.seed(0)
+                    _nfidx = _random.sample(_nfidx, n_sample_non_fully_area_frac)
+                _srfs = _srf_all[_nfidx]; _scfs = _scf_all[_nfidx]
+                _sboxes = _shapely_box(
+                    _x0 + _scfs * _sp, _y0 + _srfs * _sp,
+                    _x0 + (_scfs + 1) * _sp, _y0 + (_srfs + 1) * _sp,
+                )
+                _fracs = _shapely_area_arr(_shapely_intersection(grid.study_area, _sboxes)) / (_sp * _sp)
+                grid._search_internals.non_fully_valid_fraction = float(_fracs.mean())
     except ImportError:
         _warn_shapely1_once()
         from shapely.prepared import prep as _prep
-        _prep_area = _prep(grid.sample_area)
+        _prep_area = _prep(grid.study_area)
         for _r in range(_ormin, _ormax + 1):
             for _c in range(_ocmin, _ocmax + 1):
                 _cp = _shapely_Polygon([
@@ -337,11 +562,11 @@ def intersect_polygon_with_grid(
     
     
 
-    if not weight_valid_area:
+    if not area_weight:
         # No area weighting requested — skip the expensive recursive polygon clipping.
         # output_cells_fully_valid/partly_valid (set above) are sufficient for the
         # null-distribution fast path; _search_internals fields are only needed by
-        # the weight_valid_area code path in disk_aggregation and null_distribution.
+        # the area_weight code path in disk_aggregation and null_distribution.
         grid._search_internals.cell_to_poly = {}
         grid._search_internals.cell_to_poly_partly_valid = {}
         grid._search_internals.cells_fully_valid = set()
@@ -352,7 +577,7 @@ def intersect_polygon_with_grid(
     lvls_to_store = True
 
     cell_to_poly = clip_polygon_to_grid(
-        poly=grid.sample_area,
+        poly=grid.study_area,
         cell_to_poly={},
         lvls_to_store=lvls_to_store,
         min_steps=1, 
@@ -496,52 +721,138 @@ def intersect_polygon_with_grid(
 
     
 
-def infer_sample_area_from_pts(
+def resolve_study_area(
+    pts:_pd_DataFrame,
+    r:float,
+    study_area='cells,m=1,b=0',
+    crs:str=None,
+    local_crs:str=None,
+    x:str='lon',
+    y:str='lat',
+    grid=None,
+    min_pts_to_sample_cell:int=0,
+    no_plot:bool=True,
+    area_weight=None,
+):
+    """Resolve the study_area argument to a Shapely polygon in the projected CRS.
+
+    Accepts a spec string (e.g. ``'cells,m=1,b=4000'``), a Shapely Polygon /
+    MultiPolygon, or ``False`` (→ full grid bounding box, no area weighting).
+    """
+    from shapely.geometry import Polygon as _Polygon, MultiPolygon as _MPoly, GeometryCollection as _GColl
+    from aabpl.utils.crs_transformation import convert_MultiPolygon_crs
+
+    if type(study_area) is bool and study_area is False:
+        si = grid._search_internals.bounds
+        return _Polygon([
+            (si.xmin, si.ymin), (si.xmax, si.ymin),
+            (si.xmax, si.ymax), (si.xmin, si.ymax),
+        ])
+
+    if study_area is None:
+        study_area = 'grid'
+
+    if isinstance(study_area, str):
+        hull_type, parsed = _parse_study_area_spec(study_area)
+        hull_type_internal, kwargs, log_parts, _resolved_buf = _infer_sa_kwargs(
+            hull_type, parsed, r, min_pts_fallback=min_pts_to_sample_cell or 1
+        )
+        if area_weight is not None and _resolved_buf >= r:
+            progress_print(
+                f"Warning: study_area buffer ({_resolved_buf:g}m) >= radius ({r:g}m) — "
+                "all source-point disks are fully contained within the study area, so "
+                "area_weight has no effect and may introduce small numeric imprecision. "
+                "Consider passing area_weight=None."
+            )
+        _params_str = (', '.join(log_parts) + '. ') if log_parts else ''
+        # Use public display name (strip legacy internal name)
+        _display = 'cells' if hull_type_internal == 'buff_cells' else hull_type_internal
+        progress_print(f"Creating study area: method='{_display}', {_params_str}Use 'grid.study_area' to inspect.")
+        grid.update_spacing()
+        return infer_study_area_from_pts(
+            pts=pts, grid=grid, x=x, y=y,
+            hull_type=hull_type_internal,
+            plot_study_area=None,
+            **kwargs,
+        )
+
+    if isinstance(study_area, (_Polygon, _MPoly, _GColl)):
+        if crs and local_crs and crs != local_crs:
+            study_area = convert_MultiPolygon_crs(multipoly=study_area, initial_crs=crs, target_crs=local_crs)
+        return study_area
+
+    raise ValueError(
+        f"study_area must be a str spec, shapely Polygon, or shapely MultiPolygon; got {type(study_area).__name__}. "
+        "Call resolve_study_area.params() for valid string spec options."
+    )
+
+def _resolve_study_area_params():
+    print(_STUDY_AREA_SPEC_DOCS)
+resolve_study_area.params = _resolve_study_area_params
+
+
+def infer_study_area_from_pts(
         pts:_pd_DataFrame=None,
         grid=None,
         hull_type:str=['buff_non_empty_cells', 'buff_cells', 'buff_pts', 'concave','convex','bounding_box','grid'][0],
         concavity:float=1,
         buffer:float=None,
+        quad_segs:int=None,
         tolerance:float=None,
         x:str='lon',
         y:str='lat',
         crs:str=None,
         proj_crs:str='auto',
         min_pts_to_sample_cell:int=1,
-        plot_sample_area:dict=None,
+        plot_study_area:dict=None,
+        **kwargs,
 ) -> _shapely_Polygon:
-    """Creates and returns a polygon containing all points which can be used to draw random points within
+    if 'sample_area' in kwargs:
+        from aabpl.utils.progress import progress_print
+        progress_print(
+            "DeprecationWarning: keyword argument 'sample_area' is deprecated in "
+            "infer_study_area_from_pts(). It has no effect here — the study area is "
+            "built from pts. If you meant to pass an existing polygon, use "
+            "resolve_study_area() instead."
+        )
+        kwargs.pop('sample_area')
+    if kwargs:
+        raise TypeError(f"infer_study_area_from_pts() got unexpected keyword argument(s): {sorted(kwargs)}")
+    """Build and return a study-area polygon from the point set.
+
+    Prefer calling ``resolve_study_area`` with a spec string rather than this
+    function directly — it handles parsing, logging, and legacy aliases.
 
     Args:
     -------
     pts (pandas.DataFrame):
-        DataFrame of points for which a search for other points within the specified radius shall be performed
+        Input points.
     hull_type (str):
-        Must be one of ['concave','convex','bounding_box','grid']. 
-            - 'buff_non_empty_cells': each non-empty cell plus buffer around them
-            - 'buff_cells': each cell with at least min_pts_to_sample_cell points plus buffer around them
-            - 'buff_pts': a buffer will be drawn around each point. Warning: extremely be slow for large number of points
-            - 'concave': a concave hull will be drawn around points. 
-            - 'convex': a convex hull will be drawn around points.
-            - 'bounding_box': a bounding box around points will be drawn
-            - 'grid': a box covering full grid will be drawn
+        Internal hull type. Use ``resolve_study_area`` with a spec string for
+        the public-facing names. Internal values:
+            - ``'buff_cells'``: union of cells with >= min_pts_to_sample_cell points
+              plus buffer (canonical public name: ``'cells'``).
+            - ``'buff_pts'``: buffer around every individual point (slow for large n).
+            - ``'concave'`` / ``'convex'``: hull of all points + buffer.
+            - ``'bounding_box'``: axis-aligned bounding box + buffer.
+            - ``'grid'``: full grid extent.
     concavity (float):
-        will only be used when hull_type=='concave'. Value must be in (0,Inf]. Small values results in "very concave"(=fuzzy) hull. Inf results in convex hull (default=1)
+        Tightness for ``'concave'`` hull. 0 = very concave, large = convex (default=1).
     buffer (float):
-        Size of the buffer that shall be applied on the hull. If None then it will be set equal to radius (r) (default=None)
+        Buffer radius in projected CRS units (default=None → must be supplied).
     tolerance (float):
-        Tolerance>=0 used to simplify geometry using Douglas-Peucker specifying maximum allowed geometry displacement. Chosing a parameter that is too small might result in performance issues. (default=None)
+        Douglas-Peucker simplification tolerance. Defaults to ``buffer`` (default=None).
     x (str):
-        column name of x-coordinate (=longtitude) in pts_source (default='lon')
+        x-coordinate column name (default='lon').
     y (str):
-        column name of y-coordinate (=lattitude) in pts_source (default='lat')
+        y-coordinate column name (default='lat').
     min_pts_to_sample_cell (int):
-        will only be used when hull_type=='buff_cells'. Minimum number of points that need to be present in a cell so that the cell is included in the sample area (default=0)
-    
+        Minimum points per cell for ``'buff_cells'`` (default=1).
+
     Returns:
     -------
     sample_poly (shapely.geometry.Polygon):
-        a grid covering all points (custom class containing 
+        Study-area polygon in the projected CRS.
     """
     # Reproject pts to a metric CRS so that buffer is in metres and hull is computed
     # in projected space. Temporary columns are dropped before returning.
@@ -557,10 +868,10 @@ def infer_sample_area_from_pts(
     area_missing_from_hull = 1
     
     if hull_type=='buffer':
-        progress_print("sample_area hull_type 'buffer' deprectated. Use 'buff_pts' instead.")
+        progress_print("study_area hull_type 'buffer' deprectated. Use 'buff_pts' instead.")
         hull_type='buff_pts'
     elif hull_type == 'buffered_cells':
-        progress_print("sample_area hull_type 'buffered_cells' deprecated. Use 'buff_cells' instead.")
+        progress_print("study_area hull_type 'buffered_cells' deprecated. Use 'buff_cells' instead.")
         hull_type='buff_cells'
     
     if hull_type == 'bounding_box':
@@ -576,7 +887,7 @@ def infer_sample_area_from_pts(
         
     elif hull_type == 'grid':
         if grid is None:
-            raise ValueError('In order to use the grid bounds as valid area, a grid needs to be supplied as function input: infer_sample_area_from_pts(grid=...)')
+            raise ValueError('In order to use the grid bounds as valid area, a grid needs to be supplied as function input: infer_study_area_from_pts(grid=...)')
         # hull_coordinates = [
         #     (grid._search_internals.bounds.xmin,grid._search_internals.bounds.ymin),
         #     (grid._search_internals.bounds.xmax,grid._search_internals.bounds.ymin),
@@ -601,7 +912,7 @@ def infer_sample_area_from_pts(
         if len(pts)>10000:
             progress_print("WARNING: creating a buffer around each point might cause long computation times for "+str(len(pts))+" points. Consider using hull_type='buff_non_empty_cells' or hull_type='concave' as more efficient method.")
         
-        q=max(1,-(-2*buffer/tolerance)//1)
+        q = quad_segs if quad_segs is not None else max(1, -(-2*buffer/tolerance)//1)
         sample_poly = _shapely_MultiPoint(pts[[x,y]].values).buffer(distance=buffer, quad_segs=q).simplify(tolerance)
         # don't simplify this shape
         area_missing_from_hull = 0
@@ -668,11 +979,11 @@ def infer_sample_area_from_pts(
         else:
             if hull_type == 'buff_non_empty_cells':
                 if min_pts_to_sample_cell != 1:
-                    progress_print("sample_area hull_type 'buff_non_empty_cells' used together with min_pts_to_sample_cell != 1. min_pts_to_sample_cell will be set = 1. Use 'buff_cells' to specify different value.")
+                    progress_print("study_area hull_type 'buff_non_empty_cells' used together with min_pts_to_sample_cell != 1. min_pts_to_sample_cell will be set = 1. Use 'buff_cells' to specify different value.")
                 min_pts_to_sample_cell = 1
             # Build the valid-area footprint from OUTPUT grid cells, then intersect
             # with the search grid in intersect_polygon_with_grid below.
-            # Note: the intersection step could be skipped when weight_valid_area is
+            # Note: the intersection step could be skipped when area_weight is
             # False, since partial cell coverage only matters for area weighting.
             from numpy import floor as _np_floor
             from collections import Counter as _Counter
@@ -702,23 +1013,25 @@ def infer_sample_area_from_pts(
                     ox + _rc[:, 1] * sx, oy + _rc[:, 0] * sy,
                     ox + (_rc[:, 1] + 1) * sx, oy + (_rc[:, 0] + 1) * sy,
                 )
-                sample_poly = _shp_union(_shp_buffer(_cell_boxes, buffer, quad_segs=3))
+                _qs = quad_segs if quad_segs is not None else 3
+                sample_poly = _shp_union(_shp_buffer(_cell_boxes, buffer, quad_segs=_qs))
             except (ImportError, Exception):
                 _warn_shapely1_once()
+                _qs = quad_segs if quad_segs is not None else 3
                 polygons = [[_out_cell_poly(row, col)] for row, col in _cells]
-                sample_poly = _shapely_MultiPolygon(polygons).buffer(buffer, quad_segs=3)
+                sample_poly = _shapely_MultiPolygon(polygons).buffer(buffer, quad_segs=_qs)
             # don't simplify this shape
         area_missing_from_hull = 0
            
     else:
-        raise ValueError("hull_type to infere sample area for random points must be in ['buff_non_empty_cells', 'buff_cells', 'concave','convex','buff_pts', 'bounding_box', 'grid']. Value provided:",hull_type)
+        raise ValueError("hull_type to infere study area for random points must be in ['buff_non_empty_cells', 'buff_cells', 'concave','convex','buff_pts', 'bounding_box', 'grid']. Value provided:",hull_type)
     #
     if area_missing_from_hull > 0:
         hull_poly = _shapely_Polygon(hull_coordinates).buffer(distance=0,quad_segs=1)
         # plot_polygon(poly=hull_poly)
         while area_missing_from_hull > 0:
             sample_poly = hull_poly
-            q=max(1,-(-2*buffer/tolerance)//1)
+            q = quad_segs if quad_segs is not None else max(1, -(-2*buffer/tolerance)//1)
             sample_poly = sample_poly.buffer(distance=buffer, quad_segs=q)
             
             sample_poly = sample_poly.simplify(tolerance)
@@ -733,7 +1046,7 @@ def infer_sample_area_from_pts(
         pts.drop(columns=_proj_cols_to_drop, inplace=True, errors='ignore')
 
     # plot_polygon(poly=sample_poly)
-    if not plot_sample_area is None:
+    if not plot_study_area is None:
         fig,ax = plt.subplots(nrows=1,ncols=1,figsize=(8,8))
         ax.scatter(x=pts[x], y=pts[y], color="#51da58", s=0.3)
         plot_polygon(ax=ax, poly=sample_poly, facecolor="#06047640", edgecolor='red')
@@ -1019,3 +1332,17 @@ def compute_valid_area_weights(
     # check if ovlpd cell have an invalid area
     # if not jump to next cell-region
     # for point check ovlpd cells for invalid area
+
+
+# ---------------------------------------------------------------------------
+# Backwards-compatible aliases (old name -> new name)
+# ---------------------------------------------------------------------------
+def infer_sample_area_from_pts(*args, **kwargs):
+    """Deprecated alias for infer_study_area_from_pts."""
+    from aabpl.utils.progress import progress_print
+    progress_print(
+        "DeprecationWarning: infer_sample_area_from_pts() has been renamed to "
+        "infer_study_area_from_pts(). Please update your code."
+    )
+    return infer_study_area_from_pts(*args, **kwargs)
+

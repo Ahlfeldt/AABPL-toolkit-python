@@ -1,4 +1,4 @@
-from numpy import zeros as _np_zeros
+﻿from numpy import zeros as _np_zeros
 from matplotlib.pyplot import subplots as _plt_subplots
 from matplotlib.pyplot import close as _plt_close
 from matplotlib.colors import ListedColormap as _plt_ListedColormap
@@ -8,7 +8,7 @@ from aabpl.illustrations.plot_utils import set_map_frame, plot_polygon
 from shapely.geometry import Polygon as _shapely_Polygon
 
 
-def plot_sample_area(
+def plot_study_area(
         grid,
         filename:str='',
         show_grid_bounds:bool=False,
@@ -49,7 +49,7 @@ def plot_sample_area(
     fig_in  = plot_kwargs.pop('fig', None)
     ax_in   = plot_kwargs.pop('ax', None)
 
-    sa_bounds = grid.sample_area.bounds   # (xmin, ymin, xmax, ymax)
+    sa_bounds = grid.study_area.bounds   # (xmin, ymin, xmax, ymax)
     xmin, ymin, xmax, ymax = sa_bounds
     w = xmax - xmin
     h = ymax - ymin
@@ -60,7 +60,7 @@ def plot_sample_area(
     ax_xmin, ax_xmax = xmin - pad2, xmax + pad2
     ax_ymin, ax_ymax = ymin - pad2, ymax + pad2
     # Outer rectangle for the non-valid-area polygon: slightly larger so it always
-    # extends beyond the plot edge regardless of sample_area shape.
+    # extends beyond the plot edge regardless of study_area shape.
     pad3 = 0.03 * span
     outer_xmin, outer_xmax = xmin - pad3, xmax + pad3
     outer_ymin, outer_ymax = ymin - pad3, ymax + pad3
@@ -75,7 +75,7 @@ def plot_sample_area(
         fig, ax = fig_in, ax_in
 
     non_valid_area_color = '#bedbe6'
-    sample_area_color    = '#ffffff'
+    study_area_color    = '#ffffff'
 
     # ── cell raster ──────────────────────────────────────────────────────────
     _si  = grid._search_internals
@@ -99,19 +99,19 @@ def plot_sample_area(
             if 0 <= ri < n_rows and 0 <= ci < n_cols:
                 X[ri, ci] = False
 
-    cmap_binary = _plt_ListedColormap([sample_area_color, non_valid_area_color])
+    cmap_binary = _plt_ListedColormap([study_area_color, non_valid_area_color])
     extent = [sgb[0], sgb[2], sgb[1], sgb[3]]
-    ax.set_facecolor(sample_area_color)
+    ax.set_facecolor(study_area_color)
     ax.imshow(X=X, interpolation='none', cmap=cmap_binary, extent=extent)
 
     # ── sample-area boundary ──────────────────────────────────────────────────
     # Outer rectangle is 3% larger than the sample area bounds so it always
     # extends past the plot edge; this makes the excluded fringe visible even
-    # when the sample_area itself is a bounding box.
+    # when the study_area itself is a bounding box.
     non_valid_area = _shapely_Polygon([
         (outer_xmin, outer_ymin), (outer_xmax, outer_ymin),
         (outer_xmax, outer_ymax), (outer_xmin, outer_ymax),
-    ]).difference(grid.sample_area)
+    ]).difference(grid.study_area)
     plot_polygon(ax=ax, poly=non_valid_area,
                  facecolor=non_valid_area_color, edgecolor='#4a8fa8', linewidth=0.6)
 
@@ -129,7 +129,7 @@ def plot_sample_area(
 
     # ── legend ───────────────────────────────────────────────────────────────
     legend_handles = [
-        _plt_Patch(facecolor=sample_area_color,    edgecolor='#888', label='Sample area'),
+        _plt_Patch(facecolor=study_area_color,    edgecolor='#888', label='Study area'),
         _plt_Patch(facecolor=non_valid_area_color, edgecolor='#4a8fa8', label='Excluded area'),
     ]
     if show_grid_bounds:
@@ -140,7 +140,7 @@ def plot_sample_area(
     ax.legend(handles=legend_handles, loc='best', fontsize=7,
               handlelength=1.0, handleheight=0.9, borderpad=0.5)
 
-    ax.set_title('Sample area', fontsize=9)
+    ax.set_title('Study area', fontsize=9)
 
     fig.tight_layout()
     if filename:

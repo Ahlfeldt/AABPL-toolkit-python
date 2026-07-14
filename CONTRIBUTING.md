@@ -17,7 +17,7 @@
 | `aabpl/radius_search/` | `region_classes.py` | Geometry of individual disk regions: intersection logic, split-with-edge, contained/overlap classification. |
 | `aabpl/radius_search/` | `null_distribution.py` | Draws uniform random points within the sample area and runs `radius_search` on them to build the null distribution. |
 | `aabpl/radius_search/` | `clusters.py` | Cell-level cluster delineation: contiguity merging, centroid-distance merging, convex-hull fill, polygon output. |
-| `aabpl/radius_search/` | `sample_area.py` | Infers the valid sample area polygon from the point pattern; computes valid-area weights for boundary correction. |
+| `aabpl/radius_search/` | `study_area.py` | Infers the valid study area polygon from the point pattern; computes valid-area weights for boundary correction. |
 | `aabpl/radius_search/` | `optimal_grid_spacing.py` | Legacy grid-spacing analysis utilities (analytical breakpoints). |
 | `aabpl/illustrations/` | `*.py` | Visualisation helpers for the algorithm (offset regions, disk, nested grid, sample area, variable plots). Not required for normal use. |
 | `aabpl/utils/` | `crs_transformation.py` | CRS reprojection helpers (WGS-84 ↔ local metric CRS). |

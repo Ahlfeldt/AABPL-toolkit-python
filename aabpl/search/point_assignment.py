@@ -1,3 +1,5 @@
+import math as _math
+import numpy as np
 from numpy import (
     array as _np_array,
     zeros as _np_zeros,
@@ -5,6 +7,8 @@ from numpy import (
     diff as _np_diff,
     where as _np_where,
     searchsorted as _np_searchsorted,
+    bincount as _np_bincount,
+    maximum as _np_maximum,
 )
 from pandas import (DataFrame as _pd_DataFrame, cut as _pd_cut, concat as _pd_concat) 
 from aabpl.utils.misc import find_column_name,arr_to_tpls
@@ -115,21 +119,20 @@ def aggregate_point_data_to_cells(
 
     Writes to grid:
         id_to_sums        : ``{(row, col): ndarray}`` — sum of ``c`` columns over all
-                            points in the cell.  Used by ``clusters.py`` and
-                            ``grid_class.py``.
-        id_to_pt_ids      : ``{(row, col): ndarray}`` — point index array for the cell.
-                            Used by ``null_distribution.py`` and ``plot_grid.py``.
-        id_to_vals_xy     : ``{(row, col): ndarray}`` — stacked ``[c + [x, y]]`` array
-                            for the cell.  Used by ``disk_aggregation.py`` to compute
-                            candidate-count ceilings before the search loop.
+                            points in the cell.  Used by ``cell_count_iter`` (below)
+                            and directly by the search hot path.
         id_to_sums_by_lvl : ``{key: ndarray}`` — same as ``id_to_sums`` at level 0,
                             plus one entry per non-empty subcell at each deeper level.
                             Keys are codec-packed int64 when ``grid.cell_codec`` is set,
                             else ``(lvl, (row_centroid, col_centroid))`` tuples.
-                            The main radius-search loop in ``disk_aggregation.py`` reads
-                            this dict exclusively.
-        id_to_pt_ids_by_lvl  : same structure, stores point-index arrays.
-        id_to_vals_xy_by_lvl : same structure, stores stacked ``[c + [x, y]]`` arrays.
+                            The main radius-search loop reads this dict exclusively.
+        id_to_vals_xy_by_lvl : same structure, stores packed (start<<32)|end index
+                            ranges into ``grid.pts_vals_xy`` (not per-cell arrays).
+
+    Note: id_to_pt_ids / id_to_pt_ids_by_lvl were removed (see
+    aabpl/testing/run_all_tests.py's regression check that they stay gone) --
+    per-point ids for the whole sorted block are available via grid.pts_ids
+    instead.
     """
     # what is points data initally sorted by
     # aggregate cells to super cells to save lookup time 
@@ -260,7 +263,11 @@ def aggregate_point_data_to_cells(
                 nonlocal _node_count
                 _sums_array[_node_count] = pts_vals[cur_pos:pos_next].sum(axis=0)
                 id_to_sums_by_lvl[_kc]    = _node_count
-                id_to_vals_xy_by_lvl[_kc] = (cur_pos << 32) | pos_next
+                # id_to_vals_xy_by_lvl is only ever read at level 0 (_lvl0_packed/
+                # cell_count_iter both hardcode codec.key(0,...)) -- populating it
+                # for lvl>0 here is pure dead weight (same entry count as
+                # id_to_sums_by_lvl, never read back). Level-0 entries are still
+                # written below in the row/col loop.
                 _node_count += 1
                 if lvl + 1 <= nest_depth:
                     stack.append((cur_pos, pos_next, next_subcell_val, lvl+1, row_c, col_c))
@@ -281,10 +288,12 @@ def aggregate_point_data_to_cells(
             next_col   = int(row_cols[rel]) if rel < len(row_cols) else -1
 
             cell_vals  = pts_vals[cur_col_i:next_col_i]
-            cell_ids   = pts_ids[cur_col_i:next_col_i]
+            # cell_ids = pts_ids[cur_col_i:next_col_i]  # dead: fed id_to_pt_ids,
+            # which was removed (see docstring note above) -- this slice was
+            # computed every cell iteration and discarded, never stored.
             cell_sum   = cell_vals.sum(axis=0)
 
-            # level-0 cell dicts (tuple keys, used by clusters/plots/exports)
+            # level-0 cell dicts (used by cell_count_iter and the search hot path)
             rc = (cur_row, cur_col)
             id_to_sums[rc] = cell_sum
 
@@ -334,3 +343,273 @@ def cell_count_iter(grid):
         k = codec.key(0, rc[0], rc[1]) if codec is not None else (0, rc)
         pos = vxy[k]
         yield rc[0], rc[1], (pos & 0xFFFFFFFF) - (pos >> 32)
+
+
+################ aggregate_point_data_to_cells_adaptive_nd ###################################################################
+def _estimate_local_max_depths(pts_rows, pts_cols, sr, K, r_rows):
+    """Coarse KxK-block density scan -> per-block (max depth needed, level-0 needed).
+
+    Mirrors disk_aggregation_chunk_adaptive_nd.py's ppc convention (ppc = fine-cell
+    density * pi*sr^2, see nd_choice.get_exact_L's docstring) and reuses best_nd_tag
+    for the nd decision, so this agrees with the same crossover thresholds the
+    hot-loop planning uses -- it is an independent coarse estimate (not literally
+    the same per-chunk boundaries search_and_aggregate's planning pass computes),
+    but built from the same density signal.
+
+    nd<0 (supercell) tags never read id_to_sums_by_lvl/sums_array at all -- see
+    disk_aggregation_chunk_adaptive_nd.py's _process_super_cell_chunk, which builds
+    its own index straight from raw pts_vals_xy via _ensure_super_cell_target_index,
+    completely bypassing the quadtree dicts this function builds. So a coarse block
+    whose OWN density says nd<0 doesn't need any id_to_sums_by_lvl entry there --
+    not even level 0.
+
+    BUT: an nd>=0 query chunk's contain/overlap template can reach across chunk
+    boundaries (that's why chunking carries a row-margin at all) -- a dense nd=3
+    region sitting next to a sparse block would have its contain lookups silently
+    miss keys if the sparse neighbor was never built past a shallower depth (or
+    skipped level 0 entirely). _contain_sum has no way to distinguish "genuinely
+    empty cell" from "cell exists but wasn't built at this depth" -- both look
+    like a missing key -- so an under-build here is a silent undercount, not a
+    crash. To stay safe this dilates both the depth requirement AND the
+    needs-level-0 flag outward by the same reach margin _super_block_radius uses
+    (ceil(r/coarse_spacing), floored at 1 coarse block): any block within reach of
+    an nd>=0 block inherits that block's requirements, so cross-boundary contain
+    reads always land on something that was actually built.
+
+    Returns:
+        (depth_by_block: dict[(coarse_row,coarse_col), int] -- dilated max depth,
+         needs_level0: dict[(coarse_row,coarse_col), bool] -- dilated; blocks
+         absent from this dict (never occupied, never within reach of an
+         occupied nd>=0 block) may safely skip level 0 too)
+    """
+    from .algorithm.nd_choice import best_nd_tag
+    if len(pts_rows) == 0:
+        return {}, {}
+    coarse_rows = (pts_rows // K).astype(np.int64) if hasattr(pts_rows, 'astype') else (pts_rows // K)
+    coarse_cols = (pts_cols // K).astype(np.int64) if hasattr(pts_cols, 'astype') else (pts_cols // K)
+    coarse_rows = _np_array(coarse_rows); coarse_cols = _np_array(coarse_cols)
+    cr_min, cr_max = int(coarse_rows.min()), int(coarse_rows.max())
+    cc_min, cc_max = int(coarse_cols.min()), int(coarse_cols.max())
+    n_r, n_c = cr_max - cr_min + 1, cc_max - cc_min + 1
+    block_key = (coarse_rows - cr_min).astype(np.int64) * n_c + (coarse_cols - cc_min)
+    counts = _np_bincount(block_key, minlength=n_r * n_c).reshape(n_r, n_c)
+
+    eff = _np_zeros((n_r, n_c), dtype=np.int64)      # max(0, nd) per block, 0 where unoccupied
+    needs_lvl0 = _np_zeros((n_r, n_c), dtype=bool)   # nd >= 0 per block
+    occ_ri, occ_ci = _np_where(counts > 0)
+    for ri, ci in zip(occ_ri.tolist(), occ_ci.tolist()):
+        cnt = int(counts[ri, ci])
+        ppc = (cnt / (K * K)) * _math.pi * sr * sr
+        nd, _single_region = best_nd_tag(sr, max(ppc, 1e-6))
+        eff[ri, ci] = max(0, nd)
+        needs_lvl0[ri, ci] = (nd >= 0)
+
+    # dilate outward by reach margin, same convention as _super_block_radius:
+    # max(1, ceil(r_rows / K)) coarse blocks in every direction.
+    pad = max(1, int(_math.ceil(r_rows / K))) if K > 0 else 1
+    eff_p = _np_zeros((n_r + 2*pad, n_c + 2*pad), dtype=np.int64)
+    eff_p[pad:pad+n_r, pad:pad+n_c] = eff
+    lvl0_p = _np_zeros((n_r + 2*pad, n_c + 2*pad), dtype=bool)
+    lvl0_p[pad:pad+n_r, pad:pad+n_c] = needs_lvl0
+
+    eff_dil = _np_zeros((n_r, n_c), dtype=np.int64)
+    lvl0_dil = _np_zeros((n_r, n_c), dtype=bool)
+    for dr in range(-pad, pad + 1):
+        for dc in range(-pad, pad + 1):
+            eff_dil = _np_maximum(eff_dil, eff_p[pad+dr:pad+dr+n_r, pad+dc:pad+dc+n_c])
+            lvl0_dil |= lvl0_p[pad+dr:pad+dr+n_r, pad+dc:pad+dc+n_c]
+
+    depth_by_block = {}
+    needs_level0 = {}
+    ri_idx, ci_idx = _np_where(lvl0_dil | (eff_dil > 0) | (counts > 0))
+    for ri, ci in zip(ri_idx.tolist(), ci_idx.tolist()):
+        key = (cr_min + ri, cc_min + ci)
+        depth_by_block[key] = int(eff_dil[ri, ci])
+        needs_level0[key] = bool(lvl0_dil[ri, ci])
+    return depth_by_block, needs_level0
+
+
+@time_func_perf
+def aggregate_point_data_to_cells_adaptive_nd(
+    grid:dict,
+    pts:_pd_DataFrame,
+    c:list=['employment'],
+    y:str='lat',
+    x:str='lon',
+    row_name:str='id_y',
+    col_name:str='id_x',
+    nest_depth:int=5,
+    sr:float=2.0,
+    silent:bool=False,
+) -> _pd_DataFrame:
+    """Same as aggregate_point_data_to_cells, but caps quadtree depth PER SPATIAL
+    REGION instead of building every level-0 cell down to the grid's global native
+    nest_depth unconditionally.
+
+    Rationale: aggregate_point_data_to_cells previously measured at 40-60%+ of
+    total radius_search runtime, and most of that is wasted whenever a region is
+    sparse enough that best_nd_tag would pick a shallow nd (or a supercell, nd<0,
+    which never reads past level 0 at all) for the chunks covering it -- see the
+    session's finding that e.g. nd=-8 chunks paid for a full level-0 quadtree
+    build that was never read.
+
+    A coarse KxK-block density scan (_estimate_local_max_depths) decides, per
+    block, the max depth actually needed there via the same best_nd_tag crossover
+    model the hot loop itself uses. Each level-0 cell then only descends the
+    quadtree to its block's local cap instead of the global nest_depth.
+
+    K matches disk_aggregation_chunk_adaptive_nd.py's coarse-block convention
+    (max(4, ceil(r/spacing))) so the density estimate is computed at roughly the
+    same spatial granularity as the search's own coarse density map, though this
+    is an independently-computed scan (see _estimate_local_max_depths docstring),
+    not literally the same chunk boundaries as the hot-loop planning pass.
+
+    Args: identical to aggregate_point_data_to_cells, plus:
+        sr: spacing ratio (r / grid spacing) -- needed for the ppc estimate that
+            drives the local depth decision.
+
+    Caveat: id_to_sums (the plain, non-by_lvl per-cell dict) is skipped entirely
+    for cells in a region with no nd>=0 chunk (dilated) within reach -- confirmed
+    via grep that the search hot path (disk_aggregation_chunk_adaptive_nd.py)
+    never reads it directly, only id_to_sums_by_lvl/sums_array. Other consumers
+    of id_to_sums (cell_count_iter -- used by cluster/plot/export code, not
+    search) will see those cells as absent rather than zero-count. Acceptable
+    for this opt-in, search-focused mode; not a concern for the default (False)
+    uniform path, which is unaffected.
+    """
+    aggregate_level = 0
+    cols_for_sort = [row_name, col_name]
+    subcell_nr = find_column_name('sc_nr', existing_columns=pts.columns)
+
+    pts_rows_raw = pts[row_name].values
+    pts_cols_raw = pts[col_name].values
+    r_rows = int(_math.ceil(sr)) if sr > 0 else 1
+    K = max(4, r_rows)
+    depth_by_block, needs_level0 = _estimate_local_max_depths(pts_rows_raw, pts_cols_raw, sr, K, r_rows)
+    _default_depth = nest_depth  # blocks with no points never get scanned; N/A in practice
+
+    if nest_depth > 0:
+        offset_x = 0.5 + ((pts[x]-grid._search_internals.bounds.xmin)%grid._search_internals.spacing - grid._search_internals.spacing/2) / grid._search_internals.spacing
+        offset_y = 0.5 + ((pts[y]-grid._search_internals.bounds.ymin)%grid._search_internals.spacing - grid._search_internals.spacing/2) / grid._search_internals.spacing
+        pts[subcell_nr] = 0
+        for i in range(1,nest_depth+1):
+            n = 2**(i)
+            subcell_mult = 2**((nest_depth-i)*2)
+            pts[subcell_nr] += (offset_x//(1/n)%n%2 * subcell_mult  + offset_y//(1/n)%n%2 * 2 * subcell_mult).astype(int)
+        cols_for_sort.append(subcell_nr)
+
+    pts.sort_values(cols_for_sort,inplace=True)
+
+    pts_rows = pts[row_name].values
+    pts_cols = pts[col_name].values
+    pts_vals = pts[c].values
+    pts_vals_xy = pts[c+[x,y]].values
+    pts_ids = pts.index.values
+    pts_subcell_nrs = pts[subcell_nr].values if nest_depth > 0 else _np_zeros(len(pts_cols))
+    n_pts = len(pts)
+
+    row_id_indexes = list(_np_where(_np_diff(pts_rows, prepend=pts_rows[0] - 1) != 0)[0])
+    row_ids = [int(pts_rows[i]) for i in row_id_indexes]
+
+    id_to_sums = {}
+    id_to_sums_by_lvl = {}
+    id_to_vals_xy_by_lvl = {}
+
+    # Same worst-case upper bound as the uniform version -- per-region capping
+    # only ever REDUCES node count relative to this, never exceeds it.
+    _max_nodes = n_pts * (nest_depth + 1)
+    _n_cols_arr = max(len(c), 1)
+    _sums_array = _np_zeros((_max_nodes, _n_cols_arr), dtype=float)
+    _node_count = 0
+
+    _codec = getattr(grid._search_internals, 'cell_codec', None)
+    if _codec is not None:
+        def _k(lvl, rc):
+            return int(_codec.key(lvl, rc[0], rc[1]))
+    else:
+        def _k(lvl, rc):
+            return (lvl, rc)
+
+    def nest_next_lvl(pos_min_init, pos_max_init, row_init, col_init, local_max_depth):
+        if local_max_depth <= 0:
+            return
+        stack = [(pos_min_init, pos_max_init, 0, 1, row_init, col_init)]
+        while stack:
+            pos_min, pos_max, subcell_val, lvl, row, col = stack.pop()
+            subcell_mult = 2**((nest_depth - lvl) * 2)
+            quad_nrs = (pts_subcell_nrs[pos_min:pos_max] - subcell_val) // subcell_mult
+            cur_pos = pos_min
+            for cur_quad_nr in range(4):
+                if cur_pos >= pos_max:
+                    break
+                offset = cur_pos - pos_min
+                if quad_nrs[offset] > cur_quad_nr:
+                    continue
+                rel = int(_np_searchsorted(quad_nrs[offset:], cur_quad_nr + 1, side='left'))
+                pos_next = cur_pos + rel
+                next_subcell_val = subcell_val + cur_quad_nr * subcell_mult
+                row_c = row + cur_quad_nr // 2 / (2**lvl)
+                col_c = col + cur_quad_nr %  2 / (2**lvl)
+                rc = (row_c + 2**-(lvl+1), col_c + 2**-(lvl+1))
+                _kc = _k(lvl, rc)
+                nonlocal _node_count
+                _sums_array[_node_count] = pts_vals[cur_pos:pos_next].sum(axis=0)
+                id_to_sums_by_lvl[_kc]    = _node_count
+                # id_to_vals_xy_by_lvl is only ever read at level 0 -- see the
+                # matching comment in aggregate_point_data_to_cells above.
+                _node_count += 1
+                # local_max_depth (not the global nest_depth) gates further descent
+                if lvl + 1 <= local_max_depth:
+                    stack.append((cur_pos, pos_next, next_subcell_val, lvl+1, row_c, col_c))
+                cur_pos = pos_next
+
+    row_ends = row_id_indexes[1:] + [n_pts]
+    for cur_row, cur_col_i, next_row_i in zip(row_ids, row_id_indexes, row_ends):
+        cur_col_i = int(cur_col_i)
+        next_row_i = int(next_row_i)
+        row_cols = pts_cols[cur_col_i:next_row_i]
+        cur_col = int(row_cols[0])
+        _coarse_row = cur_row // K
+
+        while True:
+            rel = int(_np_searchsorted(row_cols, cur_col, side='right'))
+            next_col_i = cur_col_i + rel
+            next_col   = int(row_cols[rel]) if rel < len(row_cols) else -1
+
+            _block_key = (_coarse_row, cur_col // K)
+            # Default True (safe) if a block is somehow missing from the scan --
+            # should not happen (every occupied fine cell's coarse block is
+            # scanned), but an unbuilt level 0 is a silent undercount downstream,
+            # so the safe default on any uncertainty is "build it".
+            if needs_level0.get(_block_key, True):
+                cell_vals  = pts_vals[cur_col_i:next_col_i]
+                cell_sum   = cell_vals.sum(axis=0)
+
+                rc = (cur_row, cur_col)
+                id_to_sums[rc] = cell_sum
+
+                _k0 = _k(0, rc)
+                _sums_array[_node_count] = cell_sum
+                id_to_sums_by_lvl[_k0]    = _node_count
+                id_to_vals_xy_by_lvl[_k0] = (cur_col_i << 32) | next_col_i
+                _node_count += 1
+
+                if nest_depth > 0:
+                    _local_depth = min(nest_depth, depth_by_block.get(_block_key, _default_depth))
+                    nest_next_lvl(cur_col_i, next_col_i, cur_row - 0.5, cur_col - 0.5, _local_depth)
+
+            if next_col == -1:
+                break
+            cur_col_i = next_col_i
+            cur_col   = next_col
+            row_cols  = row_cols[rel:]
+        #
+    #
+
+    grid._search_internals.id_to_sums           = id_to_sums
+    grid._search_internals.id_to_sums_by_lvl    = id_to_sums_by_lvl
+    grid._search_internals.id_to_vals_xy_by_lvl = id_to_vals_xy_by_lvl
+    grid.sums_array           = _sums_array[:_node_count]
+    grid.pts_vals_xy          = pts_vals_xy
+    grid.pts_ids              = pts_ids
+    return

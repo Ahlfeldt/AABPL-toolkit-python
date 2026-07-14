@@ -460,18 +460,20 @@ def compute_spacing_breakpoints(max_offset: int = 4, silent: bool = True):
 SPACINGS_BREAKPOINTS = _np_array([
     2**.5, 1.5, 2.5**.5, 2, 4.5**0.5, 5**0.5, 2.5, (13/2)**0.5, (17/2)**0.5, 3
 ])
-CANDIDATE_DEPTHS = range(4)  # nd 0-3; expand once full sweep (incl. nd=4+) is complete
+CANDIDATE_DEPTHS = range(4)  # nd 0-3 covers optimal range across all benchmarked sr values
 
 def choose_nest_depth(r_over_s: float) -> int:
-    """Heuristic nest_depth for a given r/spacing ratio."""
-    sqrt2 = math.sqrt(2)
-    nd_min = 0 if r_over_s >= sqrt2 else max(0, math.ceil(math.log2(sqrt2 / r_over_s)))
-    if r_over_s >= 3.0:
-        return nd_min
-    elif r_over_s >= 1.5:
-        return nd_min + 1
-    else:
-        return min(nd_min + 2, 4)
+    """Choose nest_depth based on 5-rep benchmark across all 10 candidate sr values (2026-07).
+
+    Key findings:
+    - nd=0 up to 2x slower at sr>=2.5 (particularly sr=2.55, sr=3.0 large n_tgt)
+    - nd=2 anomalously slow at sr=sqrt(2) large n (~+24%)
+    - nd=5,6 show occasional regressions; nd=1,3 most consistently neutral
+    - Rule: nd=1 for sr<2.5, nd=3 for sr>=2.5
+    """
+    if r_over_s >= 2.5:
+        return 3
+    return 1
 
 
 # ---------------------------------------------------------------------------

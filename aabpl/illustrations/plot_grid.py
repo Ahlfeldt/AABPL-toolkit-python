@@ -1,4 +1,4 @@
-from numpy import (
+﻿from numpy import (
     array as _np_array,
     zeros as _np_zeros,
     unique as _np_unique,
@@ -55,7 +55,7 @@ class GridPlots(object):
     cluster_vars   : Scatter of source points coloured by aggregated value.
     rand_dist      : Comparison of random vs. observed radius-sum distribution.
     cluster_pts    : Source points coloured by cluster membership.
-    sample_area    : Sample area used for null-distribution random points.
+    study_area     : Study area used for null-distribution random points.
     grid_ids       : Grid cell row/col indices and point counts (diagnostic).
 
     Examples
@@ -67,10 +67,10 @@ class GridPlots(object):
     def __init__(self, grid):
         self.grid = grid
 
-    def sample_area(self, filename:str='', show:bool=True, display_dpi:int=100,
+    def study_area(self, filename:str='', show:bool=True, display_dpi:int=100,
                     save_kwargs:dict={}, show_grid_bounds:bool=False, **plot_kwargs):
         """
-        Plot the sample area used for drawing null-distribution random points.
+        Plot the study area used for drawing null-distribution random points.
 
         Parameters
         ----------
@@ -93,13 +93,16 @@ class GridPlots(object):
         -------
         matplotlib.figure.Figure
         """
-        from aabpl.illustrations.plot_sample_area import plot_sample_area as _plot_sa
+        from aabpl.illustrations.plot_study_area import plot_study_area as _plot_sa
         return _plot_sa(
             grid=self.grid,
             filename=filename, show=show, display_dpi=display_dpi,
             save_kwargs=save_kwargs, show_grid_bounds=show_grid_bounds,
             **plot_kwargs,
         )
+
+    # Backward-compat alias
+    sample_area = study_area
 
     def vars(self, colnames=None, filename='', show:bool=True, display_dpi:int=100, save_kwargs:dict={}, **plot_kwargs):
         """
@@ -127,10 +130,10 @@ class GridPlots(object):
                 Scatter marker size (default auto-scaled to figsize).
             vmin, vmax : float
                 Colormap range (default data min/max).
-            sample_area_colors : list[str, str]
+            study_area_colors : list[str, str]
                 Colours for [valid area, excluded area]
                 (default ``['#ffffff', '#bedbe6']``).
-            sample_area_linewidth : float
+            study_area_linewidth : float
                 Border linewidth of the valid-area polygon (default ``0.2``).
 
         Returns
@@ -526,10 +529,10 @@ class GridPlots(object):
                 Scatter marker size (default auto-scaled to figsize).
             vmin, vmax : float
                 Colormap range (default data min/max).
-            sample_area_colors : list[str, str]
+            study_area_colors : list[str, str]
                 Colours for [valid area, excluded area]
                 (default ``['#ffffff', '#bedbe6']``).
-            sample_area_linewidth : float
+            study_area_linewidth : float
                 Border linewidth of the valid-area polygon (default ``0.5``).
 
         Returns

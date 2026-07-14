@@ -14,11 +14,11 @@ from aabpl.utils.misc import flatten_list
 from aabpl.testing.test_performance import time_func_perf
 
 @time_func_perf
-def draw_random_points_in_sample_area(
+def draw_random_points_in_study_area(
     grid:dict,
     cell_width:float,
     n_random_points:int=int(1e5),
-    sample_area:_shapely_Polygon=None,
+    study_area:_shapely_Polygon=None,
     cells_rndm_sample:dict=None,
     random_seed:float=None,
     cell_height:float=None,
@@ -50,8 +50,8 @@ def draw_random_points_in_sample_area(
     random_points_cell_ids (array):
         vector cell ids where random points fall into. TODO not yet implemented.  
     """
-    if sample_area is None:
-        sample_area = grid.sample_area
+    if study_area is None:
+        study_area = grid.study_area
 
     # SET RANDOM SEED IF ANY SUPPLIED AND ASSERT TYPE
     if type(random_seed) == int:
@@ -70,7 +70,7 @@ def draw_random_points_in_sample_area(
     #
 
     # ── Fast path: output-cell-level sampling ────────────────────────────────
-    # When infer_sample_area_from_pts has pre-classified output cells (buff_cells
+    # When infer_study_area_from_pts has pre-classified output cells (buff_cells
     # methods), sample uniformly within output cells.  Fully-valid cells need no
     # geometry check; partly-valid boundary cells do.
     _out_fully = getattr(grid, 'output_cells_fully_valid', None)
@@ -111,7 +111,7 @@ def draw_random_points_in_sample_area(
                 _pts = _np_array([_ox, _oy]) + _np_array([_sx, _sy]) * (
                     _np_random((_n_part_draw, 2)) + _rc[:, ::-1]
                 )
-                _inside = _shapely_contains_xy(sample_area, _pts[:, 0], _pts[:, 1])
+                _inside = _shapely_contains_xy(study_area, _pts[:, 0], _pts[:, 1])
                 _kept = _pts[_inside]
                 if _n_part_draw > 0:
                     _partly_keep_rate = max(len(_kept) / _n_part_draw, 1e-3)
@@ -125,10 +125,10 @@ def draw_random_points_in_sample_area(
     # cells_fully_valid_ref = grid.cells_fully_valid_max_lvl
     cells_fully_valid_ref = grid._search_internals.cells_fully_valid
     cells_partly_valid_ref = grid._search_internals.cells_partly_valid_max_lvl
-    # col_min = int((sample_area.bounds[0] - grid.total_bounds.xmin) // cell_width)
-    # row_min = int((sample_area.bounds[1] - grid.total_bounds.ymin) // cell_height)
-    # col_max = int((sample_area.bounds[2] - grid.total_bounds.xmin) // cell_width)
-    # row_max = int((sample_area.bounds[3] - grid.total_bounds.ymin) // cell_height)
+    # col_min = int((study_area.bounds[0] - grid.total_bounds.xmin) // cell_width)
+    # row_min = int((study_area.bounds[1] - grid.total_bounds.ymin) // cell_height)
+    # col_max = int((study_area.bounds[2] - grid.total_bounds.xmin) // cell_width)
+    # row_max = int((study_area.bounds[3] - grid.total_bounds.ymin) // cell_height)
     # col_min = grid.sample_col_min
     # row_min = grid.sample_row_min
     # col_max = grid.sample_col_max
@@ -150,7 +150,7 @@ def draw_random_points_in_sample_area(
             sum([2**-(2*lvl) for lvl,(row, col) in cells_fully_valid_ref if lvl==lvl_i])
             for lvl_i in set([lvl for lvl, (row, col) in cells_fully_valid_ref])
         ])
-    all_cells_eligible = sample_area is None or max_cells_fully_covered >= grid._search_internals.n_cells 
+    all_cells_eligible = study_area is None or max_cells_fully_covered >= grid._search_internals.n_cells 
     
 
     # update cells_rndm_sample with grid cells outside the grid
@@ -207,7 +207,7 @@ def draw_random_points_in_sample_area(
             (grid._search_internals.bounds.xmin,grid._search_internals.bounds.ymax),
     ])
     
-    sample_area_contains_grid = sample_area.contains(grid_bbox)
+    study_area_contains_grid = study_area.contains(grid_bbox)
     # estimate the share of invalid area to draw additionally to create points (as some get discarded when they fall in invalid area)
     share_of_invalid_cells = .0 if all_cells_eligible else  sum(
         [2**(2*-lvl) for lvl, (row, col) in cells_partly_valid_ref]
@@ -217,7 +217,7 @@ def draw_random_points_in_sample_area(
         )
     share_of_invalid_geometry = sum(
         [cell_height * 2**(-lvl) * cell_width * 2**(-lvl) - cell_to_poly[lvl,(row,col)].area for lvl, (row, col) in cells_partly_valid_ref]
-        ) / sample_area.area
+        ) / study_area.area
     # make a guess upward biased guess how large the share of invalid random points may be. 
     share_of_invalid_area = 1 - (
         0.125 *  (1 - share_of_invalid_cells) * (1 - share_of_invalid_geometry) + 
@@ -255,8 +255,8 @@ def draw_random_points_in_sample_area(
         )
         
         # if anywhere is valid area        
-        if sample_area_contains_grid:
-            new_random_point_coordinates_in_sample_area = new_random_point_coordinates
+        if study_area_contains_grid:
+            new_random_point_coordinates_in_study_area = new_random_point_coordinates
             # 
         else: # filter out points in invalid area
             rndm_cells_fully_valid = _np_array([
@@ -265,16 +265,16 @@ def draw_random_points_in_sample_area(
                 (int if lvl >= 0 else float)(col)
                 )) in cells_fully_valid_ref  for lvl,row,col in rndm_cells])
 
-            # Points from fully-valid cells are guaranteed inside sample_area — no geometry check needed.
+            # Points from fully-valid cells are guaranteed inside study_area — no geometry check needed.
             pts_from_full_cells = new_random_point_coordinates[rndm_cells_fully_valid]
 
             # Points from partial cells need a geometry check; use vectorised contains for speed.
             pts_from_partial = new_random_point_coordinates[~rndm_cells_fully_valid]
             if len(pts_from_partial):
-                in_area = _shapely_contains_xy(sample_area, pts_from_partial[:, 0], pts_from_partial[:, 1])
+                in_area = _shapely_contains_xy(study_area, pts_from_partial[:, 0], pts_from_partial[:, 1])
                 pts_from_partial = pts_from_partial[in_area]
 
-            new_random_point_coordinates_in_sample_area = (
+            new_random_point_coordinates_in_study_area = (
                 _np_vstack([pts_from_full_cells, pts_from_partial])
                 if len(pts_from_full_cells) and len(pts_from_partial)
                 else pts_from_full_cells if len(pts_from_full_cells)
@@ -285,8 +285,8 @@ def draw_random_points_in_sample_area(
             
             #
         # save valid random points
-        if len(new_random_point_coordinates_in_sample_area) > 0:
-            random_points_coordinates = _np_vstack([random_points_coordinates, new_random_point_coordinates_in_sample_area])
+        if len(new_random_point_coordinates_in_study_area) > 0:
+            random_points_coordinates = _np_vstack([random_points_coordinates, new_random_point_coordinates_in_study_area])
         # update loop vars
         it += 1
         pts_attempted_to_create += n_rndm_points_to_create
@@ -298,7 +298,7 @@ def draw_random_points_in_sample_area(
 def compute_null_distribution(
     grid:dict,
     pts:_pd_DataFrame,
-    sample_area:_shapely_Polygon=None,
+    study_area:_shapely_Polygon=None,
     min_pts_to_sample_cell:int=1,
     null_distribution=int(1e5),
     k_th_percentile:float=[99.5],
@@ -313,7 +313,7 @@ def compute_null_distribution(
     r=None,
     stat:str='sum',
 ):
-    """Draws random points within sample_area and aggregates data within the search radius to
+    """Draws random points within study_area and aggregates data within the search radius to
     build a null distribution. From those values it calculates the k_th_percentile threshold.
 
     k_th_percentile: in [0,100] k-th percentile
@@ -324,7 +324,7 @@ def compute_null_distribution(
         Controls the null distribution used for cluster detection:
 
         - **int** (default ``100_000``): draw this many points uniformly at random within
-          ``sample_area`` and compute their radius sums as the reference distribution.
+          ``study_area`` and compute their radius sums as the reference distribution.
         - **numpy.ndarray of shape (N, 2)**: use these coordinates directly — first column is
           **x**, second column is **y**, both in the projected CRS (metres). The internal
           random draw is skipped.
@@ -346,11 +346,11 @@ def compute_null_distribution(
         )
     from aabpl.search.point_assignment import cell_count_iter as _cell_count_iter
     grid._search_internals.cells_rndm_sample = True if min_pts_to_sample_cell == 0 else set((row, col) for row, col, cnt in _cell_count_iter(grid) if cnt >= min_pts_to_sample_cell)
-    grid.sample_area = sample_area
+    grid.study_area = study_area
 
     if isinstance(null_distribution, int):
-        # Draw N random points uniformly within sample_area.
-        random_point_coords = draw_random_points_in_sample_area(
+        # Draw N random points uniformly within study_area.
+        random_point_coords = draw_random_points_in_study_area(
             grid=grid,
             cell_width=grid._search_internals.spacing,
             n_random_points=null_distribution,
@@ -415,7 +415,7 @@ def compute_null_distribution(
 
 def draw_random_coords(
     n_pts: int,
-    sample_area=None,
+    study_area=None,
     crs: str = None,
     proj_crs: str = 'auto',
     coord_generator=None,
@@ -433,20 +433,20 @@ def draw_random_coords(
     ----------
     n_pts : int
         Number of coordinate pairs to return.
-    sample_area : Polygon, MultiPolygon, or list of (x, y) tuples, optional
+    study_area : Polygon, MultiPolygon, or list of (x, y) tuples, optional
         Valid area. Points that fall outside are rejected.
         A coordinate list is interpreted as a ``shapely.Polygon`` automatically.
         When ``None`` every coordinate produced by ``coord_generator`` is
         accepted — ``coord_generator`` is then required.
     crs : str, optional
-        CRS of ``sample_area`` (e.g. ``'EPSG:4326'``). When provided the
+        CRS of ``study_area`` (e.g. ``'EPSG:4326'``). When provided the
         geometry is reprojected to ``proj_crs`` before sampling, using the
         same ``convert_MultiPolygon_crs`` utility used internally by
-        ``detect_cluster_pts``. Leave ``None`` when ``sample_area`` is already
+        ``detect_cluster_pts``. Leave ``None`` when ``study_area`` is already
         in the target projected CRS (metres).
     proj_crs : str, default ``'auto'``
         Target projected CRS. ``'auto'`` picks the best UTM zone from the
-        centroid of ``sample_area`` (requires ``sample_area`` to be supplied
+        centroid of ``study_area`` (requires ``study_area`` to be supplied
         and ``crs`` to be set). Pass an explicit EPSG string (e.g.
         ``'EPSG:32618'``) to override. Ignored when ``crs`` is ``None``.
     coord_generator : callable, optional
@@ -457,7 +457,7 @@ def draw_random_coords(
         valid points have been collected.
 
         When ``None`` (default) a uniform draw over the bounding box of
-        ``sample_area`` is used — ``sample_area`` must be supplied in that
+        ``study_area`` is used — ``study_area`` must be supplied in that
         case.
     random_seed : int, optional
         Seed for the internal ``numpy.random.Generator``.
@@ -477,12 +477,12 @@ def draw_random_coords(
         from shapely.geometry import Polygon
         import aabpl
         poly = Polygon([(0,0),(10000,0),(10000,10000),(0,10000)])
-        pts = aabpl.draw_random_coords(5000, sample_area=poly, random_seed=42)
+        pts = aabpl.draw_random_coords(5000, study_area=poly, random_seed=42)
 
     From a coordinate list, auto-reprojected from WGS-84::
 
         coords = [(-74.05, 40.65), (-73.85, 40.65), (-73.85, 40.85), (-74.05, 40.85)]
-        pts = aabpl.draw_random_coords(5000, sample_area=coords,
+        pts = aabpl.draw_random_coords(5000, study_area=coords,
                                         crs='EPSG:4326', random_seed=42)
 
     Custom generator (e.g. clustered reference points)::
@@ -493,57 +493,57 @@ def draw_random_coords(
             idx = rng.integers(0, 10, n)
             return centres[idx] + rng.normal(0, 500, (n, 2))
 
-        pts = aabpl.draw_random_coords(5000, sample_area=poly,
+        pts = aabpl.draw_random_coords(5000, study_area=poly,
                                         coord_generator=clustered)
     """
     import numpy as _np
     from numpy.random import default_rng as _default_rng
     from shapely.geometry import Polygon as _Polygon, MultiPolygon as _MultiPolygon
 
-    if sample_area is None and coord_generator is None:
+    if study_area is None and coord_generator is None:
         raise ValueError(
-            "Provide at least one of 'sample_area' or 'coord_generator'. "
-            "When 'sample_area' is None every produced coordinate is accepted, "
+            "Provide at least one of 'study_area' or 'coord_generator'. "
+            "When 'study_area' is None every produced coordinate is accepted, "
             "so 'coord_generator' must define the distribution."
         )
 
     # --- coerce coordinate list to Shapely Polygon ----------------------------
-    if sample_area is not None and not isinstance(sample_area, (_Polygon, _MultiPolygon)):
+    if study_area is not None and not isinstance(study_area, (_Polygon, _MultiPolygon)):
         try:
-            sample_area = _Polygon(sample_area)
+            study_area = _Polygon(study_area)
         except Exception as e:
             raise ValueError(
-                "sample_area must be a Shapely Polygon, MultiPolygon, or a list of "
+                "study_area must be a Shapely Polygon, MultiPolygon, or a list of "
                 f"(x, y) coordinate tuples. Could not interpret as Polygon: {e}"
             )
 
     # --- CRS reprojection (reuses shared utility from crs_transformation) -----
-    if crs is not None and sample_area is not None:
+    if crs is not None and study_area is not None:
         from aabpl.utils.crs_transformation import convert_MultiPolygon_crs, convert_wgs_to_utm
         from pyproj import Transformer as _Transformer
         if proj_crs == 'auto':
             if crs != 'EPSG:4326':
                 # convert centroid to WGS-84 first to pick the right UTM zone
-                cx, cy = sample_area.centroid.coords[0]
+                cx, cy = study_area.centroid.coords[0]
                 t = _Transformer.from_crs(crs, 'EPSG:4326', always_xy=True)
                 cx_wgs, cy_wgs = t.transform(cx, cy)
             else:
-                cx_wgs, cy_wgs = sample_area.centroid.coords[0]
+                cx_wgs, cy_wgs = study_area.centroid.coords[0]
             proj_crs = 'EPSG:' + str(convert_wgs_to_utm(cx_wgs, cy_wgs))
         if crs != proj_crs:
-            sample_area = convert_MultiPolygon_crs(sample_area, initial_crs=crs, target_crs=proj_crs)
-    elif crs is not None and sample_area is None:
+            study_area = convert_MultiPolygon_crs(study_area, initial_crs=crs, target_crs=proj_crs)
+    elif crs is not None and study_area is None:
         raise ValueError(
-            "crs is set but sample_area is None — cannot determine target projection "
-            "without a geometry anchor. Either supply sample_area or set proj_crs explicitly "
+            "crs is set but study_area is None — cannot determine target projection "
+            "without a geometry anchor. Either supply study_area or set proj_crs explicitly "
             "and reproject your coord_generator output yourself."
         )
 
     rng = _default_rng(random_seed)
 
-    # --- default generator: uniform over bounding box of sample_area ----------
+    # --- default generator: uniform over bounding box of study_area ----------
     if coord_generator is None:
-        xmin, ymin, xmax, ymax = sample_area.bounds
+        xmin, ymin, xmax, ymax = study_area.bounds
         def coord_generator(n, rng):
             return _np.column_stack([
                 rng.uniform(xmin, xmax, n),
@@ -563,9 +563,9 @@ def draw_random_coords(
             )
         coords = candidates[:, :2]
 
-        if sample_area is not None:
+        if study_area is not None:
             coords = _np_array([
-                c for c in coords if sample_area.covers(_shapely_Point(c))
+                c for c in coords if study_area.covers(_shapely_Point(c))
             ])
 
         if len(coords) > 0:

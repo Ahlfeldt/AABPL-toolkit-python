@@ -1,4 +1,4 @@
-from matplotlib.pyplot import (subplots as _plt_subplots)
+﻿from matplotlib.pyplot import (subplots as _plt_subplots)
 from matplotlib.pyplot import get_cmap as _plt_get_cmap
 from matplotlib.pyplot import close as _plt_close
 from matplotlib.colors import LogNorm as _plt_LogNorm, Normalize as _plt_Normalize, LinearSegmentedColormap as _plt_LinearSegmentedColormap, ListedColormap as _plt_ListedColormap, BoundaryNorm as _plt_BoundaryNorm
@@ -124,12 +124,12 @@ def create_plots_for_vars(
                                   constrained_layout=True,
                                   sharex=(ncols == 1 and nrows > 1),
                                   sharey=(nrows == 1 and ncols > 1))
-    if not grid.sample_grid_bounds is None and not grid.sample_area is None:
-        _sa_xmin, _sa_ymin, _sa_xmax, _sa_ymax = grid.sample_area.bounds
+    if not grid.study_grid_bounds is None and not grid.study_area is None:
+        _sa_xmin, _sa_ymin, _sa_xmax, _sa_ymax = grid.study_area.bounds
         non_valid_area = _shapely_Polygon([
             (_sa_xmin, _sa_ymin), (_sa_xmax, _sa_ymin),
             (_sa_xmax, _sa_ymax), (_sa_xmin, _sa_ymax),
-        ]).difference(grid.sample_area)
+        ]).difference(grid.study_area)
         xmin, xmax, ymin, ymax = grid._search_internals.bounds.xmin, grid._search_internals.bounds.xmax, grid._search_internals.bounds.ymin, grid._search_internals.bounds.ymax,
     else:    
         xmin, xmax, ymin, ymax = grid._search_internals.bounds.xmin, grid._search_internals.bounds.xmax, grid._search_internals.bounds.ymin, grid._search_internals.bounds.ymax,
@@ -156,14 +156,14 @@ def create_plots_for_vars(
             ax.set_ylabel('')
             ax.tick_params(labelleft=False)
         # CPOLOR NON SAMPLE AREA
-        if not grid.sample_grid_bounds is None and not grid.sample_area is None:
+        if not grid.study_grid_bounds is None and not grid.study_area is None:
             ax.set_facecolor(sample_area_color)
             cells_rndm_sample = grid._search_internals.cells_rndm_sample
             _si = grid._search_internals
-            col_min = int(round((grid.sample_grid_bounds[0]-_si.bounds.xmin)/_si.spacing,0))
-            row_min = int(round((grid.sample_grid_bounds[1]-_si.bounds.ymin)/_si.spacing,0))
-            col_max = int(round((grid.sample_grid_bounds[2]-_si.bounds.xmin)/_si.spacing-1,0))
-            row_max = int(round((grid.sample_grid_bounds[3]-_si.bounds.ymin)/_si.spacing-1,0))
+            col_min = int(round((grid.study_grid_bounds[0]-_si.bounds.xmin)/_si.spacing,0))
+            row_min = int(round((grid.study_grid_bounds[1]-_si.bounds.ymin)/_si.spacing,0))
+            col_max = int(round((grid.study_grid_bounds[2]-_si.bounds.xmin)/_si.spacing-1,0))
+            row_max = int(round((grid.study_grid_bounds[3]-_si.bounds.ymin)/_si.spacing-1,0))
             # row_min, row_max = min([row for row,col in grid.cells_rndm_sample]), max([row for row,col in grid.cells_rndm_sample])
             # col_min, col_max = min([col for row,col in grid.cells_rndm_sample]), max([col for row,col in grid.cells_rndm_sample])
             n_rows_x = row_max - row_min + 1
@@ -181,7 +181,7 @@ def create_plots_for_vars(
                     if 0 <= ri < n_rows_x and 0 <= ci < n_cols_x:
                         X[ri, ci] = False
             cmap_binary = _plt_ListedColormap([sample_area_color, non_valid_area_color])
-            extent = [grid.sample_grid_bounds[0],grid.sample_grid_bounds[2],grid.sample_grid_bounds[1],grid.sample_grid_bounds[3]]
+            extent = [grid.study_grid_bounds[0],grid.study_grid_bounds[2],grid.study_grid_bounds[1],grid.study_grid_bounds[3]]
             p = ax.imshow(X=X, interpolation='none', cmap=cmap_binary, extent=extent)#, To-Do the extent is imprecise as it does not cover the full grid only its points
             non_valid_patch = _plt_Patch(facecolor=non_valid_area_color, label='Non-valid area', edgecolor=non_valid_area_color)
             sample_patch = _plt_Patch(facecolor=sample_area_color, label='Sample area', edgecolor=sample_area_color)

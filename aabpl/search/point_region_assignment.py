@@ -530,10 +530,15 @@ def assign_points_to_mirco_regions(
                                                       'offset_region_comb_nr_to_check',
                                                       'offset_all_x_vals', 'offset_all_y_vals',
                                                       'id_to_offset_regions')})
-    
-    
-    
 
+    # ---- single-region fast path -----------------------------------------------
+    # build_disk_region_lookups signals this with an empty raster dict (triggered by
+    # cfg.SINGLE_REGION=True or sr < sqrt(2)).  All source points belong to one
+    # region — skip the expensive pd.cut + while loop entirely.
+    if not _lookups['raster_cell_to_region_comb_nr']:
+        pts[cell_region_name] = 0
+        pts['region_and_trgl_id'] = pts['triangle_id'].astype('int64')
+        return
 
     lbls_x = [-ix for ix in reversed(range(1, (len(offset_all_x_vals)-1)//2+1))] + list(range(1,(len(offset_all_x_vals)-1)//2+1))
     lbls_y = [-iy for iy in reversed(range(1, (len(offset_all_y_vals)-1)//2+1))] + list(range(1,(len(offset_all_y_vals)-1)//2+1))

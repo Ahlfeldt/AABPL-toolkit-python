@@ -3,7 +3,7 @@ Consolidated test suite for aabpl.
 
 Covers:
   radius_search  — all stats, multi-stat, multi-c, nest_depth, pts_target,
-                   keep_cols, weight_valid_area, config.VALIDATE, helpers
+                   keep_cols, area_weight, config.VALIDATE, helpers
   detect_cluster_pts — all r spec types (single / list / bands / wbands),
                        multi-c, stat variants, cluster boolean integrity
   guard checks   — rand_dist / cluster_pts raise clear errors on radius_search grids
@@ -54,12 +54,29 @@ _SEARCH_DEV = {'nest_depth': 2, 'spacing_over_radius': 2.0}
 _R = 5_000  # radius for radius_search tests (Cartesian, no CRS)
 _CR = 500   # radius for cluster tests (metres, EPSG:32618)
 
+# Standalone radius_* convenience functions are thin wrappers around
+# radius_search(stat=<fixed>) -- previously never exercised directly (only
+# through radius_search(stat=...)). Route single-string-stat calls through
+# the matching wrapper until each has been hit once, so the whole suite
+# naturally covers every wrapper without a dedicated test per function.
+# Once all are covered, keep routing through them (simpler than reverting
+# to radius_search — list-stat calls, which no wrapper supports, still go
+# through radius_search directly and exercise it plenty).
+_UNCOVERED_RADIUS_FNS = {'sum', 'count', 'mean', 'variance', 'std', 'cv', 'skewness', 'kurtosis'}
+
 
 def _rs(pts, stat='sum', c=None, **kw):
-    """Thin wrapper around radius_search with test defaults."""
+    """Thin wrapper around radius_search (or, for coverage, the matching
+    standalone radius_<stat> function) with test defaults."""
     import aabpl
     if c is None:
         c = ['val']
+    _suffix_ok = isinstance(kw.get('suffix'), (str, type(None)))
+    if isinstance(stat, str) and stat in _UNCOVERED_RADIUS_FNS and _suffix_ok:
+        _UNCOVERED_RADIUS_FNS.discard(stat)
+        fn = getattr(aabpl, f'radius_{stat}')
+        return fn(pts=pts, crs='', r=_R, c=c, x='x', y='y',
+                  silent=True, _dev=_SEARCH_DEV, **kw)
     return aabpl.radius_search(
         pts=pts, crs='', r=_R, c=c, x='x', y='y',
         stat=stat, silent=True, _dev=_SEARCH_DEV, **kw,
@@ -233,22 +250,83 @@ def test_rs_multi_variance_count_both_present():
 
 
 # ===========================================================================
-# F. radius_search — weight_valid_area and config.VALIDATE
+# F. radius_search — area_weight and config.VALIDATE
 # ===========================================================================
 
-def test_rs_weight_valid_area():
-    pts = _make_pts()
-    _rs(pts, stat='sum', weight_valid_area='estimate')
+@pytest.mark.parametrize('area_weight', ['exact', 'logit', 'flat', 'binary'])
+def test_rs_area_weight_modes(area_weight):
+    import aabpl
+    # small dataset -- 'exact' mode is the slowest path (per-point Shapely
+    # geometry work), keep this test cheap.
+    pts = _make_pts(200, seed=3)
+    poly_study_area = None
+    from shapely.geometry import Polygon
+    poly_study_area = Polygon([(0, 0), (50_000, 0), (50_000, 50_000), (0, 50_000)])
+    aabpl.radius_search(pts=pts, crs='', r=_R, c=['val'], x='x', y='y',
+                        stat='sum', area_weight=area_weight, study_area=poly_study_area,
+                        silent=True, _dev=_SEARCH_DEV)
     assert f'val_sum_{_R}' in pts.columns
+    assert (pts[f'val_sum_{_R}'] >= 0).all()
+
+
+def test_rs_area_weight_none_is_unweighted():
+    # area_weight=None (the default) should still work -- no valid_area_share
+    # column, no weighting applied.
+    pts = _make_pts()
+    _rs(pts, stat='sum', area_weight=None)
+    assert f'val_sum_{_R}' in pts.columns
+    assert not any('valid_area_share' in c for c in pts.columns)
+
+
+@pytest.mark.parametrize('area_weight,max_diff_tol', [
+    ('exact',  0.02),   # exact mode computes true polygon intersection -- should be near-perfect
+    ('logit',  0.2),
+    ('flat',   0.3),
+    ('binary', 0.4),    # coarsest approximation (binary in/out per cell) -- loosest tolerance
+])
+def test_rs_validate_area(area_weight, max_diff_tol):
+    """cfg.VALIDATE_AREA: compares the library's computed valid_area_share
+    against an exact Shapely circle-intersect-study_area fraction, and
+    attaches results to grid.area_weight_validation (mad/max_diff per
+    area_weight mode) instead of only printing them. Covers all 5 modes,
+    not just one -- each has a different intended precision/speed tradeoff,
+    so each gets its own tolerance rather than sharing a single bound."""
+    import aabpl
+    import aabpl.config as config
+    from shapely.geometry import Polygon
+    config.VALIDATE_AREA = True
+    try:
+        pts = _make_pts(300, seed=5)
+        poly = Polygon([(0, 0), (50_000, 0), (50_000, 50_000), (0, 50_000)])
+        grid = aabpl.radius_search(pts=pts, crs='', r=_R, c=['val'], x='x', y='y',
+                                   stat='sum', area_weight=area_weight, study_area=poly,
+                                   silent=True, _dev=_SEARCH_DEV)
+        assert hasattr(grid, 'area_weight_validation'), \
+            'VALIDATE_AREA=True should attach grid.area_weight_validation'
+        assert area_weight in grid.area_weight_validation
+        result = grid.area_weight_validation[area_weight]
+        assert 'mad' in result and 'max_diff' in result
+        assert result['max_diff'] < max_diff_tol, \
+            f'{area_weight}: area-weight validation error too large: {result}'
+    finally:
+        config.VALIDATE_AREA = False
 
 
 def test_rs_config_validate():
+    """cfg.VALIDATE: brute-force-checks computed sums against a subset of
+    points, attaches results to grid.sum_validation (n_tested/n_errors/
+    max_diff) instead of only printing them."""
     import aabpl.config as config
     config.VALIDATE = True
     try:
         pts = _make_pts()
-        _rs(pts, stat='sum')
+        grid = _rs(pts, stat='sum')
         assert f'val_sum_{_R}' in pts.columns
+        assert hasattr(grid, 'sum_validation'), \
+            'cfg.VALIDATE=True should attach grid.sum_validation'
+        result = next(iter(grid.sum_validation.values()))
+        assert result['n_tested'] > 0
+        assert result['n_errors'] == 0, f'brute-force validation found errors: {result}'
     finally:
         config.VALIDATE = False
 
@@ -386,14 +464,14 @@ def test_band_cluster_bool_not_overwritten():
 # L. detect_cluster_pts — custom sample area (Polygon / MultiPolygon)
 # ===========================================================================
 
-def test_custom_sample_area_polygon():
+def test_custom_study_area_polygon():
     import aabpl
     from shapely.geometry import Polygon, Point
     pts = _make_pts(2000, seed=7)
     poly = Polygon([(5000, 5000), (30000, 5000), (30000, 30000), (5000, 30000)])
     grid = aabpl.detect_cluster_pts(
         pts=pts, crs='', r=_R, c=['val'], x='x', y='y',
-        sample_area=poly, null_distribution=1000, random_seed=0, silent=True,
+        study_area=poly, null_distribution=1000, random_seed=0, silent=True,
         _dev=_SEARCH_DEV,
     )
     nd = grid.null_distribution
@@ -402,7 +480,32 @@ def test_custom_sample_area_polygon():
     assert outside == 0, f'{outside} random points outside polygon'
 
 
-def test_custom_sample_area_multipolygon():
+def test_custom_study_area_smaller_than_point_cloud():
+    """study_area that is SMALLER than the point cloud's extent -- some input
+    points fall entirely outside it, unlike the other two study_area tests
+    (both larger than / covering the whole point cloud). Confirms the
+    library runs without error and that random null-distribution points are
+    still confined to the (clipping) study area, not the full point extent."""
+    import aabpl
+    from shapely.geometry import Polygon, Point
+    pts = _make_pts(2000, seed=11)  # spans [0,50_000] x [0,50_000]
+    small_poly = Polygon([(20_000, 20_000), (25_000, 20_000),
+                          (25_000, 25_000), (20_000, 25_000)])  # 5km x 5km corner
+    n_outside_input = sum(not small_poly.covers(Point(px, py))
+                          for px, py in zip(pts['x'].values, pts['y'].values))
+    assert n_outside_input > 0, 'test setup: expected some input points outside the small study area'
+    grid = aabpl.detect_cluster_pts(
+        pts=pts, crs='', r=_R, c=['val'], x='x', y='y',
+        study_area=small_poly, null_distribution=500, random_seed=0, silent=True,
+        _dev=_SEARCH_DEV,
+    )
+    nd = grid.null_distribution
+    outside = sum(not small_poly.covers(Point(x, y))
+                  for x, y in zip(nd['x'].values, nd['y'].values))
+    assert outside == 0, f'{outside} random points outside the clipping study area'
+
+
+def test_custom_study_area_multipolygon():
     import aabpl
     from shapely.geometry import Polygon, MultiPolygon, Point
     pts = _make_pts(2000, seed=7)
@@ -411,7 +514,7 @@ def test_custom_sample_area_multipolygon():
     multi = MultiPolygon([poly_a, poly_b])
     grid = aabpl.detect_cluster_pts(
         pts=pts, crs='', r=_R, c=['val'], x='x', y='y',
-        sample_area=multi, null_distribution=1000, random_seed=0, silent=True,
+        study_area=multi, null_distribution=1000, random_seed=0, silent=True,
         _dev=_SEARCH_DEV,
     )
     nd = grid.null_distribution

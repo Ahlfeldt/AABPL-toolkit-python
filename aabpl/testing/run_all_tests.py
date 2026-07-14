@@ -8,7 +8,7 @@ Covers:
 - nest_depth 0, 2, 3
 - Cartesian CRS (crs='')
 - Separate pts_target
-- weight_valid_area
+- area_weight
 - config.VALIDATE=True
 - cell_count / cell_count_iter helpers
 - Grid attribute checks (no legacy id_to_pt_ids)
@@ -203,19 +203,19 @@ finally:
     config.VALIDATE = False
 
 # ═══════════════════════════════════════════════════════════════════════════════
-section("9 · weight_valid_area  (nd=2, sum)")
+section("9 · area_weight  (nd=2, sum)")
 # ═══════════════════════════════════════════════════════════════════════════════
 
 config.VALIDATE = False
 pts = pts_base.copy()
 try:
     grid = rs(pts=pts, crs='', r=R, c=['val'], x='x', y='y',
-                               stat='sum', weight_valid_area='estimate',
+                               stat='sum', area_weight='estimate',
                                silent=True, _dev=DEV)
-    check(f'val_sum_{R}' in pts.columns, f"weight_valid_area: missing val_sum_{R}")
-    print(f"  weight_valid_area='estimate'  OK")
+    check(f'val_sum_{R}' in pts.columns, f"area_weight: missing val_sum_{R}")
+    print(f"  area_weight='estimate'  OK")
 except Exception as e:
-    print(f"  weight_valid_area skipped: {e}")
+    print(f"  area_weight skipped: {e}")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 section("10 · count-only mode with explicit c  (nd=2)")
@@ -373,9 +373,7 @@ try:
     )
     print(f"  detect_cluster_cells separate pts_target  OK")
 except Exception as e:
-    # KNOWN ISSUE: create_clusters looks for out_id_y/out_id_x in pts_src
-    # when pts_target is separate — pre-existing bug, not related to recent changes.
-    print(f"  detect_cluster_cells separate pts_target  KNOWN ISSUE (skipped): {e}")
+    raise AssertionError(f"detect_cluster_cells (separate target) raised: {e}")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 section("14 · detect_cluster_cells_from_labeled_pts  (crs='', nd=2)")
@@ -394,9 +392,7 @@ try:
     check(hasattr(grid, 'clustering'), "detect_cluster_cells_from_labeled_pts: grid has no 'clustering' attribute")
     print(f"  detect_cluster_cells_from_labeled_pts  OK")
 except Exception as e:
-    # KNOWN ISSUE: x_steps is None when create_clusters calls get_cell_centroid
-    # — update_spacing() not called before clustering in this path.
-    print(f"  detect_cluster_cells_from_labeled_pts  KNOWN ISSUE (skipped): {e}")
+    raise AssertionError(f"detect_cluster_cells_from_labeled_pts raised: {e}")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 section("15 · grid.plot.* smoke tests after keep_cols=False cleanup")
@@ -449,7 +445,7 @@ except Exception as e:
     raise AssertionError(f"grid.plot.rand_dist raised after keep_cols=False cleanup: {e}")
 
 # ═══════════════════════════════════════════════════════════════════════════════
-section("16 · custom sample_area: Polygon and MultiPolygon containment check")
+section("16 · custom study_area: Polygon and MultiPolygon containment check")
 # ═══════════════════════════════════════════════════════════════════════════════
 # Verifies that ALL random null-distribution points fall inside the user-supplied
 # polygon/multipolygon.  Uses crs='' (Cartesian) so projected coords == input coords.
@@ -465,7 +461,7 @@ for label, sa in [('Polygon', poly_a), ('MultiPolygon', multi)]:
     pts = pts_sa.copy()
     grid_sa = aabpl.detect_cluster_pts(
         pts=pts, crs='', r=R, c=['val'], x='x', y='y',
-        sample_area=sa,
+        study_area=sa,
         n_random_points=2000, random_seed=0,
         silent=True, _dev=DEV,
     )
@@ -478,6 +474,61 @@ for label, sa in [('Polygon', poly_a), ('MultiPolygon', multi)]:
     check(n_outside == 0,
           f"{label}: {n_outside}/{len(xs)} random points fall outside the supplied polygon")
     print(f"  {label}: all {len(xs)} random points inside supplied geometry  OK")
+
+# ═══════════════════════════════════════════════════════════════════════════════
+section("17 · area_weight variants: accuracy (VALIDATE_AREA) + timing")
+# ═══════════════════════════════════════════════════════════════════════════════
+# Uses a small Cartesian dataset with a known study-area polygon so that the
+# exact circle ∩ polygon fraction (computed by Shapely) is fast to verify.
+# Results (timing + VALIDATE_AREA report) are saved to tests/area_weight_timing.json.
+import json, time as _time, os as _os
+from shapely.geometry import Polygon as _Poly
+
+_aw_pts  = _make_pts(500, seed=42)
+_aw_poly = _Poly([(5000, 5000), (45000, 5000), (45000, 45000), (5000, 45000)])
+
+_AW_VARIANTS = ['exact', 'logit', 'flat', 'binary']
+_AW_R        = 4000
+
+config.VALIDATE_AREA = True
+_aw_timing = {}
+
+for _wva in _AW_VARIANTS:
+    _pts = _aw_pts.copy()
+    _t0 = _time.perf_counter()
+    rs(_pts, crs='', r=_AW_R, c=['val'], x='x', y='y',
+       study_area=_aw_poly, area_weight=_wva,
+       silent=True, _dev=DEV)
+    _elapsed = _time.perf_counter() - _t0
+    _share_col = f'val_sum_{_AW_R}'
+    _va_col    = f'valid_area_share_{_AW_R}'
+    check(_va_col in _pts.columns, f"area_weight='{_wva}': missing {_va_col}")
+    _aw_timing[_wva] = {'time_s': round(_elapsed, 4)}
+    print(f"  area_weight='{_wva}'  t={_elapsed:.3f}s  OK")
+
+config.VALIDATE_AREA = False
+
+# baseline (no area_weight)
+_pts = _aw_pts.copy()
+_t0  = _time.perf_counter()
+rs(_pts, crs='', r=_AW_R, c=['val'], x='x', y='y', silent=True, _dev=DEV)
+_aw_timing['none'] = {'time_s': round(_time.perf_counter() - _t0, 4)}
+
+_aw_out = {
+    'dataset': 'synthetic_n=500_cartesian',
+    'r': _AW_R,
+    'variants': _aw_timing,
+    'speedup_vs_none': {
+        k: round(v['time_s'] / _aw_timing['none']['time_s'], 2)
+        for k, v in _aw_timing.items() if k != 'none'
+    },
+}
+_json_path = _os.path.join(_os.path.dirname(__file__),
+                            '..', '..', 'tests', 'area_weight_timing.json')
+_json_path = _os.path.normpath(_json_path)
+with open(_json_path, 'w') as _f:
+    json.dump(_aw_out, _f, indent=2)
+print(f"  Timing saved to {_json_path}")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 print("\n" + "="*60)

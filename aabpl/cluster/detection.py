@@ -34,8 +34,8 @@ def _detect_cluster_pts_multi(
     stat,
     exclude_self,
     cell_size,
-    sample_area,
-    weight_valid_area,
+    study_area,
+    area_weight,
     k_th_percentile,
     null_distribution,
     random_seed,
@@ -65,13 +65,13 @@ def _detect_cluster_pts_multi(
     Called by detect_cluster_pts when r is not a single scalar.
     Not intended for direct use — call detect_cluster_pts instead.
     """
-    from aabpl.main import radius_search, _validate_kwargs, resolve_sample_area
+    from aabpl.main import radius_search, _validate_kwargs, resolve_study_area
     from aabpl.utils.misc import find_column_name
     from aabpl.search.multi_radius import (
         _parse_r_spec, _multi_radius_search, _fmt_r, _AGG_ABBR, _combine_bands_on_df,
     )
     from aabpl.search.null_distribution import compute_null_distribution
-    from aabpl.search.sample_area import intersect_polygon_with_grid
+    from aabpl.search.study_area import intersect_polygon_with_grid
 
     spec_type, spec_data = parsed_spec if parsed_spec is not None else _parse_r_spec(r)
     max_radius = (
@@ -117,16 +117,16 @@ def _detect_cluster_pts_multi(
         row_name=row_name, col_name=col_name,
         pts_target=pts_target, x_tgt=x_tgt, y_tgt=y_tgt,
         row_name_tgt=row_name_tgt, col_name_tgt=col_name_tgt,
-        weight_valid_area=weight_valid_area,
+        area_weight=area_weight,
     )
 
-    last_grid.sample_area = resolve_sample_area(
-        pts=pts, r=max_radius, sample_area=sample_area,
+    last_grid.study_area = resolve_study_area(
+        pts=pts, r=max_radius, study_area=study_area,
         crs=crs, local_crs=local_crs,
         x=x, y=y, grid=last_grid,
         min_pts_to_sample_cell=min_pts_to_sample_cell, no_plot=True,
     )
-    intersect_polygon_with_grid(grid=last_grid, weight_valid_area=weight_valid_area)
+    intersect_polygon_with_grid(grid=last_grid, area_weight=area_weight)
 
     grids_by_radius = last_grid._mr_grids
     k_th_percentiles = (
@@ -148,7 +148,7 @@ def _detect_cluster_pts_multi(
             continue
         radius_suffix = f'_{stat_str}_{_fmt_r(radius)}'
         thresholds_for_radius, null_df = compute_null_distribution(
-            grid=grid_for_radius, pts=pts, sample_area=last_grid.sample_area,
+            grid=grid_for_radius, pts=pts, study_area=last_grid.study_area,
             min_pts_to_sample_cell=min_pts_to_sample_cell,
             c=value_cols, x=x, y=y, row_name=row_name, col_name=col_name,
             suffix=radius_suffix, null_distribution=null_df,

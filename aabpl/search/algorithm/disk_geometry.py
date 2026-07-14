@@ -472,7 +472,7 @@ def _batch_vtx_checks(vtx_pts, vtx_cntd, vtx_ovlpd,
             V[:, None, :] - edge_p1[None, :, :], axis=-1)   # (N, M)
         d2 = _np.linalg.norm(
             V[:, None, :] - edge_p2[None, :, :], axis=-1)   # (N, M)
-        contained = _np.all(_np.maximum(d1, d2) <= r_over_s, axis=1)  # (N,)
+        contained = _np.all(_np.maximum(d1, d2) < r_over_s, axis=1)  # (N,) strict: boundary → overlap
         for i, vp in enumerate(need_cntd):
             if bool(contained[i]):
                 vtx_cntd[vp] = True
@@ -2188,9 +2188,34 @@ def _cells_to_arr(cells):
     return _np_local.array([[lvl, r, c] for lvl, (r, c) in cells], dtype=_np_local.float32)
 
 
+def _min_single_region_ovlpd_cells(grid_spacing, r, include_boundary, nest_depth):
+    """Minimal single-region overlap-cell set, computed directly via
+    classify_disk_cells_by_level -- the same cheap computation the
+    single-region fast path (build_disk_region_lookups) uses. Independent of
+    whether the full multi-region geometry is also being built: this is a
+    strictly smaller/tighter answer than unioning all 8-sector multi-region
+    templates together (what build_region_cell_lookups used to do here), so
+    it's always preferable regardless of which branch is active. Measured
+    difference at sr=2.0, r=2000, nest_depth=3: 24 cells (this function) vs
+    1,368 cells (old union-based approach) -- both correct, but the union
+    version made any chunk that adaptively picks a single_region=True tag
+    while the global SINGLE_REGION flag is False (the normal adaptive
+    default) pay for a ~57x larger overlap template than necessary.
+    """
+    _cntd_raw, _, _ovlpd_raw, _ = classify_disk_cells_by_level(
+        grid_spacing=grid_spacing, r=r, include_boundary=include_boundary, nest_depth=nest_depth,
+    )
+    _ovlpd_set = {(0, (int(rc[0]), int(rc[1]))) for rc in _ovlpd_raw.tolist()}
+    return _cells_to_arr(_ovlpd_set)
+
+
 def build_region_cell_lookups(
         id_to_offset_regions: dict,
         shared_cntd_cells: set,
+        nest_depth: int = 0,
+        grid_spacing: float = None,
+        r: float = None,
+        include_boundary: bool = False,
 ) -> dict:
     """
     Build all region-cell lookup dicts that the radius-search loop reads at runtime.
@@ -2244,6 +2269,19 @@ def build_region_cell_lookups(
     attr['region_and_trgl_id_to_nested_cntd_cells']    = region_and_trgl_to_nested_cntd_cells
     attr['region_and_trgl_id_to_distinct_cntd_cells']  = region_and_trgl_to_distinct_cntd_cells
     attr['region_and_trgl_id_to_distinct_ovlpd_cells'] = region_and_trgl_to_distinct_ovlpd_cells
+
+    # ---- single-region merged overlap template ----------------------------------
+    # Computed directly via the same cheap classify_disk_cells_by_level path the
+    # single-region fast path uses (see _min_single_region_ovlpd_cells), rather
+    # than unioning every multi-region template together -- that union was a
+    # valid but ~57x larger superset (measured at sr=2.0: 1,368 vs 24 cells),
+    # which meant any chunk adaptively dispatched to a single_region=True tag
+    # while this (multi-region) branch built the geometry paid for a needlessly
+    # bloated overlap template. Requires grid_spacing/r to be passed through.
+    if grid_spacing is not None and r is not None:
+        attr['single_region_ovlpd_cells'] = _min_single_region_ovlpd_cells(
+            grid_spacing, r, include_boundary, nest_depth)
+
     return attr
 
 
@@ -2254,14 +2292,22 @@ def _downgrade_cell_pair(cntd_arr, ovlpd_arr, deep_level):
     Rules
     -----
     - Cells at levels < deep_level pass through unchanged.
-    - Contained cells at deep_level: group by parent (row//2, col//2).
+    - Contained cells at deep_level: group by parent.
         All 4 siblings present in cntd  -> parent is contained.
         Fewer than 4                    -> parent is overlapped.
     - Overlapped cells at deep_level: parent is always overlapped (deduplicated).
     - A parent promoted to both cntd and ovlpd is kept as overlapped.
+
+    Cell coordinates use the disk-geometry centroid system: level-0 cells have
+    integer (row, col) offsets from the source; level-k sub-cells are at their
+    centroid, which is the parent centroid ± 2^(-(k+2)).  Division by 2 does NOT
+    recover the parent — the correct formula matches merge_nested_cells_bottom_up.
     """
     import numpy as _np
     parent_level = deep_level - 1
+    # child centroid spacing used by get_children at this level
+    _step  = 2.0 ** (-deep_level)       # half child-to-child gap (= delta used by get_children at deep_level-1)
+    _pstep = 2.0 * _step                 # parent centroid spacing
 
     if len(cntd_arr):
         _mask = cntd_arr[:, 0] == deep_level
@@ -2277,19 +2323,30 @@ def _downgrade_cell_pair(cntd_arr, ovlpd_arr, deep_level):
         ovlpd_shallow = ovlpd_arr
         ovlpd_deep = _np.empty((0, 3), dtype=_np.float32)
 
+    def _parent_coords(sub):
+        """Centroid-aware parent coordinate computation (mirrors merge_nested_cells_bottom_up)."""
+        r = sub[:, 1].astype(_np.float64)
+        c = sub[:, 2].astype(_np.float64)
+        if parent_level == 0:
+            # level-0 centres are integers; floor(r+0.5) rounds to nearest int
+            pr = _np.floor(r + 0.5).astype(_np.int32)
+            pc = _np.floor(c + 0.5).astype(_np.int32)
+        else:
+            pr = r - (r % _pstep) + _step
+            pc = c - (c % _pstep) + _step
+        return pr, pc
+
     new_cntd_set  = set()
     new_ovlpd_set = set()
 
     if len(cntd_deep):
         from collections import Counter as _Counter
-        p_r = (cntd_deep[:, 1] / 2).astype(_np.int32)
-        p_c = (cntd_deep[:, 2] / 2).astype(_np.int32)
+        p_r, p_c = _parent_coords(cntd_deep)
         for (pr, pc), cnt in _Counter(zip(p_r.tolist(), p_c.tolist())).items():
             (new_cntd_set if cnt == 4 else new_ovlpd_set).add((pr, pc))
 
     if len(ovlpd_deep):
-        p_r = (ovlpd_deep[:, 1] / 2).astype(_np.int32)
-        p_c = (ovlpd_deep[:, 2] / 2).astype(_np.int32)
+        p_r, p_c = _parent_coords(ovlpd_deep)
         new_ovlpd_set.update(zip(p_r.tolist(), p_c.tolist()))
 
     new_cntd_set -= new_ovlpd_set  # ovlpd wins on conflict
@@ -2333,7 +2390,13 @@ def downgrade_disk_region_cache_entry(entry, from_nd):
         rid_to_cntd_new[rid]  = c
         rid_to_ovlpd_new[rid] = o
 
-    shared_set_new = frozenset(map(tuple, shared_c_new.astype(int).tolist())) if len(shared_c_new) else frozenset()
+    # Use float32 round-trip for frozenset keys to preserve sub-cell centroid coordinates
+    # (astype(int) would corrupt non-integer level-1+ coordinates like (1, 1.75, -0.25)).
+    def _arr_to_fset(arr):
+        if not len(arr): return frozenset()
+        return frozenset(map(tuple, arr.astype(_np.float32).tolist()))
+
+    shared_set_new = _arr_to_fset(shared_c_new)
     mult = entry['region_and_trgl_mult']
     rtrgl_nc_new = {}
     rtrgl_dc_new = {}
@@ -2346,7 +2409,7 @@ def downgrade_disk_region_cache_entry(entry, from_nd):
         )
         rtrgl_nc_new[key] = nc_new
         rtrgl_do_new[key] = do_new
-        nc_set = frozenset(map(tuple, nc_new.astype(int).tolist())) if len(nc_new) else frozenset()
+        nc_set = _arr_to_fset(nc_new)
         dc_set = nc_set - shared_set_new
         rtrgl_dc_new[key] = _np.array(sorted(dc_set), dtype=_np.float32) if dc_set else _np.empty((0, 3), dtype=_np.float32)
 
@@ -2413,6 +2476,45 @@ def build_disk_region_lookups(
         _config.disk_region_cache.move_to_end(_cache_key)
         return {**_config.disk_region_cache[_cache_key], 'id_to_offset_regions': {}}
 
+    # ---- single-region fast path ------------------------------------------------
+    # Triggered by cfg.SINGLE_REGION=True (any sr) or sr < sqrt(2) (regions
+    # unreliable below this threshold).  Skips the full arc/triangle/raster
+    # machinery and returns a trivial result: all cells in one region.
+    # Raster fields are empty dicts — assign_points_to_mirco_regions detects
+    # this and skips the per-source-point raster assignment loop.
+    # Uses a separate cache key prefix 'sr' to avoid colliding with normal entries.
+    _use_sr_fast_path = (
+        _config.SINGLE_REGION or r / grid_spacing < 2 ** 0.5 - 1e-10
+    ) and plot_offset_checks is None and plot_offset_regions is None and plot_offset_raster is None
+    if _use_sr_fast_path:
+        _sr_key = ('sr', round(r / grid_spacing, 8), nest_depth, include_boundary)
+        if _sr_key not in _config.disk_region_cache:
+            import numpy as _np_sr
+            _cntd_raw, _, _ovlpd_raw, _ = classify_disk_cells_by_level(
+                grid_spacing=grid_spacing, r=r, include_boundary=include_boundary, nest_depth=nest_depth,
+            )
+            _cntd_set  = {(0, (int(rc[0]), int(rc[1]))) for rc in _cntd_raw.tolist()}
+            _ovlpd_set = {(0, (int(rc[0]), int(rc[1]))) for rc in _ovlpd_raw.tolist()}
+            _config.disk_region_cache[_sr_key] = {
+                'raster_cell_to_region_comb_nr':           {},
+                'offset_region_comb_nr_to_check':          {},
+                'offset_all_x_vals':                       _np_sr.empty(0),
+                'offset_all_y_vals':                       _np_sr.empty(0),
+                'contain_region_mult':                     1,
+                'shared_cntd_cells':                       _cells_to_arr(_cntd_set),
+                'single_region_ovlpd_cells':               _cells_to_arr(_ovlpd_set),
+                'region_id_to_cntd_cells':                 {},
+                'region_id_to_ovlpd_cells':                {},
+                'region_id_to_area':                       {},
+                'region_and_trgl_mult':                    _REGION_AND_TRGL_MULT,
+                'region_and_trgl_id_to_nested_cntd_cells':    {},
+                'region_and_trgl_id_to_distinct_cntd_cells':  {},
+                'region_and_trgl_id_to_distinct_ovlpd_cells': {},
+            }
+            _evict_disk_region_cache()
+        _config.disk_region_cache.move_to_end(_sr_key)
+        return {**_config.disk_region_cache[_sr_key], 'id_to_offset_regions': {}}
+
     _prog = _DiskRegionProgress(silent=silent, r_over_spacing=r/grid_spacing, nest_depth=nest_depth)
     _prog.start()
 
@@ -2431,7 +2533,7 @@ def build_disk_region_lookups(
 
     _prog.step("Init triangle + boundary checks")
     trgl_regions = init_triangle1_region()
-    check_dict, cells_always_ovlpd = build_boundary_checks(cells_maybe_overlapping_a_trgl_disk, trgl_regions, r=r)
+    check_dict, cells_always_ovlpd = build_boundary_checks(cells_maybe_overlapping_a_trgl_disk, trgl_regions, r=r, grid_spacing=grid_spacing)
 
     _prog.step("Split regions")
     split_regions_by_checks(check_dict=check_dict, trgl_regions=trgl_regions, r=r, plot_offset_checks=plot_offset_checks)
@@ -2538,10 +2640,10 @@ def build_disk_region_lookups(
     for region in regions:
         region_area = region.calc_area()
         total_reg_area+=region_area
-        n_cntd += region_area * (len(region.distinct_cntd_cells)) 
+        n_cntd += region_area * (len(region.distinct_cntd_cells))
         n_ovlpd += region_area * (len(region.distinct_ovlpd_cells))
-        area_cntd += region_area * (sum([2**(-2*lvl) for lvl, cell in region.distinct_cntd_cells])) 
-        area_ovlpd += region_area * (sum([2**(-2*lvl) for lvl, cell in region.distinct_ovlpd_cells])) 
+        area_cntd += region_area * (sum([2**(-2*lvl) for lvl, cell in region.distinct_cntd_cells]))
+        area_ovlpd += region_area * (sum([2**(-2*lvl) for lvl, cell in region.distinct_ovlpd_cells]))
     # print("cn", round(area_cntd/(_math_pi *r**2),4), 
     #       "ov", round(area_ovlpd/(_math_pi *r**2),4),
     #       "tot", round((area_ovlpd+area_cntd)/(_math_pi *r**2),4),
@@ -2553,7 +2655,9 @@ def build_disk_region_lookups(
     #       'sh_cn',len(shared_cntd_cells), 
     #       'sh_ov', len(shared_ovlpd_cells))
     
-    _region_cell_lookups = build_region_cell_lookups(id_to_offset_regions, shared_cntd_cells)
+    _region_cell_lookups = build_region_cell_lookups(
+        id_to_offset_regions, shared_cntd_cells, nest_depth,
+        grid_spacing=grid_spacing, r=r, include_boundary=include_boundary)
     _prog.done()
     _result = {
         'raster_cell_to_region_comb_nr':  raster_cell_to_region_comb_nr,
@@ -2590,10 +2694,20 @@ def _evict_disk_region_cache():
         # candidate pool: oldest quarter, never including the last (most recent) entry
         pool_size = max(1, n // 4)
         candidates = keys[:pool_size]
+        # Two key shapes share this cache: normal entries are
+        # (spacing_ratio, nest_depth, include_boundary); the single-region
+        # fast path (build_disk_region_lookups) prefixes with the literal
+        # string 'sr' to avoid colliding with normal entries, giving
+        # ('sr', spacing_ratio, nest_depth, include_boundary). Must detect
+        # which shape a key is before indexing into it.
+        def _sr_nd(k):
+            if len(k) == 4 and k[0] == 'sr':
+                return k[1], k[2]
+            return k[0], k[1]
         # among candidates pick the one cheapest to rebuild
         victim = min(
             candidates,
-            key=lambda k: _predict_build(spacing_ratio=k[0], nest_depth=k[1]),
+            key=lambda k: _predict_build(spacing_ratio=_sr_nd(k)[0], nest_depth=_sr_nd(k)[1]),
         )
         del cache[victim]
 

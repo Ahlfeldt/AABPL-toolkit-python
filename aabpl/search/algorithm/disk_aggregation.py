@@ -10,7 +10,7 @@ from aabpl.utils.progress import SearchProgress, progress_print
 from aabpl.illustrations.plot_disk import illustrate_point_disk
 from aabpl.testing.test_performance import time_func_perf
 from math import pi as math_pi
-from ..sample_area import compute_disk_cell_overlap
+from ..study_area import compute_disk_cell_overlap
 from ..point_assignment import cell_count_iter, _lvl0_packed
 from aabpl import config as _cfg
 
@@ -35,7 +35,7 @@ def search_and_aggregate(
     cell_region_name='cell_region',
     suffix=None,
     exclude_self=True,
-    weight_valid_area=None,
+    area_weight=None,
     plot_pt_disk=None,
     silent=False,
     validate=False,
@@ -97,18 +97,29 @@ def search_and_aggregate(
     # ---- edge weighting: which level-0 cells are NOT in the sampling grid ------
     cells_rndm_sample = grid._search_internals.cells_rndm_sample
     if isinstance(cells_rndm_sample, bool) and cells_rndm_sample:
-        weight_valid_area = False  # every cell is sampled -> the whole disk is valid
-    if weight_valid_area not in ('precise', 'estimate', False, None):
-        progress_print("Value for 'weight_valid_area' must be in ['precise', 'estimate', False]. "
-              f"Instead {weight_valid_area!r} was provided.")
-        weight_valid_area = False
+        area_weight = False  # every cell is sampled -> the whole disk is valid
+    if area_weight == 'estimate=0.5':
+        area_weight = 'estimate'  # orig treats estimate=0.5 same as estimate (chunk handles it more efficiently)
+    # Map new area_weight names (chunk-path variants) to closest orig equivalent
+    _AW_ORIG_ALIASES = {
+        'exact':  'precise',
+        'logit':  'estimate',
+        'flat':   'estimate',
+        'binary': 'estimate',
+    }
+    if area_weight in _AW_ORIG_ALIASES:
+        area_weight = _AW_ORIG_ALIASES[area_weight]
+    if area_weight not in ('precise', 'estimate', False, None):
+        progress_print("Value for 'area_weight' must be in ['precise', 'estimate', 'estimate=0.5', False]. "
+              f"Instead {area_weight!r} was provided.")
+        area_weight = False
 
     # ---- integer offset templates (template + home_key == absolute cell keys) --
     shared_cntd_offset = codec.offset_int(shared_cntd_cells)
     cntd_offset_by_region = {rid: codec.offset_int(cells) for rid, cells in cntd_cells_by_region.items()}
     ovlpd_offset_by_region = {rid: codec.offset_int(cells) for rid, cells in ovlpd_cells_by_region.items()}
 
-    if weight_valid_area:
+    if area_weight:
         pad = -int(-grid_spacing // r)
         invalid_cells = set(
             (int(row_id), int(col_id))
@@ -433,11 +444,11 @@ def search_and_aggregate(
             return _buffer[:n]
 
     # ---- valid-area term (per point; only built when weighting) ----------------
-    if weight_valid_area:
+    if area_weight:
         progress_print(
-            "NOTE: weight_valid_area is still in development. Valid/invalid cells are "
+            "NOTE: area_weight is still in development. Valid/invalid cells are "
             "currently determined by data density (cells with too few points are treated "
-            "as invalid) rather than directly from the sample_area polygon geometry. "
+            "as invalid) rather than directly from the study_area polygon geometry. "
             "Results may be inaccurate when data coverage and the polygon boundary diverge."
         )
         _boundary_cntd_area = None
@@ -445,9 +456,9 @@ def search_and_aggregate(
         _boundary_overlap_area = None
         def invalid_cntd_area(cell_region_id, home_key):
             # NOTE: contained cells are treated as binary (fully valid OR fully invalid).
-            # Cells that straddle the sample_area boundary but were classified as fully
+            # Cells that straddle the study_area boundary but were classified as fully
             # valid still contribute 0 invalid area here, causing a slight upward bias in
-            # valid_area_share when sample_area is a custom polygon with sharp edges.
+            # valid_area_share when study_area is a custom polygon with sharp edges.
             # TODO: use cell_to_poly_partly_valid to subtract the actual invalid fraction
             # of boundary-straddling contained cells for a more precise estimate.
             abs_keys = cntd_l0_offset[cell_region_id] + home_key
@@ -462,15 +473,15 @@ def search_and_aggregate(
                 cells.append((int(rr), int(cc)))
             return cells
 
-        if weight_valid_area == 'precise':
+        if area_weight == 'precise':
             if r2 < 2 * grid_spacing ** 2:
                 progress_print("WARNING: the precise valid-area method assumes r >= sqrt(2)*grid_spacing; "
                       "for smaller radii the valid area may be inaccurate.")
             if _bkeys_frac:
-                progress_print("WARNING: weight_valid_area='precise' does not yet correct for cells that "
-                      "straddle the sample_area boundary; those cells are treated as fully valid, "
+                progress_print("WARNING: area_weight='precise' does not yet correct for cells that "
+                      "straddle the study_area boundary; those cells are treated as fully valid, "
                       "causing a slight upward bias in valid_area_share near the boundary. "
-                      "Use weight_valid_area='estimate' for boundary-corrected results.")
+                      "Use area_weight='estimate' for boundary-corrected results.")
 
             def overlap_invalid_area(point_offset, point_xy, point_row, point_col, cells):
                 return sum(compute_disk_cell_overlap(
@@ -490,8 +501,8 @@ def search_and_aggregate(
                 return share.sum() * grid_spacing ** 2
 
             if _bkeys_frac:
-                progress_print("WARNING: weight_valid_area='estimate' approximates cells that straddle "
-                      "the sample_area boundary by scaling the logit estimate by their valid-area "
+                progress_print("WARNING: area_weight='estimate' approximates cells that straddle "
+                      "the study_area boundary by scaling the logit estimate by their valid-area "
                       "fraction (computed at the level-0 search-grid resolution). This assumes the "
                       "invalid portion is spatially uniform within the cell and may be inaccurate for "
                       "polygon edges that cut through a cell at a steep angle.")
@@ -550,7 +561,7 @@ def search_and_aggregate(
                                | rt_changed)
 
     sums_within_disks = _np_zeros((n_pts, n_cols))
-    invalid_area = _np_zeros(n_pts) if weight_valid_area else None
+    invalid_area = _np_zeros(n_pts) if area_weight else None
     progress = SearchProgress(silent=silent, n_pts=n_pts)
     progress.start()
     next_threshold = progress.next_threshold
@@ -564,7 +575,7 @@ def search_and_aggregate(
         if cell_changed[start]:
             cell_sum = sum_over_cells(covered_cell_keys(shared_cntd_offset, hk))
         sums_within_disks[start:end] += cell_sum + sum_over_cells(covered_cell_keys(cntd_offset_by_region[region_and_trgl[start]], hk))
-        if weight_valid_area:
+        if area_weight:
             invalid_area[start:end] += invalid_cntd_area(cell_region[start], hk)
             if _boundary_cntd_area is not None:
                 invalid_area[start:end] += _boundary_cntd_area(cell_region[start], hk)
@@ -587,7 +598,7 @@ def search_and_aggregate(
                 dy = block_xy[:, 1][:, None] - candidate_xy[None, :, 1]
                 inside = (dx * dx + dy * dy) <= r2
                 sums_within_disks[block_start:block_end] += inside.astype(float) @ candidate_vals
-        if weight_valid_area:
+        if area_weight:
             bad_cells = invalid_overlap_cells(cell_region[start], hk)
             if bad_cells:
                 for i in range(start, end):
@@ -602,7 +613,7 @@ def search_and_aggregate(
             next_threshold = progress.update(end - 1)
     progress.done()
 
-    if weight_valid_area:
+    if area_weight:
         valid_area_shares = (full_disk_area - invalid_area) / full_disk_area
 
     # ---- example-disk plot: reconstruct the chosen point once, off the hot path -
@@ -669,9 +680,12 @@ def search_and_aggregate(
             progress_print("Option `exclude_self=True` but search target and search origin DataFrame seem to be different, thus point own values are not substracted. "+
                   "You may have to Fall back to substract the point own values manually from result of radius aggregation.")
 
-    if weight_valid_area:
+    if area_weight:
         share_name = f'valid_area_share_{r}'
         pts_source[share_name] = valid_area_shares
+        if _cfg.VALIDATE_AREA and getattr(grid, 'study_area', None) is not None:
+            from aabpl.testing.validate_area_weight import validate_area_shares as _vaw
+            _vaw(pts_source, share_name, grid.study_area, r, x, y)
         for sum_name in sum_radius_names:
             pts_source[sum_name] = pts_source[sum_name].values / pts_source[share_name].values
         if not silent:

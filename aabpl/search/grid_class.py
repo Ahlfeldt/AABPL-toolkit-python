@@ -1,4 +1,4 @@
-from numpy import (
+﻿from numpy import (
     array as _np_array,
     linspace as _np_linspace,
     stack as _np_stack,
@@ -26,7 +26,7 @@ from .algorithm.disk_search import (
     search_and_aggregate
 )
 from .point_region_assignment import assign_points_to_cell_regions
-from .sample_area import compute_disk_cell_overlap, intersect_polygon_with_grid
+from .study_area import compute_disk_cell_overlap, intersect_polygon_with_grid
 from aabpl.testing.test_performance import time_func_perf
 from aabpl.cluster.clusters import Clustering
 from shapely.geometry import Polygon, Point
@@ -111,7 +111,7 @@ class Grid(object):
         Left-edge coordinates of output columns / rows.
     cell_aggregates : dict
         ``{(row, col): values_array}`` — aggregated indicator values per non-empty cell.
-    sample_area : shapely.Geometry or None
+    study_area : shapely.Geometry or None
         Valid sampling polygon within which null-distribution points are drawn.
     null_distribution : pandas.DataFrame or None
         Random points used for the null distribution with their radius-sum columns.
@@ -178,17 +178,38 @@ class Grid(object):
         if _extent_r_ratio > 10_000_000:
             from aabpl.utils.progress import progress_print as _pp
             _approx_cells = int((xmax - xmin) / r * 1.414) * int((ymax - ymin) / r * 1.414)
+            def _fmt(n):
+                if n >= 1e15: return f'{n/1e15:.3g} quadrillion'
+                if n >= 1e12: return f'{n/1e12:.3g} trillion'
+                if n >= 1e9:  return f'{n/1e9:.3g} billion'
+                if n >= 1e6:  return f'{n/1e6:.3g} million'
+                return f'{n:,.0f}'
+            _w = xmax - xmin; _h = ymax - ymin
             _pp(
-                f'Warning: max(W,H)/r = {_extent_r_ratio:,.0f} (extent {max(xmax-xmin,ymax-ymin):,.0f}, r={r}). '
-                f'Search grid ~{_approx_cells:,.0f} cells — will require very large arrays and may exhaust memory. '
-                f'Check that r is in the same units as your coordinates.'
+                f'WARNING: r={r} appears far too small for this coordinate extent '
+                f'({_w:,.0f} x {_h:,.0f} units). '
+                f'Search grid would have ~{_fmt(_approx_cells)} cells and will exhaust memory or overflow. '
+                f'Check that r is in the same units as your coordinates (metres for projected CRS, '
+                f'degrees for EPSG:4326 — use a projected CRS for metre-based radii). '
+                f'To proceed anyway, increase r or use a projected CRS.'
             )
 
         # auto choose spacing ratio and depth unless explictly set by the user via config.
+        # _ADAPTIVE_NEST_DEPTH_CAP is a narrower, opt-in override for benchmarking
+        # adaptive-routed (FIXED_NEST_DEPTH=None) supercell tags: those never read
+        # the target quadtree beyond level 0 at all, so building it to the grid's
+        # native depth (e.g. 3) is pure waste -- measured at ~5.6s/82% of
+        # aggregate_point_data_to_cells's cost for a 50k-point sparse dataset.
+        # Only takes effect when FIXED_NEST_DEPTH is unset, so it never changes
+        # disk_search.py's routing decision (which reads FIXED_NEST_DEPTH alone)
+        # or any existing production behaviour.
+        _nest_depth_hint = _cfg.FIXED_NEST_DEPTH
+        if _nest_depth_hint is None:
+            _nest_depth_hint = getattr(_cfg, 'ADAPTIVE_NEST_DEPTH_CAP', None)
         spacing, nest_depth = choose_spacing_and_depth(
             r=r,
             spacing_ratio=_cfg.FIXED_SPACING_RATIO,
-            nest_depth=_cfg.FIXED_NEST_DEPTH,
+            nest_depth=_nest_depth_hint,
             n_pts_src=n_pts_src,
             n_pts_tgt=n_pts_tgt,
             n_pts_src_extra=n_pts_src_extra,
@@ -288,8 +309,8 @@ class Grid(object):
         self._search_internals = si
 
         self.bounds = {'data': (xmin, ymin, xmax, ymax)}
-        self.sample_area = None
-        self.sample_grid_bounds = None
+        self.study_area = None
+        self.study_grid_bounds = None
 
         grid_xmin = _sb.xmin
         grid_ymin = _sb.ymin
@@ -447,13 +468,13 @@ class Grid(object):
             lines.append(f'  pts["{row_name}"] / ["{col_name_attr}"]   cell row/col ids written to pts')
 
         # Sample area
-        sa = getattr(self, 'sample_area', None)
+        sa = getattr(self, 'study_area', None)
         if sa is not None:
             x0, y0, x1, y1 = sa.bounds
             geom_type = type(sa).__name__
-            lines.append(f'  grid.sample_area          ({geom_type})  x [{_f(x0)} to {_f(x1)}]  y [{_f(y0)} to {_f(y1)}]')
+            lines.append(f'  grid.study_area           ({geom_type})  x [{_f(x0)} to {_f(x1)}]  y [{_f(y0)} to {_f(y1)}]')
         else:
-            lines.append(f'  grid.sample_area          not set')
+            lines.append(f'  grid.study_area           not set')
 
         # Null distribution
         nd = getattr(self, 'null_distribution', None)
@@ -500,7 +521,7 @@ class Grid(object):
 
         # Other user-facing attributes not listed above
         _internal = {
-            'sums_array', 'pts_ids', 'pts_vals_xy', 'sample_grid_bounds',
+            'sums_array', 'pts_ids', 'pts_vals_xy', 'study_grid_bounds',
             '_output_sample_spacing_x', '_output_sample_spacing_y', '_silent',
             'sample_col_ids', 'sample_col_max', 'sample_col_min',
             'sample_row_ids', 'sample_row_max', 'sample_row_min',
@@ -509,7 +530,7 @@ class Grid(object):
         _mentioned = {
             'row_ids', 'col_ids', 'cell_aggregates', 'x_steps_bounds', 'y_steps_bounds',
             'proj_crs', 'data_crs', '_output_val_cols', 'cell_row_name', 'cell_col_name',
-            'sample_area', 'null_distribution', 'clustering', '_search_class',
+            'study_area', 'null_distribution', 'clustering', '_search_class',
             '_search_internals', '_spacing_computed', '_proj_is_metric',
             '_grid_bounds_proj', '_x_anchor_offset', '_y_anchor_offset',
             'cell_size', 'cell_size_y', 'n_cells', 'plot', 'bounds',
@@ -524,7 +545,7 @@ class Grid(object):
         lines += [
             '-' * 60,
             '  Plots   grid.plot.clusters() / .vars() / .cluster_pts() / .rand_dist()',
-            '          grid.plot.sample_area()',
+            '          grid.plot.study_area()',
             '  Export  grid.save_sparse_grid(filename)      non-empty cells + cluster ids',
             '          grid.save_full_grid(filename)         all cells (dense)',
             '          grid.save_cell_clusters(filename)     cluster polygons',
@@ -822,6 +843,20 @@ class Grid(object):
         self.col_ids = _np_arange(len(self.x_steps_bounds) - 1)
         self.n_cells = len(self.row_ids) * len(self.col_ids)
 
+        # 4b. Guard against absurdly large output grids.
+        _max_cells = getattr(self, '_max_output_cells', 50_000_000)
+        if self.n_cells > _max_cells:
+            _nx = len(self.col_ids); _ny = len(self.row_ids)
+            _w = self.x_steps_bounds[-1] - self.x_steps_bounds[0]
+            _h = self.y_steps_bounds[-1] - self.y_steps_bounds[0]
+            _min_cs = max(_w / 10_000, _h / 10_000)
+            raise MemoryError(
+                f"Output grid would have {self.n_cells:,} cells ({_nx:,} x {_ny:,}), "
+                f"which exceeds the safety limit of {_max_cells:,}. "
+                f"Increase cell_size (currently {self.cell_size:g}; try at least {_min_cs:.4g}) "
+                f"or pass max_output_cells= to override the limit."
+            )
+
         # 5. Warn if user-specified bounds add substantially more cells than data alone.
         if not self._silent and any(v is not None for v in (gb_xmin, gb_ymin, gb_xmax, gb_ymax)):
             _raw = self._search_internals.raw_bounds
@@ -975,10 +1010,28 @@ class Grid(object):
     # save_sparse_grid = Clustering.save_sparse_grid
     # save_cell_clusters = Clustering.save_cell_clusters
 
-    def plot_sample_area(self, *args, **kwargs):
-        import warnings
-        warnings.warn("grid.plot_sample_area() is deprecated. Use grid.plot.sample_area() instead.", DeprecationWarning, stacklevel=2)
-        return self.plot.sample_area(*args, **kwargs)
+    def plot_study_area(self, *args, **kwargs):
+        return self.plot.study_area(*args, **kwargs)
+
+    # Backward-compat aliases — silent, no deprecation warning
+    plot_sample_area = plot_study_area
+
+    @property
+    def sample_area(self):
+        return self.study_area
+
+    @sample_area.setter
+    def sample_area(self, value):
+        self.study_area = value
+
+    @property
+    def sample_grid_bounds(self):
+        return self.study_grid_bounds
+
+    @sample_grid_bounds.setter
+    def sample_grid_bounds(self, value):
+        self.study_grid_bounds = value
+
 
     def create_full_grid_df(self, target_crs:str=['initial','local','EPSG:4326'][0], max_column_name_length:int=10):
         """returns geopandas.GeoDataFrame with entry for each grid cell with attributes on its Polygon, centroid, sum of indicator(s), and cluster id

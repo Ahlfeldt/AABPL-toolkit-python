@@ -113,9 +113,9 @@ def create_distribution_plot(
         non_valid_area_color : str
             Fill colour for the non-valid (excluded) area (default
             ``'#bedbe6'``).
-        sample_area_color : str
-            Fill colour for the valid sample area (default ``'#ffffff'``).
-        sample_area_linewidth : float
+        study_area_color : str
+            Fill colour for the valid study area (default ``'#ffffff'``).
+        study_area_linewidth : float
             Border linewidth of the valid-area polygon (default ``0.2``).
 
         Threshold lines
@@ -191,8 +191,8 @@ def create_distribution_plot(
         'dist_map_ratio': 0.3,
 
         'non_valid_area_color': '#bedbe6',
-        'sample_area_color': '#ffffff',
-        'sample_area_linewidth': 0.2,
+        'study_area_color': '#ffffff',
+        'study_area_linewidth': 0.2,
 
         'fig': None,
         'axs': None,
@@ -227,11 +227,11 @@ def create_distribution_plot(
     title_override       = kwargs.pop('title')
     suptitle_kwargs      = kwargs.pop('suptitle')
     ax_titles            = kwargs.pop('ax_titles')
-    sample_area_lw       = kwargs.pop('sample_area_linewidth')
+    study_area_lw       = kwargs.pop('study_area_linewidth')
     color_scale          = kwargs.pop('color_scale')
     zero_color           = kwargs.pop('zero_color')
     non_valid_area_color = kwargs.pop('non_valid_area_color')
-    sample_area_color    = kwargs.pop('sample_area_color')
+    study_area_color    = kwargs.pop('study_area_color')
     color_cluster        = kwargs.pop('color_cluster')
     cmap_name            = kwargs.pop('cmap')
     cmap_minval          = kwargs.pop('cmap_minval')
@@ -239,7 +239,7 @@ def create_distribution_plot(
 
     # Remove any remaining control keys that must not leak into ax.scatter().
     for k in ['fig', 'axs', 'figsize', 'title', 'suptitle', 'ax_titles',
-              'sample_area_linewidth', 'color_scale', 'maps_side_by_side',
+              'study_area_linewidth', 'color_scale', 'maps_side_by_side',
               'hspace', 'wspace', 'colorbar_width']:
         plot_kwargs.pop(k, None)
 
@@ -280,7 +280,7 @@ def create_distribution_plot(
     )
     fig.suptitle(_suptitle, **suptitle_kwargs)
 
-    _sa_xmin, _sa_ymin, _sa_xmax, _sa_ymax = grid.sample_area.bounds
+    _sa_xmin, _sa_ymin, _sa_xmax, _sa_ymax = grid.study_area.bounds
     _sa_w = _sa_xmax - _sa_xmin
     _sa_h = _sa_ymax - _sa_ymin
     _sa_span = max(_sa_w, _sa_h)
@@ -299,7 +299,7 @@ def create_distribution_plot(
     non_valid_area = _shapely_Polygon([
         (_out_xmin, _out_ymin), (_out_xmax, _out_ymin),
         (_out_xmax, _out_ymax), (_out_xmin, _out_ymax),
-    ]).difference(grid.sample_area)
+    ]).difference(grid.study_area)
 
     pct_xmin, pct_xmax = 0, 100
     xs_random_pts = _np_linspace(pct_xmin, pct_xmax, n_random_points)
@@ -469,7 +469,7 @@ def create_distribution_plot(
                     ci = col - col_min
                     if 0 <= ri < n_rows_x and 0 <= ci < n_cols_x:
                         X[ri, ci] = False
-            cmap_binary = _plt_ListedColormap([sample_area_color, non_valid_area_color])
+            cmap_binary = _plt_ListedColormap([study_area_color, non_valid_area_color])
             extent = [
                 grid.sample_grid_bounds[0], grid.sample_grid_bounds[2],
                 grid.sample_grid_bounds[1], grid.sample_grid_bounds[3],
@@ -477,7 +477,7 @@ def create_distribution_plot(
 
         # ── Map: random points ────────────────────────────────────────────────
         ax_rnd = fig.add_subplot(bottom_gs[0])
-        ax_rnd.set_facecolor(sample_area_color)
+        ax_rnd.set_facecolor(study_area_color)
         ax_rnd.set_title(
             ax_titles.get('rand_map', "Random points (n={n})").format(
                 col=col_label, k=k,
@@ -489,21 +489,21 @@ def create_distribution_plot(
         if X is not None:
             ax_rnd.imshow(X=X, interpolation='none', cmap=cmap_binary, extent=extent)
             non_valid_patch = _plt_Patch(facecolor=non_valid_area_color, label='Non-valid area', edgecolor='black')
-            sample_patch    = _plt_Patch(facecolor=sample_area_color,    label='Sample area',    edgecolor='black')
+            sample_patch    = _plt_Patch(facecolor=study_area_color,    label='Sample area',    edgecolor='black')
             ax_rnd.legend(handles=[non_valid_patch, sample_patch], loc='upper left', fontsize=5)
         plot_polygon(ax=ax_rnd, poly=non_valid_area, facecolor=non_valid_area_color,
-                     edgecolor='black', linewidth=sample_area_lw)
+                     edgecolor='black', linewidth=study_area_lw)
         sc = ax_rnd.scatter(
             x=_rnd_x, y=_rnd_y, c=random_vals[:, i],
             s=s_map, marker='.', norm=norm, cmap=cmap_scatter, linewidths=0.3,
         )
-        plot_polygon(ax=ax_rnd, poly=grid.sample_area, facecolor="none",
-                     edgecolor='black', linewidth=sample_area_lw)
+        plot_polygon(ax=ax_rnd, poly=grid.study_area, facecolor="none",
+                     edgecolor='black', linewidth=study_area_lw)
         set_map_frame(ax=ax_rnd, xmin=_ax_xmin, xmax=_ax_xmax, ymin=_ax_ymin, ymax=_ax_ymax, padding_frac=0)
 
         # ── Map: dataset points ───────────────────────────────────────────────
         ax_pts = fig.add_subplot(bottom_gs[1])
-        ax_pts.set_facecolor(sample_area_color)
+        ax_pts.set_facecolor(study_area_color)
         ax_pts.set_title(
             ax_titles.get('pts_map', "Dataset points (n={n})").format(
                 col=col_label, k=k,
@@ -515,7 +515,7 @@ def create_distribution_plot(
         if X is not None:
             ax_pts.imshow(X=X, interpolation='none', cmap=cmap_binary, extent=extent)
         plot_polygon(ax=ax_pts, poly=non_valid_area, facecolor=non_valid_area_color,
-                     edgecolor='black', linewidth=sample_area_lw)
+                     edgecolor='black', linewidth=study_area_lw)
         sc_pts = ax_pts.scatter(
             x=_pts_x, y=_pts_y, c=pts_vals[:, i],
             s=s_map, marker='.', norm=norm, cmap=cmap_scatter, linewidths=0.3,

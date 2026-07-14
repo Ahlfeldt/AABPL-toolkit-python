@@ -33,7 +33,7 @@ def convert_MultiPolygon_crs(
         multipoly_transformed = _shapely_transform(project, multipoly)
     except:
         from aabpl.utils.progress import progress_print
-        progress_print("ERROR in reprojecting sample_area "+str(type(multipoly))+" from "+initial_crs+" to "+target_crs+". Ensure that both crs are valid for coordinates of the sample_area.")
+        progress_print("ERROR in reprojecting study_area "+str(type(multipoly))+" from "+initial_crs+" to "+target_crs+". Ensure that both crs are valid for coordinates of the study_area.")
         multipoly_transformed = _shapely_transform(project, multipoly)
     return multipoly_transformed
 
