@@ -62,6 +62,8 @@ setup(
         'Intended Audience :: Science/Research',
         'Topic :: Scientific/Engineering :: GIS',
         'Topic :: Scientific/Engineering :: Information Analysis',
-        'License :: OSI Approved :: MIT License',
+        # 'License :: OSI Approved :: MIT License' classifier removed --
+        # deprecated by modern setuptools in favor of the license='MIT'
+        # SPDX expression above (see SetuptoolsDeprecationWarning at build time).
     ],
 )
