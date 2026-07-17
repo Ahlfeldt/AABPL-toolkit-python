@@ -12,7 +12,7 @@
 
 ## About
 
-aabpl is a fast Python tool for radius search and spatial aggregation of point data — for every point, aggregate values of nearby points within a fixed radius or distance band. Built on top of this general-purpose spatial toolkit is the prime locations delineation algorithm developed by Ahlfeldt, Albers, and Behrens (2024), a spatial clustering method that uses arbitrary point patterns as input and returns a gridded version of the data along with polygons of the delineated spatial clusters. This repository is part of the **[Toolkit of Prime Locations (AABPL)](https://github.com/Ahlfeldt/AABPL-toolkit/blob/main/README.md)**.
+aabpl is a fast Python tool for radius search and spatial aggregation of 2D point data — for every point, aggregate values of nearby points within a fixed radius or distance band. Built on top of this general-purpose spatial toolkit is the prime locations delineation algorithm developed by Ahlfeldt, Albers, and Behrens (2024), a spatial clustering method that uses arbitrary point patterns as input and returns a gridded version of the data along with polygons of the delineated spatial clusters. This repository is part of the **[Toolkit of Prime Locations (AABPL)](https://github.com/Ahlfeldt/AABPL-toolkit/blob/main/README.md)**.
 
 When using the algorithm in your work, **please cite Ahlfeldt, Albers, Behrens (2024): Prime locations. American Economic Review: Insights, forthcoming.**
 

@@ -1,5 +1,8 @@
 import builtins as _builtins
-from importlib.metadata import version
+try:
+    from importlib.metadata import version  # stdlib only since Python 3.8
+except ImportError:
+    version = None
 from . import config
 from . import main
 from .main import (
@@ -23,7 +26,7 @@ from .search.grid_class import Grid
 from .search.study_area import infer_study_area_from_pts, infer_sample_area_from_pts
 from .search.null_distribution import draw_random_coords
 
-__version__ = version('aabpl')
-if not getattr(_builtins, '_aabpl_imported', False):
+__version__ = version('aabpl') if version is not None else None
+if __version__ is not None and not getattr(_builtins, '_aabpl_imported', False):
     print(f"aabpl v{__version__}.")
     _builtins._aabpl_imported = True

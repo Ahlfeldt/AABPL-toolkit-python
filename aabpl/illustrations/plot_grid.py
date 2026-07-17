@@ -545,9 +545,10 @@ class GridPlots(object):
         fig = grid.plot.cluster_vars(filename='vars.png', show=False, cmap='viridis')
         fig = grid.plot.cluster_vars(figsize=(20, 10), s=2)
         """
+        _sc3 = self.grid._search_class
         return create_plots_for_vars(
             grid=self.grid,
-            colnames=_np_array([(_sc3 := (self.grid._search_class)).target.c, _sc3.source.aggregate_columns]),
+            colnames=_np_array([_sc3.target.c, _sc3.source.aggregate_columns]),
             filename=filename,
             show=show,
             save_kwargs=save_kwargs,

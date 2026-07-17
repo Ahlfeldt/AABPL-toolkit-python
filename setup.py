@@ -13,9 +13,9 @@ except (UnicodeDecodeError, FileNotFoundError):
     long_description = ''
 setup(
     name=name,
-    version="0.4.2",
+    version="0.4.3",
     description=(
-        'Fast radius search and spatial cluster detection for point data '
+        'Fast radius search and spatial cluster detection for 2D point data '
         '— aggregate values within a fixed radius of every point.'
     ),
     long_description=long_description,
@@ -36,7 +36,7 @@ setup(
         'geopandas', 'shapely' 
     ],
     install_requires=['numpy','pandas','geopandas','shapely','matplotlib','pyproj','concave_hull','mpmath'],
-    python_requires='>=3.8',
+    python_requires='>=3.7',
     packages=find_packages(exclude=["tests*",]),
     extras_require={
         'test': extra_test,
@@ -51,6 +51,7 @@ setup(
         'Development Status :: 5 - Production/Stable',
         'Programming Language :: Python',
         'Programming Language :: Python :: 3',
+        'Programming Language :: Python :: 3.7',
         'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: 3.9',
         'Programming Language :: Python :: 3.10',
