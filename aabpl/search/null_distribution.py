@@ -373,9 +373,18 @@ def compute_null_distribution(
 
     grid.null_distribution = rndm_pts
 
-    cols_c = [c] if isinstance(c, str) else list(c)
-
     # ── single-radius path ────────────────────────────────────────────────────
+    # Historically this ran its own separate search (rndm_pts as source, pts as
+    # target) here. That hardcoded `pts` as the target regardless of what the
+    # caller's real search actually used as pts_target -- silently wrong (or a
+    # KeyError, if pts never got the target-side grid-assignment columns
+    # because the real target was something else) whenever pts_target != pts.
+    # detect_cluster_pts now draws rndm_pts via draw_null_distribution_points()
+    # and folds them into ONE combined search alongside the real source points
+    # (see detect_cluster_pts in main.py), so this function is kept only as a
+    # backward-compatible wrapper for any external caller still using the old
+    # two-search flow -- it still has the pts_target-ignoring behavior for
+    # anyone relying on the old (self-search-only) semantics.
     _sc = grid._search_class
     _sc.set_source(
         pts=rndm_pts,
@@ -405,12 +414,65 @@ def compute_null_distribution(
     _sc.exclude_self = _exclude_self_orig
 
     sum_radius_names = [(cname+suffix) for cname in c]
-    disk_sums_for_random_points = rndm_pts[sum_radius_names].values
-
-    thresholds = {name: _np_percentile(disk_sums_for_random_points[:,i], k_th_percentiles[i], axis=0)
-                  for i, name in enumerate(sum_radius_names)}
+    thresholds = compute_null_thresholds(rndm_pts, c, suffix, k_th_percentiles)
 
     return (thresholds, rndm_pts)
+
+
+def draw_null_distribution_points(
+    grid:dict,
+    study_area:_shapely_Polygon,
+    min_pts_to_sample_cell:int,
+    null_distribution,
+    x:str,
+    y:str,
+    random_seed:int=None,
+)->_pd_DataFrame:
+    """Draw (or pass through) the null-distribution sample coordinates only --
+    no search. Split out of compute_null_distribution so callers (e.g.
+    detect_cluster_pts) can fold these points into their own combined search
+    instead of running a second, separate one. See null_distribution param
+    docs on compute_null_distribution for the accepted input types.
+    """
+    from aabpl.search.point_assignment import cell_count_iter as _cell_count_iter
+    grid._search_internals.cells_rndm_sample = (
+        True if min_pts_to_sample_cell == 0
+        else set((row, col) for row, col, cnt in _cell_count_iter(grid) if cnt >= min_pts_to_sample_cell)
+    )
+    grid.study_area = study_area
+
+    if isinstance(null_distribution, int):
+        random_point_coords = draw_random_points_in_study_area(
+            grid=grid,
+            cell_width=grid._search_internals.spacing,
+            n_random_points=null_distribution,
+            random_seed=random_seed,
+            cell_height=grid._search_internals.spacing,
+        )
+        rndm_pts = _pd_DataFrame(data=random_point_coords, columns=[x, y])
+    elif isinstance(null_distribution, _pd_DataFrame):
+        rndm_pts = null_distribution.copy().reset_index(drop=True)
+    else:
+        arr = _np_array(null_distribution)
+        if arr.ndim != 2 or arr.shape[1] < 2:
+            raise ValueError(
+                "null_distribution array/DataFrame must have shape (N, 2) with x in the first "
+                "column and y in the second column, both in the projected CRS."
+            )
+        rndm_pts = _pd_DataFrame(data=arr[:, :2], columns=[x, y])
+
+    grid.null_distribution = rndm_pts
+    return rndm_pts
+
+
+def compute_null_thresholds(rndm_pts:_pd_DataFrame, c:list, suffix:str, k_th_percentiles:list)->dict:
+    """k-th-percentile thresholds from already-computed radius sums on rndm_pts
+    (i.e. after a search -- combined or standalone -- has populated the
+    {col}{suffix} columns on rndm_pts)."""
+    sum_radius_names = [(cname+suffix) for cname in c]
+    disk_sums_for_random_points = rndm_pts[sum_radius_names].values
+    return {name: _np_percentile(disk_sums_for_random_points[:, i], k_th_percentiles[i], axis=0)
+            for i, name in enumerate(sum_radius_names)}
 
 
 def draw_random_coords(

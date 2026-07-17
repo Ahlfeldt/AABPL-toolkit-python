@@ -2364,13 +2364,23 @@ def _downgrade_cell_pair(cntd_arr, ovlpd_arr, deep_level):
     return new_cntd, new_ovlpd
 
 
-def downgrade_disk_region_cache_entry(entry, from_nd):
+def downgrade_disk_region_cache_entry(entry, from_nd, grid_spacing=None, r=None):
     """
     Derive a disk_region_cache entry for nest_depth=from_nd-1 from an existing
     entry built at nest_depth=from_nd, without re-running the full geometry pipeline.
 
     Apply repeatedly to step down multiple levels (e.g. nd=4->3->2->1->0).
     Verified correct for sr=0.8..6.0 and nd=1..6.
+
+    single_region_ovlpd_cells is not carried over from entry / downgraded via
+    _downgrade_cell_pair -- it's the single-region fast path's own merged
+    template and is recomputed fresh at the target nest_depth (from_nd-1) via
+    _min_single_region_ovlpd_cells, when grid_spacing/r are supplied. Bug
+    history: this key was previously omitted from the returned dict entirely,
+    so every downgraded (nd < native) chunk that adaptively picked
+    single_region=True silently fell back to the native-nest_depth template in
+    disk_aggregation_chunk_adaptive_nd.py -- geometrically mismatched at the
+    coarser cell resolution, undercounting real radius sums.
     """
     import numpy as _np
     deep = from_nd
@@ -2413,7 +2423,7 @@ def downgrade_disk_region_cache_entry(entry, from_nd):
         dc_set = nc_set - shared_set_new
         rtrgl_dc_new[key] = _np.array(sorted(dc_set), dtype=_np.float32) if dc_set else _np.empty((0, 3), dtype=_np.float32)
 
-    return {
+    _result = {
         'shared_cntd_cells':                            shared_c_new,
         'region_id_to_cntd_cells':                      rid_to_cntd_new,
         'region_id_to_ovlpd_cells':                     rid_to_ovlpd_new,
@@ -2423,6 +2433,10 @@ def downgrade_disk_region_cache_entry(entry, from_nd):
         'region_and_trgl_id_to_distinct_cntd_cells':    rtrgl_dc_new,
         'region_and_trgl_id_to_distinct_ovlpd_cells':   rtrgl_do_new,
     }
+    if grid_spacing is not None and r is not None:
+        _result['single_region_ovlpd_cells'] = _min_single_region_ovlpd_cells(
+            grid_spacing, r, False, from_nd - 1)
+    return _result
 
 
 from aabpl.utils.progress import DiskRegionProgress as _DiskRegionProgress
@@ -2490,8 +2504,18 @@ def build_disk_region_lookups(
         _sr_key = ('sr', round(r / grid_spacing, 8), nest_depth, include_boundary)
         if _sr_key not in _config.disk_region_cache:
             import numpy as _np_sr
-            _cntd_raw, _, _ovlpd_raw, _ = classify_disk_cells_by_level(
+            _cntd_raw, _, _, _ = classify_disk_cells_by_level(
                 grid_spacing=grid_spacing, r=r, include_boundary=include_boundary, nest_depth=nest_depth,
+            )
+            # ovlpd queried separately with include_boundary=True regardless of
+            # the caller's include_boundary: this is a coarse CANDIDATE filter
+            # (points still get an exact per-point check later), so it must
+            # always be a safe superset -- see _min_single_region_ovlpd_cells's
+            # docstring for the exact-boundary bug this avoids. cntd above
+            # keeps the caller's include_boundary since it IS a final in/out
+            # decision (no further per-point check for contained cells).
+            _, _, _ovlpd_raw, _ = classify_disk_cells_by_level(
+                grid_spacing=grid_spacing, r=r, include_boundary=True, nest_depth=nest_depth,
             )
             _cntd_set  = {(0, (int(rc[0]), int(rc[1]))) for rc in _cntd_raw.tolist()}
             _ovlpd_set = {(0, (int(rc[0]), int(rc[1]))) for rc in _ovlpd_raw.tolist()}

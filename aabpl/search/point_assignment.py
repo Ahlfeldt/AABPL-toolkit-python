@@ -191,15 +191,20 @@ def aggregate_point_data_to_cells(
         cols_for_sort.append(subcell_nr)
     #
     
-    pts.sort_values(cols_for_sort,inplace=True)
-    
+    # Sort via a local index array instead of pts.sort_values(inplace=True) --
+    # see the identical fix (and rationale) in aggregate_point_data_to_cells_adaptive_nd
+    # below: pts can alias pts_source in a self-search, and physically
+    # reordering it here can silently desynchronize a caller's own arrays built
+    # from pts_source's original row order.
+    _sort_idx = np.lexsort(tuple(pts[col].values for col in reversed(cols_for_sort)))
+
     # extract variables from dataframe for faster access speed
-    pts_rows = pts[row_name].values
-    pts_cols = pts[col_name].values
-    pts_vals = pts[c].values
-    pts_vals_xy = pts[c+[x,y]].values
-    pts_ids = pts.index.values
-    pts_subcell_nrs = pts[subcell_nr].values if nest_depth > 0 else _np_zeros(len(pts_cols))
+    pts_rows = pts[row_name].values[_sort_idx]
+    pts_cols = pts[col_name].values[_sort_idx]
+    pts_vals = pts[c].values[_sort_idx]
+    pts_vals_xy = pts[c+[x,y]].values[_sort_idx]
+    pts_ids = pts.index.values[_sort_idx]
+    pts_subcell_nrs = pts[subcell_nr].values[_sort_idx] if nest_depth > 0 else _np_zeros(len(pts_cols))
     n_pts = len(pts)
 
     # row group boundaries: positions where row_name changes value (pts is sorted)
@@ -382,7 +387,9 @@ def _estimate_local_max_depths(pts_rows, pts_cols, sr, K, r_rows):
          absent from this dict (never occupied, never within reach of an
          occupied nd>=0 block) may safely skip level 0 too)
     """
-    from .algorithm.nd_choice import best_nd_tag
+    from .algorithm.nd_choice import best_nd_tag, best_nd_tag_weighted
+    import aabpl.config as _cfg
+    _use_weighted = getattr(_cfg, 'USE_WEIGHTED_ND_DECISION', False)
     if len(pts_rows) == 0:
         return {}, {}
     coarse_rows = (pts_rows // K).astype(np.int64) if hasattr(pts_rows, 'astype') else (pts_rows // K)
@@ -400,7 +407,23 @@ def _estimate_local_max_depths(pts_rows, pts_cols, sr, K, r_rows):
     for ri, ci in zip(occ_ri.tolist(), occ_ci.tolist()):
         cnt = int(counts[ri, ci])
         ppc = (cnt / (K * K)) * _math.pi * sr * sr
-        nd, _single_region = best_nd_tag(sr, max(ppc, 1e-6))
+        if _use_weighted:
+            # Mirrors the real (weighted) dispatch decision exactly, evaluated
+            # on this single block: block_ppcs/block_counts is a length-1
+            # array for this block, total_area_ppc reduces to the same ppc
+            # (one fully-occupied block, no empty-block dilution), and
+            # share_occupied=1.0 since the block itself is, by construction,
+            # occupied (only occupied blocks reach this loop). Previously
+            # this always used the plain (non-weighted) best_nd_tag even when
+            # cfg.USE_WEIGHTED_ND_DECISION was on, silently disagreeing with
+            # the real per-chunk dispatch near crossover thresholds and
+            # causing aggregation to build cells too shallow -- confirmed via
+            # brute-force validation (contain-path lookups then silently miss
+            # keys that were never aggregated, a partial undercount).
+            nd, _single_region = best_nd_tag_weighted(
+                sr, [ppc], [cnt], ppc, share_occupied=1.0)
+        else:
+            nd, _single_region = best_nd_tag(sr, max(ppc, 1e-6))
         eff[ri, ci] = max(0, nd)
         needs_lvl0[ri, ci] = (nd >= 0)
 
@@ -441,6 +464,8 @@ def aggregate_point_data_to_cells_adaptive_nd(
     nest_depth:int=5,
     sr:float=2.0,
     silent:bool=False,
+    depth_by_block:dict=None,
+    needs_level0:dict=None,
 ) -> _pd_DataFrame:
     """Same as aggregate_point_data_to_cells, but caps quadtree depth PER SPATIAL
     REGION instead of building every level-0 cell down to the grid's global native
@@ -485,7 +510,18 @@ def aggregate_point_data_to_cells_adaptive_nd(
     pts_cols_raw = pts[col_name].values
     r_rows = int(_math.ceil(sr)) if sr > 0 else 1
     K = max(4, r_rows)
-    depth_by_block, needs_level0 = _estimate_local_max_depths(pts_rows_raw, pts_cols_raw, sr, K, r_rows)
+    if depth_by_block is None:
+        # Fallback for callers that never ran chunk planning first (e.g. direct
+        # use of this function outside search_and_aggregate's pipeline). When
+        # planning HAS run (the normal search_and_aggregate(plan_only=True)
+        # path), its real, final (post-merge) per-chunk nd decision is passed
+        # in instead -- an independent re-estimate here was confirmed (this
+        # session) to disagree with the real dispatch even using the identical
+        # weighted formula, because it evaluates a single isolated K-block in
+        # place of the real (possibly much larger, merged) chunk box the
+        # dispatch actually decides over -- total_area_ppc/share_occupied
+        # depend on that box, so the two are not interchangeable.
+        depth_by_block, needs_level0 = _estimate_local_max_depths(pts_rows_raw, pts_cols_raw, sr, K, r_rows)
     _default_depth = nest_depth  # blocks with no points never get scanned; N/A in practice
 
     if nest_depth > 0:
@@ -498,14 +534,25 @@ def aggregate_point_data_to_cells_adaptive_nd(
             pts[subcell_nr] += (offset_x//(1/n)%n%2 * subcell_mult  + offset_y//(1/n)%n%2 * 2 * subcell_mult).astype(int)
         cols_for_sort.append(subcell_nr)
 
-    pts.sort_values(cols_for_sort,inplace=True)
+    # Sort via a local index array instead of pts.sort_values(inplace=True): pts
+    # can be the SAME object as pts_source in a self-search (pts_target is
+    # pts_source), and physically reordering it here was found (this session,
+    # debugging an attempted search_and_aggregate single-call merge) to silently
+    # desynchronize search_and_aggregate's own source-side arrays -- built
+    # earlier in that function, from pts_source's original row order -- from
+    # pts_source's actual row order by the time results get written back.
+    # Confirmed via evidence: total sum unchanged (a pure permutation preserves
+    # it) but individual points got another point's computed value. Sorting a
+    # local index instead of the DataFrame itself leaves pts's row order
+    # exactly as the caller provided it, no matter what object it aliases.
+    _sort_idx = np.lexsort(tuple(pts[col].values for col in reversed(cols_for_sort)))
 
-    pts_rows = pts[row_name].values
-    pts_cols = pts[col_name].values
-    pts_vals = pts[c].values
-    pts_vals_xy = pts[c+[x,y]].values
-    pts_ids = pts.index.values
-    pts_subcell_nrs = pts[subcell_nr].values if nest_depth > 0 else _np_zeros(len(pts_cols))
+    pts_rows = pts[row_name].values[_sort_idx]
+    pts_cols = pts[col_name].values[_sort_idx]
+    pts_vals = pts[c].values[_sort_idx]
+    pts_vals_xy = pts[c+[x,y]].values[_sort_idx]
+    pts_ids = pts.index.values[_sort_idx]
+    pts_subcell_nrs = pts[subcell_nr].values[_sort_idx] if nest_depth > 0 else _np_zeros(len(pts_cols))
     n_pts = len(pts)
 
     row_id_indexes = list(_np_where(_np_diff(pts_rows, prepend=pts_rows[0] - 1) != 0)[0])

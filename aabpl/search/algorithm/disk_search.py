@@ -134,7 +134,9 @@ class DiskSearchTarget(DiskSearchBase):
     
     def aggregate_pt_data_to_cells(
             self,
-            silent
+            silent,
+            depth_by_block=None,
+            needs_level0=None,
     ):
         if getattr(_cfg, 'USE_ADAPTIVE_ND_AGGREGATION', False):
             _r = self.grid._search_class.r
@@ -150,6 +152,8 @@ class DiskSearchTarget(DiskSearchBase):
                 nest_depth=self.grid._search_internals.nest_depth,
                 sr=_r / _spacing,
                 silent=silent,
+                depth_by_block=depth_by_block,
+                needs_level0=needs_level0,
             )
         return aggregate_point_data_to_cells(
             grid=self.grid,
@@ -421,8 +425,14 @@ class DiskSearch(object):
             # )
         #
 
-        if not alr_added_pts_to_grid:
-            self.target.aggregate_pt_data_to_cells(silent=silent,)
+        # Aggregation (Layer 1, aggregate_pt_data_to_cells) is deliberately NOT
+        # called here anymore -- it used to run as a side effect of set_target,
+        # before any chunk planning happened, forcing it to independently
+        # re-estimate what nd/depth each region needs (a second, sometimes-
+        # disagreeing copy of the same decision the search's own chunk
+        # dispatch makes later). It's deferred to perform_search instead,
+        # which is now the single place aggregation gets triggered from.
+        self._pending_aggregate = not alr_added_pts_to_grid
         #
 
 
@@ -434,7 +444,7 @@ class DiskSearch(object):
             plot_pt_disk:dict=None,
             silent:bool=False,
     ):
-        result = search_and_aggregate(
+        _kwargs = dict(
             grid=self.grid,
             pts_source=self.source.pts,
             pts_target=self.target.pts,
@@ -453,6 +463,34 @@ class DiskSearch(object):
             plot_pt_disk=plot_pt_disk,
             silent=silent,
         )
+        _pending = getattr(self, '_pending_aggregate', True)
+        if getattr(_cfg, 'USE_ADAPTIVE_ND_AGGREGATION', False):
+            # Single call: search_and_aggregate plans, then (if run_aggregation)
+            # runs Layer 1 aggregation inline using that same plan's real
+            # per-chunk nd decision, then executes using the same plan -- no
+            # second, wasted re-planning pass, and nothing before the planning
+            # point (e.g. _parse_area_weight) runs twice.
+            #
+            # An earlier attempt at this caused a confirmed correctness
+            # regression in self-search (pts_target is pts_source): Layer 1
+            # aggregation (aggregate_point_data_to_cells_adaptive_nd) used to
+            # call pts.sort_values(inplace=True), physically reordering the
+            # shared pts_source object mid-function, after this function's own
+            # source-side arrays (rows/cols/group boundaries) had already been
+            # built from pts_source's original order -- final results then got
+            # written to the wrong row positions (same total, permuted values;
+            # confirmed via matching aggregate sums with per-point mismatches).
+            # Fixed at the root in point_assignment.py: aggregation now sorts a
+            # local index array instead of the DataFrame itself, so it never
+            # mutates a caller-visible object's row order.
+            result = search_and_aggregate(run_aggregation=_pending, **_kwargs)
+        else:
+            # Non-adaptive aggregation has no dependency on planning at all, so
+            # it's still triggered externally, before search_and_aggregate.
+            if _pending:
+                self.target.aggregate_pt_data_to_cells(silent=silent)
+            result = search_and_aggregate(**_kwargs)
+        self._pending_aggregate = False
         return result
     #
 #

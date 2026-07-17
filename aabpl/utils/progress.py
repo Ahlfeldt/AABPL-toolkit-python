@@ -44,8 +44,13 @@ _wall = _time.perf_counter
 # CPU time: used for EMA learning (immune to parallel load on a busy machine).
 _cpu = _time.process_time
 
-# Set to False to suppress all progress bars regardless of the silent parameter.
-SHOW_PROGRESS: bool = True
+# Set to True to enable progress bars (wall/cpu-calibrated ETA display, etc.).
+# Off by default: this machinery was built for multi-hour runs where an ETA
+# estimate mattered; at today's typical runtimes (seconds to a couple of
+# minutes, after this session's fixes) it's disproportionate overhead for what
+# it shows. Simple, unconditional prints (progress_print, the chunk-count
+# print in search_and_aggregate) are unaffected by this flag.
+SHOW_PROGRESS: bool = False
 
 # Progress bars are suppressed for runs estimated to finish under this many seconds.
 _MIN_SECONDS_TO_SHOW: float = 5.0

@@ -2,22 +2,21 @@
 from warnings import simplefilter
 from pandas.errors import PerformanceWarning as _pd_PerformanceWarning
 from pandas import DataFrame as _pd_DataFrame
-from numpy import array as _np_array, nan as _np_nan
+from numpy import array as _np_array, nan as _np_nan, concatenate as _np_concatenate, zeros as _np_zeros, array_equal as _np_array_equal
 from shapely.geometry import Polygon as _shapely_Polygon, MultiPolygon as _shapely_MultiPolygon, GeometryCollection as _shapely_GeometryCollection
 
 simplefilter(action='ignore', category=_pd_PerformanceWarning)
 simplefilter(action='ignore', category=FutureWarning)
 
 from .search.study_area import (
-    infer_study_area_from_pts, subtract_invalid_area,
-    intersect_polygon_with_grid, intersect_polygon_with_grid_aw,
+    infer_study_area_from_pts, intersect_polygon_with_grid, intersect_polygon_with_grid_aw,
     resolve_study_area, _STUDY_AREA_SPEC_DOCS,
 )
 from .testing.test_performance import time_func_perf
 from .search.algorithm.disk_search import DiskSearch
 from .search.grid_class import Grid
-from .utils.misc import count_polygon_edges, find_column_name
-from .utils.crs_transformation import convert_MultiPolygon_crs, convert_coords_to_local_crs, convert_pts_to_crs, convert_wgs_to_utm
+from .utils.misc import find_column_name
+from .utils.crs_transformation import convert_MultiPolygon_crs, convert_pts_to_crs, convert_wgs_to_utm
 from .utils.progress import _OUTER_PROGRESS, RadiusSearchProgress, DetectClusterProgress, progress_print
 from .utils.param_docs import attach_params
 from typing import NamedTuple as _NamedTuple
@@ -36,6 +35,32 @@ class _SearchParams(_NamedTuple):
     col_name_tgt:  str
     grid:          object
     stat:          object
+
+def _resolve_local_crs(pts, x, y, crs, proj_crs, pts_target=None, x_tgt=None, y_tgt=None):
+    """Resolve the local (projected) CRS for a point set.
+
+    ``proj_crs='auto'`` (default) picks the local UTM zone from the combined
+    bounds of ``pts`` and (if given) ``pts_target``.
+    """
+    if crs is None:
+        raise ValueError(
+            "crs is required. Pass your coordinate reference system string (e.g. crs='EPSG:4326'), "
+            "or pass crs='' to skip reprojection entirely when your coordinates are already in a "
+            "Cartesian/projected plane and r is expressed in the same units as your coordinates."
+        )
+    if not crs:
+        # Cartesian mode: coordinates are already in the target unit system; skip all reprojection.
+        # r is interpreted directly in the same units as the x/y columns.
+        return proj_crs if proj_crs != 'auto' else None
+    if proj_crs != 'auto':
+        return proj_crs
+    _pts_tgt = pts_target if pts_target is not None else pts
+    _x_tgt = x_tgt if x_tgt is not None else x
+    _y_tgt = y_tgt if y_tgt is not None else y
+    x_center = (min([pts[x].min(), _pts_tgt[_x_tgt].min()]) + max([pts[x].max(), _pts_tgt[_x_tgt].max()])) / 2
+    y_center = (min([pts[y].min(), _pts_tgt[_y_tgt].min()]) + max([pts[y].max(), _pts_tgt[_y_tgt].max()])) / 2
+    return 'EPSG:' + str(convert_wgs_to_utm(x_center, y_center))
+
 
 def _validate_kwargs(
         pts:_pd_DataFrame,
@@ -124,22 +149,7 @@ def _validate_kwargs(
         raise ValueError('`x_tgt` (x-coord column name) must be in columns of pts_target')
     if not y_tgt in pts_target.columns:
         raise ValueError('`y_tgt` (y-coord column name) must be in columns of pts_target')
-    if crs is None:
-        raise ValueError(
-            "crs is required. Pass your coordinate reference system string (e.g. crs='EPSG:4326'), "
-            "or pass crs='' to skip reprojection entirely when your coordinates are already in a "
-            "Cartesian/projected plane and r is expressed in the same units as your coordinates."
-        )
-    if not crs:
-        # Cartesian mode: coordinates are already in the target unit system; skip all reprojection.
-        # r is interpreted directly in the same units as the x/y columns.
-        local_crs = proj_crs if proj_crs != 'auto' else None
-    elif proj_crs == 'auto':
-        x_center = (min([pts[x].min(), pts_target[x_tgt].min()])+max([pts[x].max(), pts_target[x_tgt].max()]))/2
-        y_center = (min([pts[y].min(), pts_target[y_tgt].min()])+max([pts[y].max(), pts_target[y_tgt].max()]))/2
-        local_crs = 'EPSG:'+str(convert_wgs_to_utm(x_center, y_center))
-    else:
-        local_crs = proj_crs
+    local_crs = _resolve_local_crs(pts, x, y, crs, proj_crs, pts_target, x_tgt, y_tgt)
     if crs and crs != local_crs:
         x,y,local_crs = convert_pts_to_crs(pts=pts, x=x, y=y, initial_crs=crs, target_crs=proj_crs)
         if not same_target:
@@ -246,6 +256,83 @@ def build_grid(
         silent=silent,
     )
 #
+
+
+def build_study_area(
+    pts:_pd_DataFrame,
+    r:float,
+    crs:str,
+    study_area='cells,m=1,b=0',
+    x:str='lon',
+    y:str='lat',
+    proj_crs:str='auto',
+    area_weight:str=None,
+    silent:bool=None,
+):
+    """
+    Resolve a study-area spec into a Shapely polygon, without running a full search.
+
+    Builds the grid a cell/hull-based ``study_area`` method needs internally, so
+    callers only ever pass ``pts``/``r``/``crs`` — never a ``grid``. Useful when you
+    want to inspect or edit the study area (e.g. cut out a sub-region) before
+    feeding it back into ``detect_cluster_cells``/``detect_cluster_pts``/
+    ``radius_search`` via their own ``study_area=`` argument.
+
+    Args:
+    -------
+    pts (pandas.DataFrame):
+        Points used to build the grid and (for cell/hull-based methods) the
+        study-area footprint.
+    r (float):
+        Search radius in metres (or in ``x``/``y`` units when ``crs=''``). Only
+        used to size the grid and, for the ``'cells'`` method, to warn if a
+        requested buffer would make a downstream ``area_weight`` a no-op.
+    crs (str):
+        CRS of the coordinates in ``pts``, e.g. ``'EPSG:4326'``. Pass ``crs=''``
+        to skip reprojection when coordinates are already Cartesian/projected.
+    study_area (str or shapely.Polygon or shapely.MultiPolygon):
+        Study-area spec string (e.g. ``'cells,min_pts=1'``, ``'concave,buffer=500'``),
+        an existing Shapely Polygon/MultiPolygon in the same projected CRS, or
+        ``False`` for the full grid bounding box. Call
+        ``aabpl.build_study_area.params()`` to print all spec options.
+    x, y (str):
+        x/y-coordinate column names in ``pts`` (default ``'lon'``/``'lat'``).
+    proj_crs (str):
+        Target projected CRS for internal computation. ``'auto'`` (default)
+        picks the local UTM zone.
+    area_weight (str):
+        Pass the same ``area_weight`` you intend to use downstream (e.g.
+        ``'exact'``) to get a warning if the study-area buffer would make it a
+        no-op. ``None`` (default) skips that check.
+    silent (bool):
+        Suppress progress output.
+
+    Returns:
+    -------
+    study_area (shapely.Polygon or shapely.MultiPolygon):
+        The resolved study-area polygon, in the projected CRS.
+
+    Example:
+    -------
+    >>> poly = aabpl.build_study_area(pts, r=750, crs='EPSG:4326', study_area='cells,min_pts=1')
+    >>> poly = poly.difference(area_to_exclude)  # user edits the polygon
+    >>> aabpl.detect_cluster_cells(pts=pts, r=750, crs='EPSG:4326', study_area=poly)
+    """
+    local_crs = _resolve_local_crs(pts, x, y, crs, proj_crs)
+    if crs and crs != local_crs:
+        x, y, local_crs = convert_pts_to_crs(pts=pts, x=x, y=y, initial_crs=crs, target_crs=proj_crs)
+    grid = build_grid(
+        pts_source=pts, initial_crs=local_crs, local_crs=local_crs,
+        data_crs=crs or None, r=r, x=x, y=y, silent=silent,
+    )
+    return resolve_study_area(
+        pts=pts, r=r, study_area=study_area,
+        crs=crs, local_crs=local_crs, x=x, y=y,
+        grid=grid, min_pts_to_sample_cell=0,
+        area_weight=area_weight,
+    )
+build_study_area.params = resolve_study_area.params
+
 
 # Moment-based aggregations and the raw-moment powers each needs (besides the
 # mean): variance needs E[x^2]; skewness adds E[x^3]; kurtosis adds E[x^4].
@@ -522,6 +609,13 @@ def radius_search(
     # dedicated implementation which calls radius_search once per unique radius.
     from .search.multi_radius import _parse_r_spec, _multi_radius_search
     spec_type, spec_data = _parse_r_spec(r)
+    if spec_type == 'single':
+        # Unwrap single-element lists/tuples (e.g. r=[750]) to the plain
+        # scalar _parse_r_spec already resolved them to -- previously this
+        # branch fell through without reassigning r, so a single-element list
+        # still failed the scalar check below with a confusing error even
+        # though _parse_r_spec had already correctly identified it as 'single'.
+        r = spec_data
     if spec_type != 'single':
         return _multi_radius_search(
             pts=pts, r=r, c=c, x=x, y=y, stat=stat,
@@ -791,7 +885,14 @@ def radius_search(
                 n = pts[radius_count_col]
                 pts.loc[n > 0, s_name] = pts.loc[n > 0, s_name] / n[n > 0]
                 pts.loc[n == 0, s_name] = _np_nan
-        pts.drop(columns=[count_helper_col], inplace=True)
+        # count_helper_col (raw 'count') is a helper added to pts_target, not
+        # pts (see 'if stat in ['count', 'mean']:' above) -- dropping it from
+        # pts only ever worked by accident when pts_target is pts (self-search,
+        # same object). errors='ignore' since the result column here is
+        # radius_count_col (count_helper_col + suffix), already handled above;
+        # this only cleans up the raw source-side helper, matching the
+        # 'count'/_MOMENT_AGGS branches below.
+        pts_target.drop(columns=[count_helper_col], inplace=True, errors='ignore')
     if stat in ['count']:
         # Rename the single count-result column to each user-requested col+suffix.
         # When orig_cols is non-empty, copy the count into each expected output col
@@ -1114,6 +1215,10 @@ def detect_cluster_pts(
     # ── multi-radius delegation ───────────────────────────────────────────────
     from .search.multi_radius import _parse_r_spec
     spec_type, spec_data = _parse_r_spec(r)
+    if spec_type == 'single':
+        # Unwrap single-element lists/tuples (e.g. r=[750]) to the plain
+        # scalar _parse_r_spec already resolved them to.
+        r = spec_data
     if spec_type != 'single':
         # Use the already-parsed spec if detect_cluster_cells passed it through.
         effective_parsed_spec = _parsed_spec if _parsed_spec is not None else (spec_type, spec_data)
@@ -1191,22 +1296,20 @@ def detect_cluster_pts(
         area_weight=area_weight,
     )
 
-    if not _is_internal: _prog.step("assigning target")
-    grid._search_class.set_target(
-        pts=pts_target,
-        c=c,
-        x=x_tgt,
-        y=y_tgt,
-        row_name=row_name_tgt,
-        col_name=col_name_tgt,
-        silent=silent,
-    )
+    # pts_target defaults to pts itself (self-search) -- resolved here (not left
+    # to the nested radius_search call below) so we always pass an EXPLICIT
+    # target through: the nested call's own pts_target=None default would
+    # default to the *combined* (real + null-sample) source we build below,
+    # which is wrong -- null-distribution sample points must never appear as
+    # a target, only as extra query locations.
+    if pts_target is None:
+        pts_target = pts
 
     grid.study_area = resolve_study_area(
         pts=pts, r=r,
         study_area=study_area, crs=crs, local_crs=local_crs, x=x, y=y, grid=grid,
         min_pts_to_sample_cell=min_pts_to_sample_cell,
-        no_plot=True, area_weight=area_weight)
+        area_weight=area_weight)
     intersect_polygon_with_grid_aw(grid, area_weight)
 
     if not _is_internal: _prog.step("null distribution")
@@ -1217,23 +1320,155 @@ def detect_cluster_pts(
             "pts were reprojected automatically but null_distribution is used as-is. "
             "Use draw_random_coords() with the projected study_area to generate valid coordinates."
         )
-    from .search.null_distribution import compute_null_distribution
-    (_cluster_thresholds_dict, rndm_pts) = compute_null_distribution(
+    # Draw the null-distribution sample coordinates only (no search yet), then
+    # fold them into ONE combined search alongside the real source points --
+    # replaces the old flow of two separate searches (real vs pts_target, then
+    # random-sample vs pts hardcoded), which (a) paid chunk-planning/grid setup
+    # overhead twice and (b) silently ignored a caller-supplied pts_target in
+    # the null-distribution half (it always searched against `pts`, not
+    # `pts_target`). One combined search, target set once, fixes both.
+    from .search.null_distribution import draw_null_distribution_points, compute_null_thresholds
+    rndm_pts = draw_null_distribution_points(
         grid=grid,
-        pts=pts,
         study_area=grid.study_area,
         min_pts_to_sample_cell=min_pts_to_sample_cell,
+        null_distribution=null_distribution,
+        x=x,
+        y=y,
+        random_seed=random_seed,
+    )
+    n_real = len(pts)
+
+    # Combined source = real points followed by null-distribution sample
+    # points. Sample rows get 0 in every c-column: they're synthetic query
+    # locations, not real data, so they never contribute their own value to
+    # anything -- and it makes the exclude_self subtraction below a correct
+    # no-op for them without needing separate per-row logic.
+    _combined_src = _pd_DataFrame({
+        x: _np_concatenate([pts[x].values, rndm_pts[x].values]),
+        y: _np_concatenate([pts[y].values, rndm_pts[y].values]),
+    })
+    for col in c:
+        _combined_src[col] = _np_concatenate([pts[col].values, _np_zeros(len(rndm_pts))])
+
+    if not _is_internal: _prog.step("assigning source")
+    if not _is_internal: _prog.step("searching")
+    # Delegate the actual aggregation to the real radius_search() -- the same
+    # public entry point users call directly -- instead of driving
+    # grid._search_class.set_source/perform_search by hand. This is what
+    # gives single-radius, multi-radius, and (weighted) distance-band r specs
+    # all for free: whatever radius_search already supports here, works here
+    # too, with no separate handling needed.
+    # x/y here are already the projected coordinates resolved by _validate_kwargs
+    # above, so crs='' skips a second, redundant reprojection.
+    _exclude_self_orig = exclude_self
+    # resolved above on the preliminary grid (by intersect_polygon_with_grid_aw
+    # and draw_null_distribution_points respectively); carry them over below --
+    # plotting reads all three off the grid it's handed, and the nested
+    # radius_search() call below builds its own separate grid that never had
+    # any of this set on it.
+    _study_area = grid.study_area
+    _study_grid_bounds = grid.study_grid_bounds
+    _cells_rndm_sample = grid._search_internals.cells_rndm_sample
+    # sample_x_steps/y_steps (set by intersect_polygon_with_grid_aw on the
+    # preliminary grid) extend the output-grid extent to cover the null-
+    # distribution sample area, same as a true self-search would. Without
+    # carrying these over, update_spacing() below anchors the output grid to
+    # the real-points-only extent, shifting cell boundaries relative to a
+    # true self-search.
+    _sample_x_steps = getattr(grid, 'sample_x_steps', None)
+    _sample_y_steps = getattr(grid, 'sample_y_steps', None)
+    _sample_col_ids = getattr(grid, 'sample_col_ids', None)
+    _sample_row_ids = getattr(grid, 'sample_row_ids', None)
+    # raw_bounds (real pts/pts_target extent only, no null-distribution samples)
+    # drives update_spacing()'s output-grid origin (x_steps_bounds/row_ids/col_ids),
+    # which in turn is what assign_output_cell_ids() anchors on. The nested
+    # radius_search() call below builds its own grid from _combined_src (real +
+    # samples), whose wider extent would otherwise shift the output-grid origin
+    # by a few metres relative to a true self-search over pts alone.
+    _raw_bounds = grid._search_internals.raw_bounds
+    grid = radius_search(
+        pts=_combined_src,
+        crs='',
+        r=r,
         c=c,
         x=x,
         y=y,
+        stat=stat,
+        exclude_self=False,  # applied manually below, uniformly (see comment above _combined_src)
+        proj_crs=None,
+        # Defensive copy: radius_search()/set_target() may reorder its pts_target
+        # argument in place (row sorting for cell-region processing). When
+        # pts_target is pts itself (the common self-search default resolved
+        # above), that reordering would silently corrupt pts's row order out
+        # from under the positional write-back below (disk_sums_for_pts.values
+        # assumes pts is still in the same order _combined_src was built from).
+        pts_target=(pts_target.copy() if pts_target is pts else pts_target),
+        x_tgt=x_tgt,
+        y_tgt=y_tgt,
+        row_name_tgt=row_name_tgt,
+        col_name_tgt=col_name_tgt,
         row_name=row_name,
         col_name=col_name,
         suffix=suffix,
-        null_distribution=null_distribution,
-        k_th_percentile=k_th_percentile,
-        random_seed=random_seed,
+        overwrite=True,
+        keep_cols=True,
         silent=silent,
     )
+    # Use the grid radius_search() just built as our working grid from here on
+    # (instead of the earlier preliminary one): it actually processed the full
+    # combined point set (real + null-distribution samples), matching what the
+    # old two-search flow gave for free by running both through the same
+    # grid._search_class. Also picks up cell_row_name/cell_col_name etc. that
+    # radius_search() sets on its own grid.
+    grid.study_area = _study_area
+    grid.study_grid_bounds = _study_grid_bounds
+    grid._search_internals.cells_rndm_sample = _cells_rndm_sample
+    _bounds_changed = grid._search_internals.raw_bounds != _raw_bounds
+    _sample_steps_changed = (
+        _sample_x_steps is not None and not _np_array_equal(getattr(grid, 'sample_x_steps', None), _sample_x_steps)
+    ) or (
+        _sample_y_steps is not None and not _np_array_equal(getattr(grid, 'sample_y_steps', None), _sample_y_steps)
+    )
+    if _bounds_changed or _sample_steps_changed:
+        grid._search_internals.raw_bounds = _raw_bounds
+        if _sample_x_steps is not None:
+            grid.sample_x_steps = _sample_x_steps
+            grid.sample_col_ids = _sample_col_ids
+        if _sample_y_steps is not None:
+            grid.sample_y_steps = _sample_y_steps
+            grid.sample_row_ids = _sample_row_ids
+        grid.update_spacing(recompute=True)
+
+    sum_radius_names = [(cname + suffix) for cname in c]
+    if _exclude_self_orig:
+        for name, col in zip(sum_radius_names, c):
+            _combined_src[name] = _combined_src[name].values - _combined_src[col].values
+
+    for name in sum_radius_names:
+        rndm_pts[name] = _combined_src[name].values[n_real:]
+    disk_sums_for_pts = _combined_src.iloc[:n_real][sum_radius_names]
+    # radius_search() mutated _combined_src (a separate object from pts) in
+    # place, not pts itself -- write the real-point results back onto pts
+    # explicitly (the old two-search flow got this for free by passing pts
+    # directly as its own search source).
+    for name in sum_radius_names:
+        pts[name] = disk_sums_for_pts[name].values
+
+    # grid._search_class.source.pts currently IS _combined_src (real + sample
+    # rows) -- downstream code (clustering's add_cluster_id_to_pts, plotting)
+    # reads/writes that object directly, not the caller's pts, so it must be
+    # repointed at the real pts here (carrying over any cell-id columns the
+    # search assigned) to restore the pre-refactor invariant that
+    # grid._search_class.source.pts is the caller's own pts object.
+    _sc = grid._search_class
+    _src_row_name, _src_col_name = _sc.source.row_name, _sc.source.col_name
+    for _cell_id_col in (_src_row_name, _src_col_name):
+        if _cell_id_col in _combined_src.columns:
+            pts[_cell_id_col] = _combined_src[_cell_id_col].values[:n_real]
+    _sc.source.pts = pts
+
+    _cluster_thresholds_dict = compute_null_thresholds(rndm_pts, c, suffix, k_th_percentile)
     # unpack dict → list keyed by c[j]+suffix for the single-radius path
     cluster_threshold_values = [_cluster_thresholds_dict[col+suffix] for col in c]
     grid.null_distribution = rndm_pts
@@ -1242,26 +1477,6 @@ def detect_cluster_pts(
         _r_str = (f'{r/1000:g} km' if r >= 1000 else f'{r:g} m') if grid._proj_is_metric else f'{r:g}'
         for (colname, threshold_value, k_th_p) in zip(c, cluster_threshold_values, k_th_percentile):
             progress_print(f"Threshold for {colname} within {_r_str}: {k_th_p}th-percentile = {threshold_value:g}.")
-
-    if not _is_internal: _prog.step("assigning source")
-    _d = _dev or {}
-    grid._search_class.set_source(
-        pts=pts,
-        c=c,
-        x=x,
-        y=y,
-        row_name=row_name,
-        col_name=col_name,
-        suffix=suffix,
-        plot_cell_reg_assign=_d.get('plot_cell_reg_assign'),
-        plot_offset_checks=_d.get('plot_offset_checks'),
-        plot_offset_regions=_d.get('plot_offset_regions'),
-        plot_offset_raster=_d.get('plot_offset_raster'),
-        silent=silent,
-    )
-
-    if not _is_internal: _prog.step("searching")
-    disk_sums_for_pts = grid._search_class.perform_search(silent=silent,plot_pt_disk=_d.get('plot_pt_disk'))
 
     if not _is_internal: _prog.step("labeling clusters")
     for j, cname in enumerate(c):
@@ -1619,6 +1834,9 @@ def detect_cluster_cells(
         if cluster_suffix is None:
             cluster_suffix = '_cluster'
     else:
+        # Unwrap single-element lists/tuples (e.g. r=[750]) to the plain
+        # scalar _parse_r_spec already resolved them to.
+        r = _spec_data
         if suffix is None:
             suffix = _default_suffix(stat, r)
         if cluster_suffix is None:
@@ -1631,7 +1849,6 @@ def detect_cluster_cells(
     if isinstance(study_area, (_shapely_Polygon, _shapely_MultiPolygon, _shapely_GeometryCollection)) and crs and local_crs and crs != local_crs:
         study_area = convert_MultiPolygon_crs(study_area, initial_crs=crs, target_crs=local_crs)
 
-    _cols_before_dcp = set(pts.columns)
     grid = detect_cluster_pts(
         pts=pts,
         crs=local_crs if local_crs is not None else '',
@@ -1816,7 +2033,7 @@ def detect_cluster_cells(
 detect_cluster_pts.params = detect_cluster_cells.params
 
 @time_func_perf
-def detect_cluster_cells_from_labeled_pts(
+def build_cluster_cells_from_labels(
     pts:_pd_DataFrame,
     crs:str,
     r:float,
@@ -1906,6 +2123,11 @@ def detect_cluster_cells_from_labeled_pts(
         If True, existing output columns are overwritten (default=False).
     silent (bool):
         If True, suppresses all progress output (default=None).
+    grid_bounds (tuple of 4 floats|None):
+        Advanced, passed via ``**kwargs``. ``(xmin, ymin, xmax, ymax)`` in the
+        **input CRS** (same units as ``x``/``y``); any component may be ``None`` to
+        fall back to the data extent for that edge. Same semantics as
+        ``detect_cluster_cells``'s ``grid_bounds`` (default=``(None, None, None, None)``).
 
     Returns:
     -------
@@ -1947,8 +2169,13 @@ def detect_cluster_cells_from_labeled_pts(
         if 'min_cluster_share_after_contingency'   in _dep_cluster: min_cluster_share_after_contingency   = float(_dep_cluster['min_cluster_share_after_contingency'])
         if 'min_cluster_share_after_centroid_dist' in _dep_cluster: min_cluster_share_after_centroid_dist = float(_dep_cluster['min_cluster_share_after_centroid_dist'])
         if 'min_cluster_share_after_convex'        in _dep_cluster: min_cluster_share_after_convex        = float(_dep_cluster['min_cluster_share_after_convex'])
+    # grid_bounds: same undocumented advanced kwarg detect_cluster_cells accepts,
+    # forwarded to grid construction so callers can pin the output grid's extent
+    # even though this function never runs a radius search itself.
+    grid_bounds = kwargs.pop('grid_bounds', (None, None, None, None))
+    _max_output_cells = kwargs.pop('max_output_cells', None)
     if kwargs:
-        raise TypeError(f"detect_cluster_cells_from_labeled_pts() got unexpected keyword argument(s): {sorted(kwargs)}")
+        raise TypeError(f"build_cluster_cells_from_labels() got unexpected keyword argument(s): {sorted(kwargs)}")
     if is_cluster_column not in pts.columns:
         raise ValueError(f"`is_cluster_column` '{is_cluster_column}' is not a column of pts.")
     # Without an explicit value column the cluster mass is the count of clustered
@@ -1964,11 +2191,21 @@ def detect_cluster_cells_from_labeled_pts(
         pts=pts, crs=crs, r=r, c=c, stat='sum',
         x=x, y=y, row_name=row_name, col_name=col_name, suffix=suffix,
         output_spacing=cell_size, proj_crs=proj_crs, silent=silent,
+        grid_bounds=grid_bounds,
     )
     pts, local_crs = vk.pts, vk.local_crs
     c, x, y, suffix = vk.c, vk.x, vk.y, vk.suffix
     pts_target, x_tgt, y_tgt = vk.pts_target, vk.x_tgt, vk.y_tgt
     row_name_tgt, col_name_tgt, grid = vk.row_name_tgt, vk.col_name_tgt, vk.grid
+    # _validate_kwargs (a shared low-level helper) does not auto-derive a suffix
+    # default the way detect_cluster_cells does for itself -- this function never
+    # applied one either, which is what caused the pre-existing "can only
+    # concatenate str (not NoneType)" crash in set_source below whenever a caller
+    # didn't pass suffix= explicitly (reproduces identically in pip 0.4.1). suffix
+    # isn't semantically used by this function (no search results are produced),
+    # but DiskSearchSource still requires a non-None string.
+    if suffix is None:
+        suffix = _default_suffix('sum', r)
     orig_cols = list(c)
     _output_cols = set(str(col)+cluster_suffix for col in orig_cols)
     if not overwrite:
@@ -1983,9 +2220,13 @@ def detect_cluster_cells_from_labeled_pts(
     if border_dist_threshold is None:
         border_dist_threshold = _r_scalar(r) * 4/3
 
-    _max_output_cells = kwargs.pop('max_output_cells', None)
     # Assign points to grid cells and pre-aggregate per-cell mass (used for cluster
-    # totals). No radius search and no null distribution is performed.
+    # totals). No radius search and no null distribution is performed -- DiskSearch
+    # + set_source is still needed because create_clusters' add_cluster_id_to_pts
+    # reads grid._search_class.source downstream. suffix is now guaranteed non-None
+    # (see above), which was the actual root cause of the pre-existing crash here
+    # (reproduces identically in pip 0.4.1) -- set_target/set_source themselves are
+    # correct and necessary, they just weren't given a valid suffix.
     if exclude_pt_itself is not None:
         import warnings; warnings.warn("'exclude_pt_itself' is deprecated, use 'exclude_self' instead.", DeprecationWarning, stacklevel=2)
         exclude_self = exclude_pt_itself
@@ -2001,8 +2242,6 @@ def detect_cluster_cells_from_labeled_pts(
     for column in c:
         pts[str(column)+str(cluster_suffix)] = is_cluster
 
-    # update_spacing builds x_steps/y_steps, populates cell_aggregates from target pts,
-    # and calls assign_output_cell_ids which sets grid.cell_row_name correctly.
     if _max_output_cells is not None:
         grid._max_output_cells = int(_max_output_cells)
     grid.update_spacing()
@@ -2036,3 +2275,14 @@ def detect_cluster_cells_from_labeled_pts(
     pts.sort_values(init_sort, inplace=True)
     pts.drop(columns=[init_sort], inplace=True)
     return grid
+
+
+def detect_cluster_cells_from_labeled_pts(*args, **kwargs):
+    """Deprecated alias for ``build_cluster_cells_from_labels``. Same signature."""
+    import warnings
+    warnings.warn(
+        "'detect_cluster_cells_from_labeled_pts' is deprecated, use "
+        "'build_cluster_cells_from_labels' instead.",
+        DeprecationWarning, stacklevel=2,
+    )
+    return build_cluster_cells_from_labels(*args, **kwargs)

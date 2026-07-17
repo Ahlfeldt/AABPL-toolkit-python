@@ -124,7 +124,7 @@ def _detect_cluster_pts_multi(
         pts=pts, r=max_radius, study_area=study_area,
         crs=crs, local_crs=local_crs,
         x=x, y=y, grid=last_grid,
-        min_pts_to_sample_cell=min_pts_to_sample_cell, no_plot=True,
+        min_pts_to_sample_cell=min_pts_to_sample_cell,
     )
     intersect_polygon_with_grid(grid=last_grid, area_weight=area_weight)
 

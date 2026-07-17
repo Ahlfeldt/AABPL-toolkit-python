@@ -84,6 +84,10 @@ peripheral chunks stay at depth 0.
 
 **Status:** partially done (user warning added); core behaviour unchanged
 
+## Re-add proper timing benchmark for progress prints
+
+AFter testing is done.  
+
 ### Sub-issues
 
 **1. Count columns with NaN inputs**

@@ -172,6 +172,15 @@ def search_and_aggregate(
     validate=False,
     area_weight=None,  # None | 'exact' | 'logit' | 'flat' | 'binary'
     plot_pt_disk=None,       # ignored; accepted for API compatibility with orig
+    plan_only=False,  # if True: run planning only, return (depth_by_block,
+                       # needs_level0) for aggregate_point_data_to_cells_adaptive_nd
+                       # to consume, without touching grid.sums_array (may not
+                       # exist yet) or executing any chunk.
+    run_aggregation=False,  # DIAGNOSTIC/experimental, default off: if True, call
+                             # aggregation inline (after planning) then fall
+                             # through to execute in this same call, instead of
+                             # the normal two-call plan_only flow. Under active
+                             # debugging -- do not rely on this for correctness yet.
 ):
     _single_region = _cfg.SINGLE_REGION
     if pts_target is None:
@@ -401,7 +410,8 @@ def search_and_aggregate(
                                 nest_depth=nest_depth, silent=True)
     _adaptive_nd_entries[nest_depth] = _top_entry
     for _nd in range(nest_depth - 1, -1, -1):
-        _adaptive_nd_entries[_nd] = _downgrade(_adaptive_nd_entries[_nd + 1], _nd + 1)
+        _adaptive_nd_entries[_nd] = _downgrade(_adaptive_nd_entries[_nd + 1], _nd + 1,
+                                                grid_spacing=grid_spacing, r=r)
     # Build per-nd offset lookup tables
     _nd_shared_cntd  = {}   # nd -> codec offset array
     _nd_cntd_by_reg  = {}   # nd -> {rid: codec offset array}
@@ -429,43 +439,8 @@ def search_and_aggregate(
     # ---- precomputed sums array (from aggregate_point_data_to_cells) -----------
     # Contain path: instead of summing block_cell_sums in a Python loop, index
     # directly into the contiguous _sums_array using codec keys → one numpy call.
-    _sums_array  = grid.sums_array                           # (n_nodes, n_c) float64
-
-    # Build sorted key/index arrays once for vectorised lookup in _contain_sum,
-    # then cache them on the grid (not just the source dict) -- callers that
-    # invoke search_and_aggregate more than once on the same grid (e.g.
-    # detect_cluster_pts's null-distribution passes) need these arrays on
-    # every call, but id_to_sums_by_lvl itself is freed after first use (see
-    # below), so a naive "build from the dict every call" breaks on call two.
-    _ck_keys = getattr(grid._search_internals, '_ck_keys_cache', None)
-    _ck_idxs = getattr(grid._search_internals, '_ck_idxs_cache', None)
-    if _ck_keys is None:
-        _id_to_lvl = grid._search_internals.id_to_sums_by_lvl  # codec_int -> row index
-        _ck_keys = np.array(sorted(_id_to_lvl.keys()), dtype=np.int64)
-        _ck_idxs = np.array([_id_to_lvl[k] for k in _ck_keys], dtype=np.int64)
-        grid._search_internals._ck_keys_cache = _ck_keys
-        grid._search_internals._ck_idxs_cache = _ck_idxs
-        # id_to_sums_by_lvl (the dict _id_to_lvl points at) is never read again
-        # past this point -- _ck_keys/_ck_idxs (now cached above) are what
-        # _contain_sum actually uses from here on, on this and future calls.
-        # A dict entry costs ~6-9x a sorted-int64-array slot (boxed key +
-        # hash table overhead vs 16 bytes), and at deep nest_depth this dict
-        # can hold well over a million entries -- drop it rather than let it
-        # sit alive for the rest of the Grid's lifetime doing nothing.
-        grid._search_internals.id_to_sums_by_lvl = None
-        del _id_to_lvl
-
-    def _contain_sum(codec_offsets, home_codec_key):
-        """Sum precomputed cell sums for a set of contain cells."""
-        if n_c == 0 or len(codec_offsets) == 0:
-            return zero_sum
-        keys = codec_offsets + home_codec_key
-        pos  = np.searchsorted(_ck_keys, keys)
-        safe_pos = np.minimum(pos, len(_ck_keys) - 1)
-        mask = (pos < len(_ck_keys)) & (_ck_keys[safe_pos] == keys)
-        if not mask.any():
-            return zero_sum
-        return _sums_array[_ck_idxs[pos[mask]]].sum(axis=0)
+    # This block moved from here (function top) to right after the inline
+    # aggregation call below -- see that call site for why.
 
     # ---- target point arrays sorted by (row, col, subcell_nr) -------------------
     # subcell_nr orders points within a cell by quadtree quadrant at each level,
@@ -494,6 +469,78 @@ def search_and_aggregate(
     # ---- r_rows: grid-cell reach of a disk of radius r -------------------------
     r_rows = int(math.ceil(r / grid_spacing))
     _sr    = r / grid_spacing  # spacing ratio for nd_choice lookup
+
+    # ---- fine-cell gather margin needed for a given (possibly super-cell) nd ---
+    # r_rows above only accounts for the native (fine) grid_spacing. A super-cell
+    # (nd<0) chunk's overlap template reaches farther in fine-cell terms
+    # (effective coarse_spacing = grid_spacing * 2**k), so the row-band AND
+    # column candidate-gather windows (need_row_lo/hi, tgt_col_lo/hi below) must
+    # widen to that chunk's own reach or its overlap candidates outside the
+    # window are silently never gathered -- not because the underlying target
+    # points don't exist, but because they were never loaded into the local
+    # block. Computed per (row-)strip from that strip's own resolved nd tags
+    # (_sp_nd_tag/_sp_hot_tag, already known from planning -- no extra work),
+    # not from the deepest tag anywhere in the whole benchmark table: using the
+    # global worst case caused a 2**9-scale margin blowup applied to every
+    # chunk regardless of what it actually needed. Memoized per nd since the
+    # same handful of tags recur across many strips.
+    # ---- exact nd re-decision for margin sizing ---------------------------------
+    # Must mirror the REAL dispatch decision (made later in the col-chunk loop)
+    # bit-for-bit, including the USE_WEIGHTED_ND_DECISION branch -- an earlier
+    # version of this helper only replicated the non-weighted _best_nd_tag(sr, ppc)
+    # formula and fell back to the (possibly-disagreeing) planning-time hint
+    # whenever USE_WEIGHTED_ND_DECISION was on. Since that flag defaults to True,
+    # the "fix" was a silent no-op in the default config: margin sizing kept using
+    # the stale hint while the real dispatch used the weighted formula, so a
+    # chunk could be margin-sized for nd=0 (small reach) but actually dispatched
+    # to nd=-1 (needs a wider reach), causing severe undercounts. This replicates
+    # the exact weighted computation (_sparse_box_ppc_and_counts + total-area ppc
+    # + share_occupied -> _best_nd_tag_weighted) so margin sizing and real
+    # dispatch can never disagree.
+    def _exact_chunk_nd(_ecr_lo, _ecr_hi, _ecc_lo, _ecc_hi):
+        if _cfg.USE_WEIGHTED_ND_DECISION:
+            if _ecc_lo is not None:
+                _e_reg_nz, _e_reg_cnt = _sparse_box_ppc_and_counts(_ecr_lo, _ecr_hi, _ecc_lo // _K, _ecc_hi // _K)
+                _e_col_span_coarse = (_ecc_hi // _K) - (_ecc_lo // _K) + 1
+            else:
+                _e_reg_nz, _e_reg_cnt = _sparse_box_ppc_and_counts(_ecr_lo, _ecr_hi)
+                _e_col_span_coarse = _max_cc_coarse
+            _e_row_span_coarse = _ecr_hi - _ecr_lo + 1
+            _e_total_area_fine = max(1, _e_row_span_coarse * _e_col_span_coarse * _K * _K)
+            _e_total_pts_reg = float(_e_reg_cnt.sum()) if len(_e_reg_cnt) else 0.0
+            _e_total_area_ppc = (_e_total_pts_reg / _e_total_area_fine) * math.pi * _sr * _sr
+            _e_n_blocks_possible = max(1, _e_row_span_coarse * _e_col_span_coarse)
+            _e_share_occupied = len(_e_reg_nz) / _e_n_blocks_possible
+            return _best_nd_tag_weighted(_sr, _e_reg_nz, _e_reg_cnt, _e_total_area_ppc,
+                                          share_occupied=_e_share_occupied)[0]
+        else:
+            if _ecc_lo is not None:
+                _e_reg_nz = _sparse_box_ppc(_ecr_lo, _ecr_hi, _ecc_lo // _K, _ecc_hi // _K)
+            else:
+                _e_reg_nz = _sparse_box_ppc(_ecr_lo, _ecr_hi)
+            _e_ppc_est = float(np.percentile(_e_reg_nz, _PPC_CHUNK_PERCENTILE)) if len(_e_reg_nz) > 0 else 1.0
+            return _best_nd_tag(_sr, _e_ppc_est)[0]
+
+    _margin_for_nd_cache = {}
+    def _margin_for_nd(_nd):
+        if _nd >= 0:
+            return r_rows
+        if _nd in _margin_for_nd_cache:
+            return _margin_for_nd_cache[_nd]
+        from aabpl.utils.cell_geometry import classify_disk_cells_by_level
+        _k = -_nd
+        _coarse_spacing = grid_spacing * (2 ** _k)
+        _, _, _coarse_ovlpd, _ = classify_disk_cells_by_level(
+            grid_spacing=_coarse_spacing, r=r, include_boundary=False, nest_depth=0,
+        )
+        _max_coarse_offset = 0
+        if len(_coarse_ovlpd):
+            _max_coarse_offset = int(max(
+                max(abs(int(_c[0])), abs(int(_c[1]))) for _c in _coarse_ovlpd.tolist()
+            ))
+        _margin = max(r_rows, (_max_coarse_offset + 1) * (2 ** _k))
+        _margin_for_nd_cache[_nd] = _margin
+        return _margin
 
     # ---- super-cell (nd < 0) pre-computation -----------------------------------
     # Runs unconditionally so the production adaptive-nd path can use super-cells.
@@ -823,7 +870,23 @@ def search_and_aggregate(
     max_cells_per_region  = max(
         max((len(cells) for cells in ovlpd_cells_by_cell_region.values()), default=1),
         _sr_ovlpd_n_cells)
-    sorted_cell_pops = sorted(cnt for _, _, cnt in cell_count_iter(grid))
+    # Per-level-0-cell target point counts, computed directly from raw target
+    # points instead of cell_count_iter(grid) (which reads Layer 1's aggregated
+    # id_to_vals_xy_by_lvl). This only ever needed point COUNTS per cell, never
+    # the aggregated sums themselves, so it doesn't actually need aggregation
+    # to have run -- confirmed by the AttributeError this raised when planning
+    # was moved to run before aggregation. A direct bincount of tgt_rows_full/
+    # tgt_cols_full (already available, already sorted by row) gives the same
+    # per-cell counts without that dependency.
+    if n_tgt:
+        _pop_width = int(tgt_cols_full.max()) + 1
+        _pop_key = tgt_rows_full.astype(np.int64) * _pop_width + tgt_cols_full.astype(np.int64)
+        _pop_key_sorted = np.sort(_pop_key)
+        _pop_bdry = _np_flatnonzero(np.concatenate([[True], _pop_key_sorted[1:] != _pop_key_sorted[:-1]]))
+        _pop_counts = _np_append(_pop_bdry[1:], n_tgt) - _pop_bdry
+        sorted_cell_pops = sorted(_pop_counts.tolist())
+    else:
+        sorted_cell_pops = []
     max_cands        = sum(sorted_cell_pops[-max_cells_per_region:]) if sorted_cell_pops else 1
     # candidate buffer is reused across overlap groups, not simultaneously hot with the
     # target block — don't subtract it from the block-sizing budget.
@@ -1920,20 +1983,166 @@ def search_and_aggregate(
                 _cfg._DEBUG_MERGED_STRIP_COUNT = (
                     getattr(_cfg, '_DEBUG_MERGED_STRIP_COUNT', 0) + len(_atomic_col_bands))
 
-        return _col_chunks, _pt_s, _pt_e, _strip_cost, _cr_lo_strip, _cr_hi_strip
+        # Per-band nd hint, aligned with _col_chunks by index, used by the main
+        # loop to size each column-chunk's own candidate-gather margin instead
+        # of a single strip-wide value -- a strip that's mostly nd=0 with one
+        # sparse sub-band needing nd=-1 (exactly what column-heterogeneity
+        # splitting exists to handle) would otherwise never get that sub-band's
+        # margin widened, since the strip-level tags reflect the dominant
+        # density, not a minority sub-region's. Recomputed generically here
+        # (cheap density lookup per final band) rather than threaded through
+        # each construction path above, since only the nd-heterogeneity branch
+        # has precise per-band tags on hand; this way every path (greedy
+        # memory-split, no-split, debug overrides) gets a consistent estimate.
+        _col_chunk_nd_hints = []
+        for (_hb_lo, _hb_hi) in _col_chunks:
+            if _hb_lo is None:
+                _col_chunk_nd_hints.append(min(_pci_sp_nd_tag[0], _pci_sp_hot_tag[0]))
+                continue
+            _hb_reg_nz = _sparse_box_ppc(_cr_lo_strip, _cr_hi_strip, _hb_lo // _K, _hb_hi // _K)
+            _hb_ppc = float(np.percentile(_hb_reg_nz, _PPC_CHUNK_PERCENTILE)) if len(_hb_reg_nz) > 0 else 1.0
+            _col_chunk_nd_hints.append(_best_nd_tag(_sr, _hb_ppc)[0])
+
+        return _col_chunks, _col_chunk_nd_hints, _pt_s, _pt_e, _strip_cost, _cr_lo_strip, _cr_hi_strip
 
     _strip_plans = []  # (row_chunk_idx, chunk_rows, sp_nd_tag, sp_ppc, sp_hot_tag,
-                        #  col_chunks, pt_s, pt_e, strip_cost, cr_lo_strip, cr_hi_strip)
+                        #  col_chunks, col_chunk_nd_hints, pt_s, pt_e, strip_cost, cr_lo_strip, cr_hi_strip)
     _rci = 0
     for _pp_i, (_sp_idx, _sp_h, _sp_nd_tag, _sp_ppc, _sp_hot_tag) in enumerate(_merged_strips):
         _reverse_plan = (_pp_i % 2 == 1)  # matches the main loop's row_iter parity below
-        _col_chunks, _pt_s, _pt_e, _strip_cost, _cr_lo_strip, _cr_hi_strip = _plan_col_chunks(
+        _col_chunks, _col_chunk_nd_hints, _pt_s, _pt_e, _strip_cost, _cr_lo_strip, _cr_hi_strip = _plan_col_chunks(
             _rci, _sp_h, _sp_nd_tag, _sp_hot_tag, _reverse_plan)
         _strip_plans.append((_rci, _sp_h, _sp_nd_tag, _sp_ppc, _sp_hot_tag,
-                              _col_chunks, _pt_s, _pt_e, _strip_cost, _cr_lo_strip, _cr_hi_strip))
+                              _col_chunks, _col_chunk_nd_hints, _pt_s, _pt_e, _strip_cost, _cr_lo_strip, _cr_hi_strip))
         _rci += _sp_h
     # Full plan known upfront now -- exact chunk count, no more running estimate.
     n_chunks_total = sum(len(_sp[5]) for _sp in _strip_plans)
+    # Chunk-progress print cadence: update after every chunk if there are few,
+    # otherwise cap it at ~20 updates total regardless of chunk count.
+    _chunk_progress_step = max(1, n_chunks_total // 20)
+
+    # ---- rasterize each chunk's (dilated) rectangle + nd onto a coarse K×K -----
+    # block grid, then run Layer 1 aggregation with it (if run_aggregation), all
+    # inline before executing this same call. Lets aggregation be driven by the
+    # REAL, final (post-merge) chunk decision instead of an independently-
+    # estimated one -- see this session's finding that re-estimating nd on a
+    # single coarse block in isolation disagrees with the real (possibly much
+    # larger, merged) chunk box's decision, since total_area_ppc/share_occupied
+    # depend on the box actually evaluated. Previously this ran as a separate
+    # plan_only=True call from disk_search.py, with aggregation sandwiched
+    # between two search_and_aggregate calls -- folded into one call here so
+    # nothing before this point (e.g. _parse_area_weight above) runs twice.
+    # Margin/nd computation here intentionally mirrors the main loop's strip- and
+    # chunk-level logic below (same _exact_chunk_nd / _margin_for_nd calls) --
+    # duplicated rather than shared inline because threading this through the
+    # ~700-line main loop (many branches: _TEST_RANDOM_ND, _do_weight, area_weight
+    # variants, single vs multi-region) is higher-risk than a small, self-
+    # contained pre-pass. Both copies call the same canonical functions, so they
+    # cannot disagree with each other the way independently-implemented
+    # estimates did.
+    depth_by_block = {}
+    needs_level0 = {}
+    for (_pci_rci, _pci_h, _pci_sp_nd_tag, _pci_sp_ppc, _pci_sp_hot_tag,
+         _pci_col_chunks, _pci_col_chunk_nd_hints, _pci_pt_s, _pci_pt_e,
+         _pci_strip_cost, _pci_cr_lo_strip, _pci_cr_hi_strip) in _strip_plans:
+        if _pci_pt_e <= _pci_pt_s:
+            continue
+        _pci_chunk_src_rows = src_unique_rows[_pci_rci : _pci_rci + _pci_h]
+        _pci_src_row_min = int(_pci_chunk_src_rows[0])
+        _pci_src_row_max = int(_pci_chunk_src_rows[-1])
+        _pci_strip_margin = r_rows
+        _pci_nd_candidates = [
+            _exact_chunk_nd(_pci_cr_lo_strip, _pci_cr_hi_strip, _sccl, _scch)
+            for (_sccl, _scch) in _pci_col_chunks
+        ]
+        for _nd_cand in _pci_nd_candidates:
+            if _nd_cand < 0:
+                _pci_strip_margin = max(_pci_strip_margin, _margin_for_nd(_nd_cand))
+        _pci_need_row_lo = max(tgt_row_lo_global, _pci_src_row_min - _pci_strip_margin)
+        _pci_need_row_hi = min(tgt_row_hi_global, _pci_src_row_max + _pci_strip_margin)
+        for (_ccl, _cch), _pci_nd in zip(_pci_col_chunks, _pci_nd_candidates):
+            if _ccl is not None:
+                _pci_margin = r_rows if _pci_nd >= 0 else _margin_for_nd(_pci_nd)
+                _pci_col_lo, _pci_col_hi = _ccl - _pci_margin, _cch + _pci_margin
+            else:
+                _pci_col_lo, _pci_col_hi = 0, _max_cc_coarse * _K - 1
+            _blo, _bhi = _pci_need_row_lo // _K, _pci_need_row_hi // _K
+            _clo, _chi = _pci_col_lo // _K, _pci_col_hi // _K
+            for _br in range(int(_blo), int(_bhi) + 1):
+                for _bc in range(int(_clo), int(_chi) + 1):
+                    _key = (_br, _bc)
+                    depth_by_block[_key] = max(depth_by_block.get(_key, 0), max(0, _pci_nd))
+                    needs_level0[_key] = needs_level0.get(_key, False) or (_pci_nd >= 0)
+
+    import os as _diag_os3
+    _DIAG_SINGLE_CALL = _diag_os3.environ.get('AABPL_DIAG_SINGLE_CALL')
+    if _DIAG_SINGLE_CALL:
+        print(f'DIAGTMP pre-agg tgt_rows_full[:5]={tgt_rows_full[:5].tolist()} '
+              f'tgt_cols_full[:5]={tgt_cols_full[:5].tolist()} '
+              f'sum_tgt_rows={int(tgt_rows_full.sum())} sum_tgt_cols={int(tgt_cols_full.sum())} '
+              f'pts_vals_sum={float(pts_vals_xy_full[:, :n_c].sum())}', flush=True)
+
+    if plan_only:
+        return depth_by_block, needs_level0
+
+    if run_aggregation and getattr(_cfg, 'USE_ADAPTIVE_ND_AGGREGATION', False):
+        from aabpl.search.point_assignment import aggregate_point_data_to_cells_adaptive_nd
+        aggregate_point_data_to_cells_adaptive_nd(
+            grid=grid, pts=pts_target, y=y, x=x, c=c,
+            row_name=row_name, col_name=col_name,
+            nest_depth=nest_depth, sr=_sr, silent=silent,
+            depth_by_block=depth_by_block, needs_level0=needs_level0,
+        )
+        if _DIAG_SINGLE_CALL:
+            print(f'DIAGTMP post-agg tgt_rows_full[:5]={tgt_rows_full[:5].tolist()} '
+                  f'tgt_cols_full[:5]={tgt_cols_full[:5].tolist()} '
+                  f'sum_tgt_rows={int(tgt_rows_full.sum())} sum_tgt_cols={int(tgt_cols_full.sum())} '
+                  f'pts_vals_sum={float(pts_vals_xy_full[:, :n_c].sum())} '
+                  f'sums_array_shape={grid.sums_array.shape} '
+                  f'sums_array_sum={float(grid.sums_array.sum())} '
+                  f'id_to_sums_by_lvl_len={len(grid._search_internals.id_to_sums_by_lvl or {})}',
+                  flush=True)
+
+    # ---- precomputed sums array (from aggregate_point_data_to_cells) -----------
+    # Contain path: instead of summing block_cell_sums in a Python loop, index
+    # directly into the contiguous _sums_array using codec keys → one numpy call.
+    _sums_array  = grid.sums_array                           # (n_nodes, n_c) float64
+
+    # Build sorted key/index arrays once for vectorised lookup in _contain_sum,
+    # then cache them on the grid (not just the source dict) -- callers that
+    # invoke search_and_aggregate more than once on the same grid (e.g.
+    # detect_cluster_pts's null-distribution passes) need these arrays on
+    # every call, but id_to_sums_by_lvl itself is freed after first use (see
+    # below), so a naive "build from the dict every call" breaks on call two.
+    _ck_keys = getattr(grid._search_internals, '_ck_keys_cache', None)
+    _ck_idxs = getattr(grid._search_internals, '_ck_idxs_cache', None)
+    if _ck_keys is None:
+        _id_to_lvl = grid._search_internals.id_to_sums_by_lvl  # codec_int -> row index
+        _ck_keys = np.array(sorted(_id_to_lvl.keys()), dtype=np.int64)
+        _ck_idxs = np.array([_id_to_lvl[k] for k in _ck_keys], dtype=np.int64)
+        grid._search_internals._ck_keys_cache = _ck_keys
+        grid._search_internals._ck_idxs_cache = _ck_idxs
+        # id_to_sums_by_lvl (the dict _id_to_lvl points at) is never read again
+        # past this point -- _ck_keys/_ck_idxs (now cached above) are what
+        # _contain_sum actually uses from here on, on this and future calls.
+        # A dict entry costs ~6-9x a sorted-int64-array slot (boxed key +
+        # hash table overhead vs 16 bytes), and at deep nest_depth this dict
+        # can hold well over a million entries -- drop it rather than let it
+        # sit alive for the rest of the Grid's lifetime doing nothing.
+        grid._search_internals.id_to_sums_by_lvl = None
+        del _id_to_lvl
+
+    def _contain_sum(codec_offsets, home_codec_key):
+        """Sum precomputed cell sums for a set of contain cells."""
+        if n_c == 0 or len(codec_offsets) == 0:
+            return zero_sum
+        keys = codec_offsets + home_codec_key
+        pos  = np.searchsorted(_ck_keys, keys)
+        safe_pos = np.minimum(pos, len(_ck_keys) - 1)
+        mask = (pos < len(_ck_keys)) & (_ck_keys[safe_pos] == keys)
+        if not mask.any():
+            return zero_sum
+        return _sums_array[_ck_idxs[pos[mask]]].sum(axis=0)
 
     # ---- supercell region pre-scan: which nd<0 tags are used where ---------------
     # Re-derives each planned chunk's nd via the same _best_nd_tag(_sr, ppc_est)
@@ -1948,7 +2157,7 @@ def search_and_aggregate(
     _nd_chunk_regions = {}  # nd (nd<0 only) -> list of (row_lo, row_hi, col_lo, col_hi), fine-cell units
     if not _TEST_RANDOM_ND:
         for (_rci2, _sp_h2, _sp_nd_tag2, _sp_ppc2, _sp_hot_tag2,
-             _col_chunks2, _pt_s2, _pt_e2, _strip_cost2, _cr_lo2, _cr_hi2) in _strip_plans:
+             _col_chunks2, _col_chunk_nd_hints2, _pt_s2, _pt_e2, _strip_cost2, _cr_lo2, _cr_hi2) in _strip_plans:
             if _pt_e2 <= _pt_s2:
                 continue
             _strip_cols2 = cols[_pt_s2:_pt_e2]
@@ -1963,8 +2172,7 @@ def search_and_aggregate(
                 else:
                     _b_rows2 = _strip_rows2; _b_cols2 = _strip_cols2
                     _reg_nz2 = _sparse_box_ppc(_cr_lo2, _cr_hi2)
-                _ppc_est2 = float(np.percentile(_reg_nz2, _PPC_CHUNK_PERCENTILE)) if len(_reg_nz2) > 0 else 1.0
-                _nd2 = _best_nd_tag(_sr, _ppc_est2)[0]
+                _nd2 = _exact_chunk_nd(_cr_lo2, _cr_hi2, _cc_lo2, _cc_hi2)
                 if _nd2 < 0:
                     _rlo2, _rhi2 = int(_b_rows2.min()), int(_b_rows2.max())
                     _clo2, _chi2 = int(_b_cols2.min()), int(_b_cols2.max())
@@ -1977,19 +2185,34 @@ def search_and_aggregate(
     row_iter = 0  # tracks even/odd for snake column order (kept for readability;
                   # _strip_plans was already built with matching parity above)
     for (row_chunk_idx, chunk_rows, _sp_nd_tag, _sp_ppc, _sp_hot_tag,
-         _col_chunks, _pt_s, _pt_e, _strip_cost, _cr_lo_strip, _cr_hi_strip) in _strip_plans:
+         _col_chunks, _col_chunk_nd_hints, _pt_s, _pt_e, _strip_cost, _cr_lo_strip, _cr_hi_strip) in _strip_plans:
         _reverse = (row_iter % 2 == 1)
 
         chunk_src_rows = src_unique_rows[row_chunk_idx : row_chunk_idx + chunk_rows]
         src_row_min    = int(chunk_src_rows[0])
         src_row_max    = int(chunk_src_rows[-1])
 
+        # Row-band margin: widened beyond r_rows to cover the deepest ACTUAL nd
+        # among this strip's own column-chunks -- re-decided here with the same
+        # exact density estimate the non-weighted dispatch branch uses (not the
+        # planning-time hint, which can disagree with it near a crossover
+        # threshold -- see the col-chunk loop below for the same fix applied
+        # there). The row-band window covers the whole strip regardless of
+        # which column-chunk needs the extra reach, so it must use the worst
+        # case among all of them.
+        _strip_margin = r_rows
+        _strip_nd_candidates = [_exact_chunk_nd(_cr_lo_strip, _cr_hi_strip, _scc_lo, _scc_hi)
+                                 for (_scc_lo, _scc_hi) in _col_chunks]
+        for _nd_cand in _strip_nd_candidates:
+            if _nd_cand < 0:
+                _strip_margin = max(_strip_margin, _margin_for_nd(_nd_cand))
+
         # target row band needed for this chunk
-        need_row_lo = max(tgt_row_lo_global, src_row_min - r_rows)
-        need_row_hi = min(tgt_row_hi_global, src_row_max + r_rows)
+        need_row_lo = max(tgt_row_lo_global, src_row_min - _strip_margin)
+        need_row_hi = min(tgt_row_hi_global, src_row_max + _strip_margin)
 
         # advance blk_lo / blk_hi to cover [need_row_lo, need_row_hi]
-        if loaded_row_lo is None or need_row_lo > loaded_row_lo:
+        if loaded_row_lo is None or need_row_lo != loaded_row_lo:
             blk_lo = int(_np_searchsorted(tgt_rows_full, need_row_lo,     side='left'))
         if loaded_row_hi is None or need_row_hi != loaded_row_hi:
             blk_hi = int(_np_searchsorted(tgt_rows_full, need_row_hi + 1, side='left'))
@@ -2016,11 +2239,29 @@ def search_and_aggregate(
         _cr_hi = _cr_hi_strip
 
         # ---- col chunk inner loop -----------------------------------------------
-        for (_cc_lo, _cc_hi) in _col_chunks:
+        for (_cc_lo, _cc_hi), _cc_nd_hint in zip(_col_chunks, _col_chunk_nd_hints):
             if _cc_lo is not None:
-                # target: include r_rows padding either side
-                tgt_col_lo       = _cc_lo - r_rows
-                tgt_col_hi       = _cc_hi + r_rows
+                # Re-decide this chunk's nd NOW, before slicing, using the exact
+                # same density estimate + best_nd_tag call the non-weighted
+                # branch below makes -- the planning-time hint (_cc_nd_hint)
+                # was computed independently and can disagree at density values
+                # near a crossover threshold (confirmed via brute-force
+                # validation: e.g. ppc~413 classified nd=0 by one estimate and
+                # nd=-1 by the other for the same chunk), silently leaving the
+                # margin unwidened for chunks that actually need it. This
+                # duplicates a cheap lookup (not the full weighted-decision
+                # path) purely to size the gather window correctly; the
+                # downstream ppc-estimate block still runs its own decision
+                # unchanged for the actual dispatch.
+                _cc_nd_actual = _exact_chunk_nd(_cr_lo, _cr_hi, _cc_lo, _cc_hi)
+                # target: include this chunk's own margin either side, widened
+                # beyond r_rows only if its actual (re-decided) nd is a
+                # super-cell -- other, denser column-chunks in the same strip
+                # keep the cheap native margin instead of all paying for this
+                # one chunk's wider reach.
+                _cc_margin = r_rows if _cc_nd_actual >= 0 else _margin_for_nd(_cc_nd_actual)
+                tgt_col_lo       = _cc_lo - _cc_margin
+                tgt_col_hi       = _cc_hi + _cc_margin
                 tgt_cols_in_band = tgt_cols_full[blk_lo:blk_hi]
                 col_filter_idx   = _np_flatnonzero((tgt_cols_in_band >= tgt_col_lo) &
                                                    (tgt_cols_in_band <= tgt_col_hi))
@@ -2057,6 +2298,8 @@ def search_and_aggregate(
             _blk_row_lo = need_row_lo  # kept for blk_pts row-range reference
 
             chunk_num += 1
+            if not silent and (chunk_num % _chunk_progress_step == 0 or chunk_num == n_chunks_total):
+                print(f'  chunk {chunk_num}/{n_chunks_total}', flush=True)
 
             # Debug/experiment per-chunk timing: snapshot before this chunk's
             # work starts, compared against the same snapshot taken at the
@@ -2174,8 +2417,10 @@ def search_and_aggregate(
 
             if _cc_lo is not None:
                 _col_slice = cols[batch_pt_start:batch_pt_end]
-                _n_src_chunk = int(np.sum((_col_slice >= _cc_lo) & (_col_slice <= _cc_hi)))
+                _chunk_mask = (_col_slice >= _cc_lo) & (_col_slice <= _cc_hi)
+                _n_src_chunk = int(np.sum(_chunk_mask))
             else:
+                _chunk_mask = None
                 _n_src_chunk = batch_pt_end - batch_pt_start
 
             # ---- super-cell fast path: coarse-cell batching, skip fine machinery -
@@ -2229,7 +2474,15 @@ def search_and_aggregate(
                         if _ck in invalid_cell_keys:
                             va = 0.0
                         elif _ck in boundary_cell_keys:
-                            va = (boundary_cell_fracs[_ck] if _do_per_cell else _bnd_frac) * _cell_area
+                            # .get(..., 1.0) not [_ck]: boundary_cell_fracs can be
+                            # empty (compute_fractions=False) while boundary_cell_keys
+                            # is still populated from a different source (partial_cells_rc)
+                            # -- confirmed pre-existing KeyError in that gap, reproduces
+                            # identically in pip 0.4.1. Defaulting to 1.0 (fully valid,
+                            # no extra invalid-area penalty) is the conservative choice:
+                            # it never crashes, and is a no-op whenever the dict IS
+                            # populated (the common case, unaffected by this change).
+                            va = (boundary_cell_fracs.get(_ck, 1.0) if _do_per_cell else _bnd_frac) * _cell_area
                         else:
                             va = _cell_area
                         block_cell_valid_area[_ck] = va
@@ -2376,7 +2629,9 @@ def search_and_aggregate(
                                     boundary_keys = contain_cell_keys & boundary_cell_keys
                                     if _do_per_cell:
                                         for k in boundary_keys:
-                                            invalid_area_contrib += (1.0 - boundary_cell_fracs[k]) * _cell_area
+                                            # see .get(..., 1.0) rationale at the
+                                            # other boundary_cell_fracs site above
+                                            invalid_area_contrib += (1.0 - boundary_cell_fracs.get(k, 1.0)) * _cell_area
                                     else:  # flat
                                         invalid_area_contrib += (1.0 - _bnd_frac) * len(boundary_keys) * _cell_area
                             va_contain_cache[cache_key] = invalid_area_contrib
@@ -2424,7 +2679,9 @@ def search_and_aggregate(
                             if _do_per_cell:
                                 for k in boundary_overlap_keys:
                                     invalid_cell_rcs.append(codec.decode_tuple(k)[1])
-                                    invalid_cell_weights.append(1.0 - boundary_cell_fracs[k])
+                                    # see .get(..., 1.0) rationale at the other
+                                    # boundary_cell_fracs sites above
+                                    invalid_cell_weights.append(1.0 - boundary_cell_fracs.get(k, 1.0))
                             elif _do_binary:
                                 for k in boundary_overlap_keys:
                                     invalid_cell_rcs.append(codec.decode_tuple(k)[1])

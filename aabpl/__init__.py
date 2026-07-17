@@ -14,7 +14,9 @@ from .main import (
     radius_kurtosis,
     detect_cluster_pts,
     detect_cluster_cells,
+    build_cluster_cells_from_labels,
     detect_cluster_cells_from_labeled_pts,
+    build_study_area,
 )
 from .search.grid_class import Grid
 from .search.study_area import infer_study_area_from_pts, infer_sample_area_from_pts

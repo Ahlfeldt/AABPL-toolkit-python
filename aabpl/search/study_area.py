@@ -731,7 +731,6 @@ def resolve_study_area(
     y:str='lat',
     grid=None,
     min_pts_to_sample_cell:int=0,
-    no_plot:bool=True,
     area_weight=None,
 ):
     """Resolve the study_area argument to a Shapely polygon in the projected CRS.
@@ -1031,7 +1030,7 @@ def infer_study_area_from_pts(
         # plot_polygon(poly=hull_poly)
         while area_missing_from_hull > 0:
             sample_poly = hull_poly
-            q = quad_segs if quad_segs is not None else max(1, -(-2*buffer/tolerance)//1)
+            q = quad_segs if quad_segs is not None else (max(1, -(-2*buffer/tolerance)//1) if tolerance else 1)
             sample_poly = sample_poly.buffer(distance=buffer, quad_segs=q)
             
             sample_poly = sample_poly.simplify(tolerance)

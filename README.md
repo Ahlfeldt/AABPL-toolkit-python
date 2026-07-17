@@ -1,6 +1,6 @@
-﻿# AABPL-toolkit-python (beta version)
+﻿# AABPL-toolkit-python
 
-(c) Gabriel M. Ahlfeldt, Thilo N. H. Albers, Kristian Behrens, [Max von Mylius](https://github.com/maximylius), Version 0.3.6.0, 2024-10
+(c) Gabriel M. Ahlfeldt, Thilo N. H. Albers, Kristian Behrens, [Max von Mylius](https://github.com/maximylius), Version 0.4.2, 2026-07
 
 
 
@@ -123,7 +123,7 @@ grid = detect_cluster_cells(
     c='employment',                     # column(s) to aggregate within radius; c=['col1','col2'] for multiple
     stat='sum',                         # aggregation statistic: sum|count|mean|std|variance|cv|skewness|kurtosis
     exclude_self=True,                  # exclude the point's own value from its radius sum
-    study_area='cells,min_pts=1,buf=30000',  # region used to draw null-distribution random points; call aabpl.main.resolve_study_area.params() for all options
+    study_area='cells,min_pts=1,buf=30000',  # region used to draw null-distribution random points; call aabpl.build_study_area.params() for all options
                                         # alternatives: 'concave,concavity=0.5' | 'convex' | 'bbox' | 'grid' | Shapely Polygon/MultiPolygon
     area_weight=None,                   # edge-effect correction near sample boundary: None | 'exact' (precise, slower) | 'logit' | 'flat' | 'binary' (cheaper approximations)
     k_th_percentile=99.5,               # cluster threshold = this percentile of the null distribution (0–100); lower → more clusters
@@ -216,7 +216,7 @@ Variable names will then be assigned by the script. Of course, with some adjustm
 
 
 
-An **optional input** is a shapefile (or Shapely Polygon/MultiPolygon) that defines the sampling area of the counterfactual distribution, passed via the `study_area` parameter. Ahlfeldt, Albers, and Behrens (2024) exclude residential and undevelopable areas. Such a shapefile could also restrict the sampling area for counterfactual spatial distributions to inhabitable areas or to areas zoned for the development of tall buildings. The parameter also accepts a method name string with optional inline parameters, e.g. `'cells,min_pts=1'` or `'concave,concavity=0.5,buf=1000'`. Call `aabpl.resolve_study_area.params()` at any time for a full list of methods and their parameters.
+An **optional input** is a shapefile (or Shapely Polygon/MultiPolygon) that defines the sampling area of the counterfactual distribution, passed via the `study_area` parameter. Ahlfeldt, Albers, and Behrens (2024) exclude residential and undevelopable areas. Such a shapefile could also restrict the sampling area for counterfactual spatial distributions to inhabitable areas or to areas zoned for the development of tall buildings. The parameter also accepts a method name string with optional inline parameters, e.g. `'cells,min_pts=1'` or `'concave,concavity=0.5,buf=1000'`. Call `aabpl.build_study_area.params()` at any time for a full list of methods and their parameters. To inspect or edit the resolved polygon (e.g. cut out a sub-region) before running the search, use `aabpl.build_study_area(pts, r, crs, study_area=...)` to resolve it standalone, then pass the (edited) polygon back in via `study_area=`.
 
 
 
@@ -276,8 +276,9 @@ All functions are available directly on the `aabpl` module after `import aabpl`.
 | **`radius_search(pts, crs, r, c, stat, ...)`** | **Core function.** For every point in `pts`, aggregates values of neighbouring points within radius `r` (or distance bands). Adds the result as a new column. Supports `stat` in `{sum, count, mean, variance, std, cv, skewness, kurtosis}`. |
 | **`detect_cluster_cells(pts, crs, r, c, ...)`** | **Core function.** Full pipeline: runs `radius_search`, builds a null distribution from random points, delineates contiguous clustered cells into cluster polygons. Returns a `Grid` object; polygons at `grid.clustering`. |
 | `detect_cluster_pts(pts, crs, r, c, ...)` | Labels each point as clustered or not. Same pipeline as `detect_cluster_cells` but skips the output grid and polygon steps. |
-| `detect_cluster_cells_from_labeled_pts(pts, crs, r, ...)` | Delineates cluster polygons from points with a pre-existing cluster label column, skipping the radius search and null distribution. |
+| `build_cluster_cells_from_labels(pts, crs, r, ...)` | Delineates cluster polygons from points with a pre-existing cluster label column, skipping the radius search and null distribution. (Formerly `detect_cluster_cells_from_labeled_pts`, kept as a deprecated alias.) |
 | `infer_study_area_from_pts(pts, grid, ...)` | Derives the valid sample area polygon from the point pattern. Used internally; available for inspection. |
+| `build_study_area(pts, r, crs, study_area, ...)` | Resolves a `study_area` spec (e.g. `'cells,min_pts=1'`) to a Shapely polygon, building the grid internally — no `grid` argument needed. Use this to inspect or edit the study area (e.g. cut out a sub-region) before passing the result back into `detect_cluster_cells`/`detect_cluster_pts`/`radius_search` via their own `study_area=`. Call `aabpl.build_study_area.params()` to print all spec options. |
 | `draw_random_coords(n_pts, study_area, crs, ...)` | Draws `n_pts` random coordinate pairs. `study_area` accepts a Shapely Polygon/MultiPolygon or a plain coordinate list; coordinates outside it are rejected. Set `crs` to reproject the geometry from a geographic CRS (e.g. `'EPSG:4326'`) into the best UTM zone automatically — the same reprojection used internally by `detect_cluster_pts`. Pass `study_area=None` with a custom `coord_generator(n, rng)` to accept all produced coordinates. Returns a two-column DataFrame ready to pass as `null_distribution` to `detect_cluster_pts` / `detect_cluster_cells`. |
 | `radius_sum(pts, crs, r, c, ...)` | Shorthand for `radius_search(..., stat='sum')`. |
 | `radius_count(pts, crs, r, c, ...)` | Shorthand for `radius_search(..., stat='count')`. |
@@ -425,6 +426,14 @@ pts ──► radius_search ──► agg_i per point
 
 <details>
 <summary><strong>Grid and offset regions / Adaptive spacing / Nest depth</strong> — Internal implementation details; not needed for normal usage.</summary>
+
+### Performance fine-tuning
+If you are interested in enhancing the performance you can look into aabpl.config and modify the default values
+```python
+from aabpl import config
+config.L3_BYTES =  12 * 1024 * 1024 # adjust this to fit your machines L3 size.
+```
+
 
 ### Grid and offset regions
 

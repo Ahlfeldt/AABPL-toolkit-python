@@ -405,6 +405,42 @@ def test_cluster_multi_c_multi_r():
 
 
 # ===========================================================================
+# I2. detect_cluster_pts / detect_cluster_cells — pts_target != pts
+# Regression coverage for the combined-search refactor (originally surfaced
+# as `KeyError: 'id_x'` when pts_target was a separate object from pts).
+# ===========================================================================
+
+def test_cluster_pts_with_pts_target():
+    import aabpl
+    pts = _make_cluster_pts()
+    pts_target = pts.iloc[:10].copy().reset_index(drop=True)
+    aabpl.detect_cluster_pts(
+        pts=pts, pts_target=pts_target, crs=_CLUSTER_CRS, r=_CR, c='emp', stat='sum',
+        x='x', y='y', null_distribution=500, k_th_percentile=95.0, random_seed=0,
+        keep_cols=True, silent=True,
+    )
+    assert f'emp_sum_{_CR}' in pts.columns
+    assert f'emp_cluster_sum_{_CR}' in pts.columns
+    assert pts[f'emp_cluster_sum_{_CR}'].dtype == bool
+    assert f'emp_sum_{_CR}' not in pts_target.columns
+
+
+def test_cluster_cells_with_pts_target():
+    import aabpl
+    pts = _make_cluster_pts()
+    pts_target = pts.iloc[:10].copy().reset_index(drop=True)
+    grid = aabpl.detect_cluster_cells(
+        pts=pts, pts_target=pts_target, crs=_CLUSTER_CRS, r=_CR, c=['emp'], stat='sum',
+        x='x', y='y', null_distribution=500, random_seed=0,
+        keep_cols=True, silent=True,
+    )
+    assert f'emp_sum_{_CR}' in pts.columns
+    assert f'emp_cluster_sum_{_CR}' in pts.columns
+    assert f'emp_sum_{_CR}' not in pts_target.columns
+    assert grid.cell_row_name in pts.columns
+
+
+# ===========================================================================
 # J. detect_cluster_pts — stat variants
 # ===========================================================================
 
@@ -564,3 +600,104 @@ def test_plot_smoke():
             plt.close('all')
         except Exception as e:
             raise AssertionError(f'grid.plot.{method}() raised: {e}')
+
+
+# ===========================================================================
+# O. save-method smoke tests (tiniest dataset that exercises detect_cluster_cells)
+# ===========================================================================
+
+def test_save_methods_smoke(tmp_path):
+    import aabpl
+    pts = _make_cluster_pts()
+    grid = aabpl.detect_cluster_cells(
+        pts=pts, crs=_CLUSTER_CRS, r=_CR, c=['emp'], x='x', y='y',
+        stat='sum', null_distribution=500, random_seed=0,
+        keep_cols=True, silent=True,
+    )
+    cluster_column = next(iter(grid.clustering.by_column))
+
+    full_grid_path = tmp_path / 'full_grid'
+    sparse_grid_path = tmp_path / 'sparse_grid'
+    cluster_col_path = tmp_path / 'grid_clusters_col'
+    all_clusters_path = tmp_path / 'grid_clusters'
+
+    df_full = grid.save_full_grid(filename=str(full_grid_path), file_format='csv')
+    assert (tmp_path / 'full_grid.csv').exists()
+    assert len(df_full) > 0
+
+    df_sparse = grid.save_sparse_grid(filename=str(sparse_grid_path), file_format='csv')
+    assert (tmp_path / 'sparse_grid.csv').exists()
+    assert len(df_sparse) > 0
+
+    # NB: the 30-pt dataset may or may not produce any cell-level clusters
+    # above the default percentile threshold -- that's a legitimate outcome,
+    # not a bug, so these only assert the save call succeeds and writes a
+    # well-formed (possibly empty) file.
+    df_col = grid.save_cell_clusters_for_column(
+        cluster_column=cluster_column, filename=str(cluster_col_path), file_format='csv',
+    )
+    assert (tmp_path / 'grid_clusters_col.csv').exists()
+    assert list(df_col.columns) != []
+
+    dfs = grid.save_cell_clusters(filename=str(all_clusters_path), file_format='csv')
+    assert (tmp_path / 'grid_clusters.csv').exists()
+    assert cluster_column in dfs.keys()
+
+
+# ===========================================================================
+# P. build_study_area — standalone study-area resolution (tiniest dataset)
+# ===========================================================================
+
+@pytest.mark.parametrize('spec', [
+    'cells,min_pts=1',
+    'cells,min_pts=1,buffer=100',
+    'concave,concavity=0.5',
+    'convex',
+    'bounding_box',
+    'grid',
+    False,
+])
+def test_build_study_area_specs(spec):
+    """build_study_area resolves every spec type to a valid polygon without
+    requiring the caller to build a grid first."""
+    import aabpl
+    from shapely.geometry import Polygon, MultiPolygon
+    pts = _make_cluster_pts()
+    poly = aabpl.build_study_area(pts, r=_CR, crs=_CLUSTER_CRS, study_area=spec,
+                                  x='x', y='y', silent=True)
+    assert isinstance(poly, (Polygon, MultiPolygon))
+    assert poly.area > 0
+
+
+def test_build_study_area_full_pipeline():
+    """Full pipeline: resolve a study area standalone, edit it (cut out a
+    sub-region), then feed the edited polygon back into detect_cluster_cells
+    via its own study_area= argument -- the intended manual-editing workflow."""
+    import aabpl
+    from shapely.geometry import Point
+    pts = _make_cluster_pts()
+    poly = aabpl.build_study_area(pts, r=_CR, crs=_CLUSTER_CRS,
+                                  study_area='cells,min_pts=1', x='x', y='y', silent=True)
+    assert poly.area > 0
+
+    # Cut out a corner of the resolved polygon before reuse.
+    cut_area = Point(poly.centroid).buffer(poly.area ** 0.5 * 0.1)
+    edited_poly = poly.difference(cut_area)
+    assert edited_poly.area < poly.area
+
+    grid = aabpl.detect_cluster_cells(
+        pts=pts, crs=_CLUSTER_CRS, r=_CR, c=['emp'], x='x', y='y',
+        stat='sum', study_area=edited_poly,
+        null_distribution=500, random_seed=0, silent=True,
+    )
+    nd = grid.null_distribution
+    outside = sum(not edited_poly.covers(Point(px, py))
+                  for px, py in zip(nd['x'].values, nd['y'].values))
+    assert outside == 0, f'{outside} random points outside the edited study area'
+
+
+def test_build_study_area_no_grid_argument_needed():
+    """Regression guard: build_study_area must not require a grid= kwarg."""
+    import aabpl
+    import inspect
+    assert 'grid' not in inspect.signature(aabpl.build_study_area).parameters
