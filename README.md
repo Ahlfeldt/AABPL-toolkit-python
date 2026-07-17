@@ -1,7 +1,6 @@
 ﻿# AABPL-toolkit-python
 
 [![PyPI version](https://img.shields.io/pypi/v/aabpl)](https://pypi.org/project/aabpl/)
-[![PyPI downloads](https://img.shields.io/pypi/dm/aabpl)](https://pypistats.org/packages/aabpl)
 [![License: MIT](https://img.shields.io/pypi/l/aabpl)](https://opensource.org/licenses/MIT)
 [![Python versions](https://img.shields.io/pypi/pyversions/aabpl)](https://pypi.org/project/aabpl/)
 
