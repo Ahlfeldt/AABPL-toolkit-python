@@ -1,5 +1,10 @@
 ﻿# AABPL-toolkit-python
 
+[![PyPI version](https://img.shields.io/pypi/v/aabpl)](https://pypi.org/project/aabpl/)
+[![PyPI downloads](https://img.shields.io/pypi/dm/aabpl)](https://pypistats.org/packages/aabpl)
+[![License: MIT](https://img.shields.io/pypi/l/aabpl)](https://opensource.org/licenses/MIT)
+[![Python versions](https://img.shields.io/pypi/pyversions/aabpl)](https://pypi.org/project/aabpl/)
+
 (c) Gabriel M. Ahlfeldt, Thilo N. H. Albers, Kristian Behrens, [Max von Mylius](https://github.com/maximylius), Version 0.4.2, 2026-07
 
 
@@ -8,7 +13,7 @@
 
 ## About
 
-This repository is part of the **[Toolkit of Prime Locations (AABPL)](https://github.com/Ahlfeldt/AABPL-toolkit/blob/main/README.md)**. It contains a Python version of the prime locations delineation algorithm developed by Ahlfeldt, Albers, and Behrens (2024). The algorithm uses arbitrary spatial point patterns as input and returns a gridded version of the data along with polygons of the delineated spatial clusters as outputs.
+aabpl is a fast Python tool for radius search and spatial aggregation of point data — for every point, aggregate values of nearby points within a fixed radius or distance band. Built on top of this general-purpose spatial toolkit is the prime locations delineation algorithm developed by Ahlfeldt, Albers, and Behrens (2024), a spatial clustering method that uses arbitrary point patterns as input and returns a gridded version of the data along with polygons of the delineated spatial clusters. This repository is part of the **[Toolkit of Prime Locations (AABPL)](https://github.com/Ahlfeldt/AABPL-toolkit/blob/main/README.md)**.
 
 When using the algorithm in your work, **please cite Ahlfeldt, Albers, Behrens (2024): Prime locations. American Economic Review: Insights, forthcoming.**
 
@@ -475,7 +480,7 @@ Once a source point's neighbourhood is resolved, the search circle is applied:
 
 
 
-The grid spacing is not fixed — it is chosen automatically relative to the search radius `r`. A coarser grid (large spacing) means fewer cells to traverse but more points per boundary cell; a finer grid means more cells but sparser boundary zones. The algorithm selects the spacing as a dimensionless ratio `r / spacing` from a set of candidates at topology breakpoints — values where the circle“cell intersection pattern changes structurally — and jointly optimises over nest depth using a fitted timing model. The result is a spacing that minimises predicted runtime given the dataset size, point density, and spatial distribution.
+The grid spacing is not fixed — it is chosen automatically relative to the search radius `r`. A coarser grid (large spacing) means fewer cells to traverse but more points per boundary cell; a finer grid means more cells but sparser boundary zones. The algorithm selects the spacing as a dimensionless ratio `r / spacing` from a set of candidates at topology breakpoints — values where the circle–cell intersection pattern changes structurally — and jointly optimises over nest depth using a fitted timing model. The result is a spacing that minimises predicted runtime given the dataset size, point density, and spatial distribution. Grid spacing itself is chosen once for the whole search; it is the nest depth (below) that adapts further, locally, once the search is under way.
 
 
 
@@ -483,6 +488,8 @@ The grid spacing is not fixed — it is chosen automatically relative to the sea
 
 Cells that lie entirely inside the search radius are aggregated in bulk using nested cell sums — no individual point lookups needed. Cells that straddle the boundary cannot be bulk-aggregated; their points are checked individually against the radius.
 
-The `nest_depth` parameter controls how aggressively boundary cells are pre-aggregated before that individual check. At `nest_depth=0` every point in a boundary cell is checked one by one. At `nest_depth=d` each boundary cell is recursively subdivided into a 2^d × 2^d sub-grid: sub-cells fully inside the radius are bulk-summed, and only the remaining sub-cells (a thin ring near the circle edge) fall through to point-level checks. Higher nest depth means fewer individual point lookups at the cost of more sub-cell traversals. The optimal value depends on point density and cell size, which is why `nest_depth` is chosen jointly with grid spacing by the adaptive timing model.
+Nest depth controls how aggressively boundary cells are pre-aggregated before that individual check. At depth `0` every point in a boundary cell is checked one by one. At depth `d > 0` each boundary cell is recursively subdivided into a 2^d × 2^d sub-grid: sub-cells fully inside the radius are bulk-summed, and only the remaining sub-cells (a thin ring near the circle edge) fall through to point-level checks. Conversely, in sparse regions even the base cell may be finer than needed — negative depth (`d < 0`) merges 2^|d| × 2^|d| neighbouring cells into a coarser **super-cell** before aggregating, cutting the number of cells to traverse when points are thin on the ground. Higher (positive) nest depth means fewer individual point lookups at the cost of more sub-cell traversals; more negative nest depth means fewer, coarser cells to traverse at the cost of coarser bulk sums.
+
+The optimal depth depends on local point density, so it is not chosen once for the whole grid: each spatial chunk gets its own depth, selected via a lookup against a benchmarked cost model keyed by grid-spacing ratio and local points-per-cell. Dense chunks are typically routed to positive depth (fine subdivision), sparse chunks to negative depth (super-cells), and the two can coexist within a single search over a dataset with uneven density. Set `config.FIXED_NEST_DEPTH` to override this and force one depth everywhere (mainly for testing/benchmarking).
 
 </details>

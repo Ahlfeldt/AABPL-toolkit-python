@@ -11,6 +11,7 @@ Import and modify these flags at runtime to control algorithm behaviour:
 All mutable state here is module-level so changes take effect immediately
 on the next call without reloading.
 """
+from __future__ import annotations
 from collections import OrderedDict as _OrderedDict
 
 # ---------------------------------------------------------------------------

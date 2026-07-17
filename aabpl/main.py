@@ -1,4 +1,5 @@
-﻿from functools import wraps as _wraps
+﻿import math
+from functools import wraps as _wraps
 from warnings import simplefilter
 from pandas.errors import PerformanceWarning as _pd_PerformanceWarning
 from pandas import DataFrame as _pd_DataFrame
@@ -128,7 +129,8 @@ def _validate_kwargs(
         c = [c]
     else:
         if c is None or len(c)==0:
-            progress_print("Warning: No columns specified for aggregation - will simply count number of points within radius.")
+            if not silent:
+                progress_print("Warning: No columns specified for aggregation - will simply count number of points within radius.")
             stat = 'count'
         try:
             if any([type(column)!=str for column in c]):
@@ -602,6 +604,25 @@ def radius_search(
             area_weight = _dep_rs['weight_valid_area']
         if 'sample_area' in _dep_rs and study_area is None:
             study_area = _dep_rs['sample_area']
+    # ── stat='area' delegation (temporarily disabled along with radius_area) ────
+    # if isinstance(stat, (list, tuple)) and 'area' in stat:
+    #     raise ValueError("stat='area' cannot be combined with other stats in a list -- call it on its own.")
+    # if stat == 'area':
+    #     _area_mode = kwargs.pop('mode', 'absolute')
+    #     if kwargs:
+    #         raise TypeError(f"radius_search() got unexpected keyword argument(s): {sorted(kwargs)}")
+    #     if c:
+    #         raise ValueError("stat='area' does not aggregate a value column; pass c=[] (or omit c).")
+    #     return radius_area(
+    #         pts=pts, crs=crs, r=r, x=x, y=y,
+    #         area_weight=area_weight if area_weight is not None else 'exact',
+    #         mode=_area_mode, study_area=study_area, suffix=suffix, overwrite=overwrite,
+    #         row_name=row_name, col_name=col_name,
+    #         pts_target=pts_target, x_tgt=x_tgt, y_tgt=y_tgt,
+    #         row_name_tgt=row_name_tgt, col_name_tgt=col_name_tgt,
+    #         cell_size=cell_size, silent=silent,
+    #     )
+    # ── end stat='area' delegation ───────────────────────────────────────────────
     if kwargs:
         raise TypeError(f"radius_search() got unexpected keyword argument(s): {sorted(kwargs)}")
     # ── multi-radius delegation ───────────────────────────────────────────────
@@ -1033,6 +1054,128 @@ radius_skewness.__doc__ = "Skewness of neighbouring point values within radius r
 def radius_kurtosis(pts, crs:str, r:float, c:list=[], suffix=None, **kwargs):
     return radius_search(pts=pts, crs=crs, r=r, c=c, stat='kurtosis', suffix=suffix, **kwargs)
 radius_kurtosis.__doc__ = "Excess kurtosis of neighbouring point values within radius r. Wraps ``radius_search(stat='kurtosis')``.\n\n" + (radius_search.__doc__ or "")
+
+
+# radius_area is temporarily disabled -- commented out, not removed.
+# def radius_area(...): see git history / re-enable by uncommenting below.
+# def radius_area(
+#     pts:_pd_DataFrame,
+#     crs:str,
+#     r:float,
+#     x:str='lon',
+#     y:str='lat',
+#     area_weight:str='exact',
+#     mode:str=['absolute', 'fraction'][0],
+#     study_area=False,
+#     suffix=None,
+#     overwrite:bool=False,
+#     row_name:str='id_y',
+#     col_name:str='id_x',
+#     pts_target:_pd_DataFrame=None,
+#     x_tgt:str=None,
+#     y_tgt:str=None,
+#     row_name_tgt:str=None,
+#     col_name_tgt:str=None,
+#     cell_size:float=None,
+#     silent:bool=None,
+#     **kwargs,
+# ):
+#     """
+#     For every point in ``pts``, computes the valid area of its search disk —
+#     the portion of the radius-``r`` circle around the point that falls inside
+#     ``study_area``. Adds the result as a new column, appended in-place to ``pts``.
+#
+#     This reuses the same per-point circle/study-area intersection machinery
+#     that powers ``area_weight=`` in ``radius_search`` — it does not add a
+#     new geometry computation, just exposes the per-point result directly
+#     instead of using it to divide an aggregate.
+#
+#     Args:
+#     -------
+#     pts (pandas.DataFrame):
+#         Points for which the valid search-disk area is computed. Results are
+#         appended to this DataFrame in-place.
+#     crs (str):
+#         CRS of the coordinates in ``pts``, e.g. ``'EPSG:4326'``. Pass ``crs=''``
+#         to skip reprojection when coordinates are already Cartesian/projected.
+#     r (float):
+#         Search radius in metres (or in ``x``/``y`` units when ``crs=''``).
+#         Only a single scalar radius is supported (no list/bands/wbands).
+#     x, y (str):
+#         x/y-coordinate column names in ``pts`` (default ``'lon'``/``'lat'``).
+#     area_weight (str):
+#         Method used to compute the circle∩study_area fraction: ``'exact'``
+#         (default, per-point Shapely intersection), ``'logit'``, ``'flat'``,
+#         or ``'binary'`` — see ``radius_search``'s ``area_weight`` docs for the
+#         accuracy/speed trade-offs of each. Cannot be ``None`` — unlike
+#         ``radius_search``, there is no meaningful "unweighted" result here:
+#         the whole point of this function is the valid-area computation.
+#     mode (str):
+#         ``'absolute'`` (default) returns the valid area in squared CRS units
+#         (e.g. m²). ``'fraction'`` returns the valid share of the full circle
+#         (0–1), i.e. valid_area / (π·r²).
+#     study_area (shapely.Polygon | shapely.MultiPolygon | str | False):
+#         The region against which each point's circle is intersected. Accepts
+#         a spec string (e.g. ``'cells,min_pts=1'``), a Shapely Polygon/
+#         MultiPolygon, or ``False`` (default) for the full grid bounding box.
+#         Use ``aabpl.build_study_area()`` to resolve/inspect one beforehand.
+#     suffix (str):
+#         Custom suffix for the output column name (default: ``_area_{r}`` for
+#         ``mode='absolute'``, ``_area_share_{r}`` for ``mode='fraction'``).
+#     overwrite (bool):
+#         Overwrite an existing output column of the same name (default False).
+#     silent (bool):
+#         Suppress progress output.
+#
+#     Returns:
+#     -------
+#     grid (Grid):
+#         The Grid object built for the search; provides access to plots and
+#         internal search state.
+#     """
+#     if area_weight is None:
+#         raise ValueError(
+#             "radius_area requires area_weight to be set (default 'exact'); None is not "
+#             "supported here -- without an area_weight method there is nothing to compute. "
+#             "Pass area_weight='exact', 'logit', 'flat', or 'binary'."
+#         )
+#     if not (isinstance(r, (int, float)) and r > 0):
+#         raise ValueError(f"radius_area only supports a single scalar r; got r={r!r}.")
+#     if mode not in ('absolute', 'fraction'):
+#         raise ValueError(f"mode must be 'absolute' or 'fraction', got {mode!r}.")
+#
+#     _out_suffix = suffix or (f'_area_{r:g}' if mode == 'absolute' else f'_area_share_{r:g}')
+#     _out_col = 'valid' + _out_suffix
+#     if not overwrite and _out_col in pts.columns:
+#         raise ValueError(
+#             f"Output column {_out_col!r} already exists in pts. Pass overwrite=True to overwrite it."
+#         )
+#
+#     # c=[] with stat='count' makes radius_search synthesize a throwaway helper
+#     # count column that keep_cols=False drops again automatically -- the only
+#     # column that survives is the area_weight machinery's own output,
+#     # valid_area_share_{r}. See discussion: the boundary-cell walk needed to
+#     # compute per-point valid area is identical whether or not a value column
+#     # is summed alongside it, so there is no cheaper path than piggybacking
+#     # on the existing (tiny) count aggregation.
+#     grid = radius_search(
+#         pts=pts, crs=crs, r=r, c=[], stat='count', x=x, y=y,
+#         area_weight=area_weight, study_area=study_area,
+#         overwrite=True, keep_cols=False, silent=silent,
+#         row_name=row_name, col_name=col_name,
+#         pts_target=pts_target, x_tgt=x_tgt, y_tgt=y_tgt,
+#         row_name_tgt=row_name_tgt, col_name_tgt=col_name_tgt,
+#         cell_size=cell_size, **kwargs,
+#     )
+#     _share_col = [c for c in pts.columns if c.startswith('valid_area_share_')][-1]
+#     if mode == 'absolute':
+#         pts[_out_col] = pts[_share_col].values * math.pi * r ** 2
+#     else:
+#         pts[_out_col] = pts[_share_col].values
+#     if _share_col != _out_col:
+#         pts.drop(columns=[_share_col], inplace=True)
+#     return grid
+# #
 
 
 from .cluster.detection import _detect_cluster_pts_multi
